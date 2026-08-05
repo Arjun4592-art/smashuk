@@ -1,0 +1,190 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Lato:wght@300;400;700&family=Inter:wght@300;400;500;600;700&family=Sora:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Lato:wght@300;400;700&family=Inter:wght@300;400;500;600;700&family=Sora:wght@400;500;600;700&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-inter: var(--font-inter);
+  --font-sora: var(--font-sora);
+  --font-montserrat: 'Montserrat', sans-serif;
+  --font-lato: 'Lato', sans-serif;
+
+  /* ── Navy & Coral Palette ── */
+  --color-navy: #0a1f44;
+  --color-navy-light: #1a3a6e;
+  --color-navy-dark: #060f22;
+  --color-coral: #e8553a;
+  --color-coral-hover: #d4441f;
+  --color-coral-light: #fdf0ed;
+  --color-bg: #ffffff;
+  --color-bg-soft: #f2f4f7;
+  --color-footer: #2c2c3e;
+  --color-success: #10b981;
+  --color-success-light: #d1fae5;
+  --color-warning: #f59e0b;
+  --color-warning-light: #fef3c7;
+  --color-error: #ef4444;
+  --color-error-light: #fee2e2;
+  --color-text: #0a1f44;
+  --color-text-secondary: #4b5563;
+  --color-muted: #9ca3af;
+  --color-border: #e5e7eb;
+  --color-border-dark: #d1d5db;
+
+  /* ── Animations ── */
+  --animate-scroll: scroll 32s linear infinite;
+  --animate-scroll-reverse: scroll-reverse 26s linear infinite;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: 'Lato', var(--font-inter), sans-serif;
+    background-color: #ffffff;
+    color: #0a1f44;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Montserrat', var(--font-sora), sans-serif;
+    font-weight: 700;
+    color: #0a1f44;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #f2f4f7;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #e5e7eb;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+  }
+
+  /* Focus ring */
+  :focus-visible {
+    outline: 2px solid #e8553a;
+    outline-offset: 2px;
+  }
+
+  /* Selection */
+  ::selection {
+    background: #e8553a;
+    color: white;
+  }
+}
+
+@layer utilities {
+  .font-inter {
+    font-family: var(--font-inter), sans-serif;
+  }
+  .font-sora {
+    font-family: var(--font-sora), sans-serif;
+  }
+  .font-montserrat {
+    font-family: 'Montserrat', sans-serif;
+  }
+  .font-lato {
+    font-family: 'Lato', sans-serif;
+  }
+
+  /* Shimmer animation for skeleton loaders */
+  .shimmer {
+    background: linear-gradient(90deg, #f2f4f7 25%, #e5e7eb 50%, #f2f4f7 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  /* Hide scrollbar but keep scroll */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Navy & Coral utility classes */
+  .bg-navy {
+    background-color: #0a1f44;
+  }
+  .bg-coral {
+    background-color: #e8553a;
+  }
+  .text-navy {
+    color: #0a1f44;
+  }
+  .text-coral {
+    color: #e8553a;
+  }
+  .border-navy {
+    border-color: #0a1f44;
+  }
+  .border-coral {
+    border-color: #e8553a;
+  }
+  .hover\:bg-coral-hover:hover {
+    background-color: #d4441f;
+  }
+
+  /* ── Marquee Animations ── */
+  @keyframes scroll {
+    0% {
+      transform: translateX(0);
+    }
+    100% {
+      transform: translateX(-50%);
+    }
+  }
+
+  @keyframes scroll-reverse {
+    0% {
+      transform: translateX(-50%);
+    }
+    100% {
+      transform: translateX(0);
+    }
+  }
+
+  .animate-scroll {
+    animation: var(--animate-scroll);
+  }
+
+  .animate-scroll-reverse {
+    animation: var(--animate-scroll-reverse);
+  }
+
+  .animate-scroll:hover,
+  .animate-scroll-reverse:hover {
+    animation-play-state: paused;
+  }
+}

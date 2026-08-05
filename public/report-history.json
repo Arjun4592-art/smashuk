@@ -1,0 +1,13 @@
+[
+  {
+    "id": "rpt_1784285468893_dt7f0",
+    "name": "Sales Report",
+    "type": "sales-report",
+    "dateRange": "last30",
+    "downloadedBy": "Arjunn Prasaad",
+    "downloadedByEmail": "arjunmishra769@gmail.com",
+    "downloadedAt": "2026-07-17T10:51:08.893Z",
+    "rowCount": 2,
+    "fileName": "sales-report-2026-07-17.csv"
+  }
+]
