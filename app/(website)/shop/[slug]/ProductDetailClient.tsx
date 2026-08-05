@@ -390,12 +390,12 @@ export default function ProductDetailClient({ product, related }: Props) {
   // store owner create for this product. Defaults to the first variant so
   // single-variant products (the common case for rackets) behave exactly
   // as before; multi-variant products now get an actual picker below.
-  const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>(
-    product.variants?.[0]?.id,
-  )
+  const [selectedVariantId, setSelectedVariantId] = useState<
+    string | undefined
+  >(product.variants?.[0]?.id)
   const hasMultipleVariants = (product.variants?.length ?? 0) > 1
   const selectedVariant =
-    product.variants?.find((v) => v.id === selectedVariantId) ??
+    product.variants?.find((v: any) => v.id === selectedVariantId) ??
     product.variants?.[0]
   const [stringUpgrade, setStringUpgrade] =
     useState<StringUpgradeSelection | null>(null)
@@ -614,7 +614,7 @@ export default function ProductDetailClient({ product, related }: Props) {
                   Choose an option
                 </p>
                 <div className='flex flex-wrap gap-2'>
-                  {product.variants!.map((v) => {
+                  {product.variants!.map((v: any) => {
                     const label = v.title || 'Option'
                     const isSelected = v.id === selectedVariantId
                     const outOfStock =
