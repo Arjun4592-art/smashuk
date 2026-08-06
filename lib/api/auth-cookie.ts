@@ -1,10 +1,16 @@
-// lib/auth-cookies.ts
-//
-// Single source of truth for cookie names + options.
-// Keeping this centralized avoids drift between login/logout/middleware
-// (e.g. one route using 'lax' and another using 'strict' for the same cookie).
-
-import type { ResponseCookies } from 'next/dist/compiled/@edge-runtime/cookies'
+interface ResponseCookies {
+  set(
+    name: string,
+    value: string,
+    options?: {
+      httpOnly?: boolean
+      secure?: boolean
+      sameSite?: 'strict' | 'lax' | 'none'
+      path?: string
+      maxAge?: number
+    },
+  ): void
+}
 
 export type Surface = 'dashboard' | 'pos' | 'website'
 
