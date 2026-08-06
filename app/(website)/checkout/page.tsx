@@ -72,7 +72,27 @@ const StripeCardBlock = forwardRef(function StripeCardBlock(
     },
   }))
 
-  return <PaymentElement onReady={onReady} />
+  // BUG FIX: PaymentElement was mounted with no `options` at all, so Stripe
+  // defaulted to also probing for Apple Pay / Google Pay wallet
+  // availability. On a domain that isn't registered/verified for those
+  // wallets in the Stripe Dashboard (Settings → Payment methods → Apple
+  // Pay / Google Pay → add domain), that probe doesn't just fail cleanly —
+  // it retries via repeated `payframe`/`session` requests to
+  // pay.google.com in a loop that can run for minutes, and PaymentElement
+  // doesn't fire `onReady` until every payment method (wallets included)
+  // has finished resolving. That's exactly what was stuck at "Loading
+  // payment options…" indefinitely. This app only ever accepts card (see
+  // PAYMENT_METHOD above) — wallets aren't wired into confirmPayment()
+  // anyway — so turn them off explicitly instead of relying on
+  // auto-detection.
+  return (
+    <PaymentElement
+      onReady={onReady}
+      options={{
+        wallets: { applePay: 'never', googlePay: 'never' },
+      }}
+    />
+  )
 })
 
 export default function CheckoutPage() {

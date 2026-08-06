@@ -139,13 +139,40 @@ export async function PUT(
     const action = (body.action ?? 'pickup') as 'pickup' | 'dispatch'
     const markDelivered = action === 'pickup'
 
-    const { fulfillOrder } = await import('@/lib/api/medusa-fulfillment')
+    const { fulfillOrder, markOrderDelivered } =
+      await import('@/lib/api/medusa-fulfillment')
     const result = await fulfillOrder(id, medusaServiceFetch, markDelivered)
+
+    // BUG FIX: fulfillOrder() only ever runs its markDelivered step as part
+    // of CREATING a fulfillment for the first time. If the order was
+    // already fulfilled before this click (e.g. auto-fulfilled at the
+    // moment of sale for a POS pickup order), fulfillOrder() short-circuits
+    // with `alreadyFulfilled: true` and never touches fulfillment_status
+    // again — so clicking "Confirm Pickup" on an already-fulfilled order
+    // did nothing, and the button/modal kept reappearing forever because
+    // the order's fulfillment_status never advanced past "fulfilled" to
+    // "delivered". For a pickup confirmation on an already-fulfilled
+    // order, explicitly push it the rest of the way to "delivered".
+    let delivered = false
+    if (markDelivered && result.alreadyFulfilled) {
+      try {
+        const deliverResult = await markOrderDelivered(id, medusaServiceFetch)
+        delivered = !deliverResult.alreadyDelivered
+      } catch (deliverErr: any) {
+        // Order may already be delivered, or genuinely can't be (e.g.
+        // canceled) — don't fail the whole request, the fulfillment state
+        // itself is still valid; just surface nothing changed.
+        console.warn(
+          '[API] POS order PUT — markOrderDelivered fallback failed:',
+          deliverErr?.message,
+        )
+      }
+    }
 
     return NextResponse.json({
       ok: true,
       action,
-      alreadyFulfilled: !!result.alreadyFulfilled,
+      alreadyFulfilled: !!result.alreadyFulfilled && !delivered,
     })
   } catch (err: any) {
     console.error('[API] POS order PUT (fulfill) error:', err)
