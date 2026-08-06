@@ -49,7 +49,7 @@ const PAYMENT_METHOD = 'card'
 // useStripe/useElements) and exposes confirmPayment() to the parent via a
 // ref, so the parent's single "Place Order" button can drive it.
 const StripeCardBlock = forwardRef(function StripeCardBlock(
-  { onReady }: { onReady?: () => void },
+  { onReady, returnUrl }: { onReady?: () => void; returnUrl: string },
   ref,
 ) {
   const stripe = useStripe()
@@ -62,9 +62,18 @@ const StripeCardBlock = forwardRef(function StripeCardBlock(
           'Payment form is still loading — try again in a moment.',
         )
       }
+      // BUG FIX: Card doesn't need a redirect (redirect: 'if_required'
+      // keeps the customer on this page for it, same as before), but
+      // Amazon Pay / Revolut Pay ALWAYS require an off-site redirect step
+      // — Stripe rejects the confirm call outright ("You must provide a
+      // `return_url`...") without one, regardless of the 'if_required'
+      // setting. /checkout/complete picks the customer back up after they
+      // finish on Amazon/Revolut's side and finalizes the Medusa order —
+      // see that page for the other half of this flow.
       const { error } = await stripe.confirmPayment({
         elements,
         redirect: 'if_required',
+        confirmParams: { return_url: returnUrl },
       })
       if (error) {
         throw new Error(error.message ?? 'Card payment failed.')
@@ -1068,6 +1077,11 @@ export default function CheckoutPage() {
                         <StripeCardBlock
                           ref={cardRef}
                           onReady={() => setPaymentElementReady(true)}
+                          returnUrl={
+                            typeof window !== 'undefined'
+                              ? `${window.location.origin}/checkout/complete?cart_id=${cartId}`
+                              : ''
+                          }
                         />
                       </Elements>
                     </div>
