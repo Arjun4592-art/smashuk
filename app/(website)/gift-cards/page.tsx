@@ -14,6 +14,7 @@ export const metadata: Metadata = {
   title: `Gift Cards | ${SITE_NAME}`,
   description: `${SITE_NAME} gift cards — pick an amount, use it on anything in-store or online.`,
 }
+export const dynamic = 'force-dynamic'
 
 export default async function GiftCardsPage() {
   const raw = await getProduct(GIFT_CARD_PRODUCT_HANDLE)
