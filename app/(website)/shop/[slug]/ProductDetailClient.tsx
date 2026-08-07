@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useCart } from '@/hooks/useCart'
 import { formatPrice } from '@/lib/api/store'
@@ -29,300 +29,668 @@ interface StringOption {
   name: string
   brand: string
   tensionRange: string
-  price: number
   bestFor: string
   color: string
 }
 
-interface StringUpgradeSelection {
+// The paid overgrip add-on (matches smashuk.co's "Racket Grips" dropdown —
+// NOT the same as handle grip size; this is the overwrap tape). This is
+// ALWAYS shown/selectable on smashuk.co — it does NOT live inside the
+// "Free String Upgrade" Yes/No toggle, and is not gated by it.
+//
+// IMPORTANT: this is no longer a hardcoded/guessed list. Every entry here
+// is resolved live against the Medusa backend (see GRIP_SEARCH_CANDIDATES
+// + resolveGripOptions below) — if a candidate product doesn't actually
+// exist in Medusa, it is simply never added to this list and never shown
+// in the dropdown. name/price come straight from the matched Medusa
+// product/variant, not from a guess, so there's nothing to "confirm" by
+// eye against a screenshot anymore.
+interface RacketGripOption {
+  id: string // stable UI key (from the search candidate)
+  name: string // real Medusa product title
+  brand: string
+  price: number // pounds, from the matched variant's real price — 0 for "No Thanks"
+  productId: string
+  variantId: string
+}
+
+// String Selection/Tension ARE gated by the free-string-upgrade toggle
+// (they only make sense if the racket is actually being strung).
+interface StringSelection {
   string: StringOption
   tension: number
-  grip: string
 }
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
-const STRING_OPTIONS: StringOption[] = [
+// String catalogues, keyed by product.sport (lowercased). Each product's
+// dropdown only shows strings relevant to its sport — matches smashuk.co
+// (badminton rackets show Yonex/Victor/Li-Ning strings, tennis rackets show
+// Babolat/HEAD/Wilson, squash rackets show squash-specific strings).
+const STRING_OPTIONS_BY_SPORT: Record<string, StringOption[]> = {
+  badminton: [
+    {
+      id: 'yonex-bg65',
+      name: 'BG 65',
+      brand: 'Yonex',
+      tensionRange: '18–28 lbs',
+      bestFor: 'Durability & All-Round',
+      color: '#E8553A',
+    },
+    {
+      id: 'yonex-bg65ti',
+      name: 'BG 65Ti',
+      brand: 'Yonex',
+      tensionRange: '18–28 lbs',
+      bestFor: 'Repulsion & Control',
+      color: '#0A1F44',
+    },
+    {
+      id: 'yonex-bg66-ultimax',
+      name: 'BG 66 Ultimax',
+      brand: 'Yonex',
+      tensionRange: '19–29 lbs',
+      bestFor: 'Speed & Feel',
+      color: '#6366f1',
+    },
+    {
+      id: 'yonex-bg80',
+      name: 'BG 80',
+      brand: 'Yonex',
+      tensionRange: '19–29 lbs',
+      bestFor: 'Power',
+      color: '#16a34a',
+    },
+    {
+      id: 'yonex-bg80-power',
+      name: 'BG 80 Power',
+      brand: 'Yonex',
+      tensionRange: '19–29 lbs',
+      bestFor: 'Extra Power',
+      color: '#dc2626',
+    },
+    {
+      id: 'yonex-nanogy-98',
+      name: 'Nanogy 98',
+      brand: 'Yonex',
+      tensionRange: '18–28 lbs',
+      bestFor: 'Control & Feel',
+      color: '#7c3aed',
+    },
+    {
+      id: 'yonex-aerobite',
+      name: 'Aerobite',
+      brand: 'Yonex',
+      tensionRange: '19–28 lbs',
+      bestFor: 'Hybrid Spin & Power',
+      color: '#0891b2',
+    },
+    {
+      id: 'yonex-aerobite-boost',
+      name: 'Aerobite Boost',
+      brand: 'Yonex',
+      tensionRange: '19–28 lbs',
+      bestFor: 'Hybrid Extra Power',
+      color: '#0e7490',
+    },
+    {
+      id: 'yonex-exbolt-63',
+      name: 'Exbolt 63',
+      brand: 'Yonex',
+      tensionRange: '19–29 lbs',
+      bestFor: 'Flat Shots & Control',
+      color: '#1d4ed8',
+    },
+    {
+      id: 'yonex-exbolt-65',
+      name: 'Exbolt 65',
+      brand: 'Yonex',
+      tensionRange: '19–29 lbs',
+      bestFor: 'Repulsion & Durability',
+      color: '#2563eb',
+    },
+    {
+      id: 'li-ning-no1',
+      name: 'No.1',
+      brand: 'Li-Ning',
+      tensionRange: '18–28 lbs',
+      bestFor: 'All-Round Feel',
+      color: '#b91c1c',
+    },
+    {
+      id: 'victor-vbs70',
+      name: 'VBS 70',
+      brand: 'Victor',
+      tensionRange: '19–29 lbs',
+      bestFor: 'Power & Repulsion',
+      color: '#ca8a04',
+    },
+    {
+      id: 'victor-vbs68-control',
+      name: 'VBS 68 Control',
+      brand: 'Victor',
+      tensionRange: '19–29 lbs',
+      bestFor: 'Control',
+      color: '#a16207',
+    },
+    {
+      id: 'victor-vbs68-power',
+      name: 'VBS 68 Power',
+      brand: 'Victor',
+      tensionRange: '19–29 lbs',
+      bestFor: 'Power',
+      color: '#854d0e',
+    },
+    {
+      id: 'victor-vbs66-nano',
+      name: 'VBS 66 Nano',
+      brand: 'Victor',
+      tensionRange: '20–30 lbs',
+      bestFor: 'Thin Gauge & Feel',
+      color: '#78350f',
+    },
+  ],
+  tennis: [
+    {
+      id: 'babolat-spiraltek',
+      name: 'Spiraltek',
+      brand: 'Babolat',
+      tensionRange: '50–55 lbs',
+      bestFor: 'Power & Durability',
+      color: '#E8553A',
+    },
+    {
+      id: 'babolat-vs-touch',
+      name: 'VS Touch',
+      brand: 'Babolat',
+      tensionRange: '48–58 lbs',
+      bestFor: 'Feel & Control',
+      color: '#0A1F44',
+    },
+    {
+      id: 'head-velocity',
+      name: 'Velocity MLT',
+      brand: 'HEAD',
+      tensionRange: '45–60 lbs',
+      bestFor: 'Comfort & Power',
+      color: '#6366f1',
+    },
+    {
+      id: 'wilson-nxt',
+      name: 'NXT Power',
+      brand: 'Wilson',
+      tensionRange: '50–60 lbs',
+      bestFor: 'Spin & Touch',
+      color: '#16a34a',
+    },
+  ],
+  squash: [
+    {
+      id: 'ashaway-supernick-xl',
+      name: 'SuperNick XL',
+      brand: 'Ashaway',
+      tensionRange: '19–24 lbs',
+      bestFor: 'Feel & Control',
+      color: '#E8553A',
+    },
+    {
+      id: 'tecnifibre-305',
+      name: '305 Slick',
+      brand: 'Tecnifibre',
+      tensionRange: '19–24 lbs',
+      bestFor: 'Touch & Spin',
+      color: '#0A1F44',
+    },
+    {
+      id: 'head-powerkill-slick',
+      name: 'PowerKill Slick',
+      brand: 'HEAD',
+      tensionRange: '19–24 lbs',
+      bestFor: 'Power & Durability',
+      color: '#6366f1',
+    },
+    {
+      id: 'dunlop-silk',
+      name: 'Silk',
+      brand: 'Dunlop',
+      tensionRange: '19–24 lbs',
+      bestFor: 'Classic Feel',
+      color: '#16a34a',
+    },
+  ],
+}
+
+// Fallback if a product's sport isn't one of the keys above.
+const DEFAULT_STRING_OPTIONS = STRING_OPTIONS_BY_SPORT.tennis
+
+function getStringOptionsForSport(sport?: string): StringOption[] {
+  if (!sport) return DEFAULT_STRING_OPTIONS
+  return (
+    STRING_OPTIONS_BY_SPORT[sport.toLowerCase().trim()] ??
+    DEFAULT_STRING_OPTIONS
+  )
+}
+
+// The paid "Racket Grips" add-on (overgrip tape). Instead of a hardcoded,
+// partly-guessed list, this is now a set of SEARCH CANDIDATES — real
+// product names confirmed against smashuk.co's own grip collection pages
+// (smashuk.co/collections/*-grips), used to look each one up against THIS
+// store's Medusa backend. A candidate only ever reaches the dropdown if a
+// matching product is actually found in Medusa (see resolveGripOptions
+// below) — "not set up in the backend yet" now means "doesn't show up",
+// not "shows up and fails at checkout".
+const GRIP_SEARCH_CANDIDATES: { id: string; brand: string; query: string }[] = [
+  { id: 'babolat-my-overgrip', brand: 'Babolat', query: 'Babolat MY Overgrip' },
+  { id: 'yonex-pu-overgrip', brand: 'Yonex', query: 'Yonex PU Overgrip' },
   {
-    id: 'babolat-spiraltek',
-    name: 'Spiraltek',
+    id: 'victor-fishbone-replacement-grip',
+    brand: 'Victor',
+    query: 'Victor Fishbone Replacement Grip',
+  },
+  {
+    id: 'yonex-super-grap-pure',
+    brand: 'Yonex',
+    query: 'Yonex Super Grap Pure AC108',
+  },
+  {
+    id: 'babolat-syntec-x1-white',
     brand: 'Babolat',
-    tensionRange: '50–55 lbs',
-    price: 299,
-    bestFor: 'Power & Durability',
-    color: '#E8553A',
+    query: 'Babolat Syntec X1 Replacement Grip White',
   },
   {
-    id: 'babolat-vs-touch',
-    name: 'VS Touch',
+    id: 'babolat-syntec-x1-black-yellow',
     brand: 'Babolat',
-    tensionRange: '48–58 lbs',
-    price: 599,
-    bestFor: 'Feel & Control',
-    color: '#0A1F44',
+    query: 'Babolat Syntec X1 Replacement Grip Black Yellow',
   },
   {
-    id: 'head-velocity',
-    name: 'Velocity MLT',
-    brand: 'HEAD',
-    tensionRange: '45–60 lbs',
-    price: 449,
-    bestFor: 'Comfort & Power',
-    color: '#6366f1',
+    id: 'babolat-vs-original-overgrip-3pack',
+    brand: 'Babolat',
+    query: 'Babolat VS Original Feel Overgrip 3 Pack',
   },
   {
-    id: 'wilson-nxt',
-    name: 'NXT Power',
-    brand: 'Wilson',
-    tensionRange: '50–60 lbs',
-    price: 399,
-    bestFor: 'Spin & Touch',
-    color: '#16a34a',
+    id: 'babolat-pro-response-overgrip-3pack',
+    brand: 'Babolat',
+    query: 'Babolat Pro Response Overgrip 3 Pack',
   },
 ]
 
-const GRIP_SIZES = [
-  { id: 'G0', label: 'G0', inches: '4"', desc: 'XS' },
-  { id: 'G1', label: 'G1', inches: '4⅛"', desc: 'S' },
-  { id: 'G2', label: 'G2', inches: '4¼"', desc: 'M' },
-  { id: 'G3', label: 'G3', inches: '4⅜"', desc: 'L' },
-  { id: 'G4', label: 'G4', inches: '4½"', desc: 'XL' },
-  { id: 'G5', label: 'G5', inches: '4⅝"', desc: 'XXL' },
-]
+const NO_GRIP_OPTION: RacketGripOption = {
+  id: 'none',
+  name: 'No Thanks',
+  brand: '',
+  price: 0,
+  productId: '',
+  variantId: '',
+}
 
-const MIN_TENSION = 44
-const MAX_TENSION = 62
+// Looks up each candidate against THIS store's Medusa backend (via the
+// existing /api/store/products proxy) and keeps only the ones that
+// actually resolve to a real product + purchasable variant with a GBP
+// price. Runs all lookups in parallel — one product page load does one
+// batch of requests, not one request per candidate at add-to-cart time.
+async function resolveGripOptions(): Promise<RacketGripOption[]> {
+  const results = await Promise.all(
+    GRIP_SEARCH_CANDIDATES.map(async (candidate) => {
+      try {
+        const res = await fetch(
+          `/api/store/products?q=${encodeURIComponent(candidate.query)}&limit=3`,
+        )
+        if (!res.ok) return null
+        const data = await res.json()
+        const products: any[] = data.products ?? []
+        // Prefer a product whose brand metadata/title actually matches —
+        // guards against the search returning an unrelated item as its
+        // top hit.
+        const match =
+          products.find((p: any) =>
+            (p.title ?? '')
+              .toLowerCase()
+              .includes(candidate.brand.toLowerCase()),
+          ) ?? products[0]
+        if (!match) return null
+
+        const variant = match.variants?.[0]
+        if (!variant) return null // no purchasable variant — skip it
+
+        const gbp = (variant.prices ?? []).find(
+          (pr: any) => pr.currency_code === 'gbp',
+        )
+        const priceAmount =
+          variant.calculated_price?.calculated_amount ?? gbp?.amount
+        if (priceAmount === undefined) return null // no real price — skip it
+
+        const resolved: RacketGripOption = {
+          id: candidate.id,
+          name: match.title ?? candidate.query,
+          brand: candidate.brand,
+          price: priceAmount,
+          productId: match.id,
+          variantId: variant.id,
+        }
+        return resolved
+      } catch {
+        return null
+      }
+    }),
+  )
+  return results.filter((r): r is RacketGripOption => r !== null)
+}
+
+// String tension is a dropdown of whole numbers, not a slider — range
+// varies by sport (badminton strings tension much lower than tennis/squash).
+const TENSION_RANGE_BY_SPORT: Record<string, { min: number; max: number }> = {
+  badminton: { min: 18, max: 30 },
+  tennis: { min: 44, max: 62 },
+  squash: { min: 19, max: 24 },
+}
+const DEFAULT_TENSION_RANGE = TENSION_RANGE_BY_SPORT.tennis
+
+function getTensionRangeForSport(sport?: string) {
+  if (!sport) return DEFAULT_TENSION_RANGE
+  return (
+    TENSION_RANGE_BY_SPORT[sport.toLowerCase().trim()] ?? DEFAULT_TENSION_RANGE
+  )
+}
 
 // ─── StringUpgrade Component ──────────────────────────────────────────────────
+//
+// IMPORTANT STRUCTURE NOTE (fixed per smashuk.co reference):
+// "Free String Upgrade" (Yes/No) and "Racket Grips" are two INDEPENDENT
+// fields on smashuk.co. Racket Grips is ALWAYS visible and selectable,
+// regardless of whether String Upgrade is Yes or No — it is NOT nested
+// inside the Yes-only collapsible panel. Only "String Selection" and
+// "String Tension" are gated behind the Yes toggle, because those two only
+// make sense once you've said yes to stringing.
+//
+// Previously this component nested Racket Grips inside the same
+// max-h-0/collapse block as String Selection/Tension, so the grip dropdown
+// never rendered until the customer selected "Yes" for the free upgrade —
+// that's now fixed below: Racket Grips renders in its own block, outside
+// the `enabled` conditional, right after the toggle.
 
 function StringUpgrade({
-  onChange,
+  sport,
+  onStringChange,
+  onGripChange,
 }: {
-  onChange?: (sel: StringUpgradeSelection | null) => void
+  sport?: string
+  onStringChange?: (sel: StringSelection | null) => void
+  onGripChange?: (grip: RacketGripOption | null) => void
 }) {
+  const STRING_OPTIONS = getStringOptionsForSport(sport)
+  const { min: tensionMin, max: tensionMax } = getTensionRangeForSport(sport)
   const [enabled, setEnabled] = useState(false)
   const [selectedString, setSelectedString] = useState<StringOption>(
     STRING_OPTIONS[0],
   )
-  const [tension, setTension] = useState(52)
-  const [selectedGrip, setSelectedGrip] = useState<string>('G1')
-  const [showGripGuide, setShowGripGuide] = useState(false)
+  const [tension, setTension] = useState(
+    Math.round((tensionMin + tensionMax) / 2),
+  )
+  const [gripId, setGripId] = useState<string>('none')
 
-  const fillPct = ((tension - MIN_TENSION) / (MAX_TENSION - MIN_TENSION)) * 100
-  const tensionLabel =
-    tension <= 50 ? 'Power' : tension <= 56 ? 'Balanced' : 'Control'
+  // Racket Grips options are fetched from Medusa on mount, not hardcoded —
+  // a candidate only appears here if it's actually a real, purchasable
+  // product in the backend right now. While this is loading, the dropdown
+  // shows just "No Thanks"; if a product gets removed/unpublished in
+  // Medusa later, it simply stops appearing next time the page loads.
+  const [gripOptions, setGripOptions] = useState<RacketGripOption[]>([])
+  const [gripsLoading, setGripsLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    resolveGripOptions()
+      .then((options) => {
+        if (!cancelled) setGripOptions(options)
+      })
+      .finally(() => {
+        if (!cancelled) setGripsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const allGripOptions = [NO_GRIP_OPTION, ...gripOptions]
+  const selectedGrip =
+    allGripOptions.find((g) => g.id === gripId) ?? NO_GRIP_OPTION
 
   const toggle = () => {
     const next = !enabled
     setEnabled(next)
-    onChange?.(
-      next ? { string: selectedString, tension, grip: selectedGrip } : null,
-    )
+    onStringChange?.(next ? { string: selectedString, tension } : null)
   }
 
   const updateString = (opt: StringOption) => {
     setSelectedString(opt)
-    if (enabled) onChange?.({ string: opt, tension, grip: selectedGrip })
+    if (enabled) onStringChange?.({ string: opt, tension })
   }
 
   const updateTension = (val: number) => {
     setTension(val)
-    if (enabled)
-      onChange?.({ string: selectedString, tension: val, grip: selectedGrip })
+    if (enabled) onStringChange?.({ string: selectedString, tension: val })
   }
 
-  const updateGrip = (g: string) => {
-    setSelectedGrip(g)
-    if (enabled) onChange?.({ string: selectedString, tension, grip: g })
+  // Racket Grips (overgrip) is independent of the free-string-upgrade
+  // toggle — it's its own dropdown on smashuk.co and carries a real
+  // charge, so it's always available, not just when "Free String
+  // Upgrade" is Yes. The selected option is already a real, resolved
+  // Medusa product/variant by this point — no lookup needed later.
+  const updateGrip = (id: string) => {
+    setGripId(id)
+    const grip = allGripOptions.find((g) => g.id === id) ?? null
+    onGripChange?.(grip && grip.id !== 'none' ? grip : null)
   }
 
   return (
-    <div className='mb-6'>
-      <button
-        type='button'
-        onClick={toggle}
-        className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl border-2 transition-all duration-200 ${enabled ? 'border-[#E8553A] bg-[#E8553A]/5' : 'border-gray-200 bg-gray-50 hover:border-gray-300'}`}
-      >
-        <div className='flex items-center gap-3'>
-          <span
-            className={`transition-colors ${enabled ? 'text-[#E8553A]' : 'text-gray-400'}`}
+    <div className='mb-6 space-y-4'>
+      {/* Free String Upgrade toggle + Racket Grips side by side (per
+          request) — Racket Grips stays fully independent of the toggle's
+          on/off state, it's just laid out next to it now instead of
+          stacked below it. */}
+      <div className='grid grid-cols-1 md:grid-cols-2 gap-4 items-start'>
+        <div>
+          <button
+            type='button'
+            onClick={toggle}
+            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl border-2 transition-all duration-200 ${enabled ? 'border-[#E8553A] bg-[#E8553A]/5' : 'border-gray-200 bg-gray-50 hover:border-gray-300'}`}
           >
-            <svg
-              width='22'
-              height='22'
-              viewBox='0 0 24 24'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='1.8'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-            >
-              <ellipse cx='11' cy='9' rx='6' ry='7' />
-              <line x1='8' y1='6' x2='14' y2='6' />
-              <line x1='8' y1='9' x2='14' y2='9' />
-              <line x1='8' y1='12' x2='14' y2='12' />
-              <line x1='9' y1='4' x2='9' y2='14' />
-              <line x1='12' y1='4' x2='12' y2='14' />
-              <line x1='11' y1='16' x2='13' y2='22' />
-            </svg>
-          </span>
-          <div className='text-left'>
-            <p
-              className={`text-sm font-black font-montserrat transition-colors ${enabled ? 'text-[#E8553A]' : 'text-[#0A1F44]'}`}
-            >
-              String Upgrade
-              <span className='ml-2 text-xs font-semibold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-lato'>
-                +1 Day
-              </span>
-            </p>
-            <p className='text-xs text-gray-400 font-lato'>
-              {enabled
-                ? `${selectedString.brand} ${selectedString.name} · ${tension} lbs · Grip ${selectedGrip} · +£${selectedString.price}`
-                : 'Get your racket professionally strung & gripped before dispatch'}
-            </p>
-          </div>
-        </div>
-        <div
-          className={`w-11 h-6 rounded-full transition-all duration-300 relative shrink-0 ${enabled ? 'bg-[#E8553A]' : 'bg-gray-200'}`}
-        >
-          <div
-            className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-300 ${enabled ? 'left-5' : 'left-0.5'}`}
-          />
-        </div>
-      </button>
-
-      <div
-        className={`overflow-hidden transition-all duration-300 ${enabled ? 'max-h-[900px] opacity-100' : 'max-h-0 opacity-0'}`}
-      >
-        <div className='border-2 border-t-0 border-[#E8553A]/20 rounded-b-xl px-4 pb-5 pt-4 space-y-5 bg-white'>
-          {/* String selection, tension, grip — same as before, omitted for brevity */}
-          <div>
-            <p className='text-xs font-bold text-gray-400 font-montserrat uppercase tracking-wider mb-2.5'>
-              1. Choose String
-            </p>
-            <div className='grid grid-cols-2 gap-2'>
-              {STRING_OPTIONS.map((opt) => {
-                const isActive = selectedString.id === opt.id
-                return (
-                  <button
-                    key={opt.id}
-                    type='button'
-                    onClick={() => updateString(opt)}
-                    className={`text-left px-3 py-2.5 rounded-xl border-2 transition-all duration-150 ${isActive ? 'border-[#E8553A] bg-[#E8553A]/5' : 'border-gray-100 hover:border-gray-200 bg-gray-50'}`}
-                  >
-                    <div className='flex items-center gap-1.5 mb-1'>
-                      <span
-                        className='w-2 h-2 rounded-full shrink-0'
-                        style={{ background: opt.color }}
-                      />
-                      <span className='text-[10px] font-bold text-gray-400 font-lato uppercase tracking-wide'>
-                        {opt.brand}
-                      </span>
-                    </div>
-                    <p
-                      className={`text-sm font-black font-montserrat ${isActive ? 'text-[#E8553A]' : 'text-[#0A1F44]'}`}
-                    >
-                      {opt.name}
-                    </p>
-                    <p className='text-[11px] text-gray-400 font-lato'>
-                      {opt.bestFor}
-                    </p>
-                    <div className='flex items-center justify-between mt-1'>
-                      <span className='text-[10px] text-gray-400 font-lato'>
-                        {opt.tensionRange}
-                      </span>
-                      <span
-                        className={`text-xs font-bold font-montserrat ${isActive ? 'text-[#E8553A]' : 'text-gray-500'}`}
-                      >
-                        +£{opt.price}
-                      </span>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          <div>
-            <div className='flex items-center justify-between mb-2'>
-              <p className='text-xs font-bold text-gray-400 font-montserrat uppercase tracking-wider'>
-                2. String Tension
-              </p>
-              <div className='flex items-center gap-2'>
-                <span
-                  className={`text-[10px] px-2 py-0.5 rounded-full font-lato font-semibold ${tension <= 50 ? 'bg-blue-50 text-blue-500' : tension <= 56 ? 'bg-amber-50 text-amber-600' : 'bg-green-50 text-green-600'}`}
+            <div className='flex items-center gap-3'>
+              <span
+                className={`transition-colors ${enabled ? 'text-[#E8553A]' : 'text-gray-400'}`}
+              >
+                <svg
+                  width='22'
+                  height='22'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='1.8'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
                 >
-                  {tensionLabel}
-                </span>
-                <span className='text-sm font-black text-[#E8553A] font-montserrat'>
-                  {tension} lbs
-                </span>
+                  <ellipse cx='11' cy='9' rx='6' ry='7' />
+                  <line x1='8' y1='6' x2='14' y2='6' />
+                  <line x1='8' y1='9' x2='14' y2='9' />
+                  <line x1='8' y1='12' x2='14' y2='12' />
+                  <line x1='9' y1='4' x2='9' y2='14' />
+                  <line x1='12' y1='4' x2='12' y2='14' />
+                  <line x1='11' y1='16' x2='13' y2='22' />
+                </svg>
+              </span>
+              <div className='text-left'>
+                <p
+                  className={`text-sm font-black font-montserrat transition-colors ${enabled ? 'text-[#E8553A]' : 'text-[#0A1F44]'}`}
+                >
+                  Free String Upgrade
+                  <span className='ml-2 text-xs font-semibold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-lato'>
+                    +1 Day
+                  </span>
+                </p>
+                <p className='text-xs text-gray-400 font-lato'>
+                  {enabled
+                    ? `${selectedString.brand} ${selectedString.name} · ${tension} lbs — free`
+                    : 'Get your racket professionally strung before dispatch, free'}
+                </p>
               </div>
             </div>
-            <div className='relative h-5 flex items-center'>
-              <div className='absolute w-full h-1.5 rounded-full bg-gray-100' />
+            <div
+              className={`w-11 h-6 rounded-full transition-all duration-300 relative shrink-0 ${enabled ? 'bg-[#E8553A]' : 'bg-gray-200'}`}
+            >
               <div
-                className='absolute h-1.5 rounded-full bg-[#E8553A] transition-all'
-                style={{ width: `${fillPct}%` }}
-              />
-              <input
-                type='range'
-                min={MIN_TENSION}
-                max={MAX_TENSION}
-                step={1}
-                value={tension}
-                onChange={(e) => updateTension(Number(e.target.value))}
-                className='absolute w-full h-full opacity-0 cursor-pointer'
-              />
-              <div
-                className='absolute w-4 h-4 rounded-full bg-[#E8553A] border-2 border-white shadow-md pointer-events-none transition-all'
-                style={{ left: `calc(${fillPct}% - 8px)` }}
+                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-300 ${enabled ? 'left-5' : 'left-0.5'}`}
               />
             </div>
-            <div className='flex justify-between mt-1.5 mb-2'>
-              <span className='text-[10px] text-gray-400 font-lato'>
-                {MIN_TENSION} lbs · More Power
+          </button>
+        </div>
+
+        {/* Racket Grips — ALWAYS visible/selectable, independent of the Free
+          String Upgrade toggle above (matches smashuk.co: the dropdown
+          shows even when String Upgrade is untouched/"No Thanks"). Options
+          are only ever ones actually found in the Medusa backend — nothing
+          here is guessed or hardcoded. */}
+        <div>
+          <p className='text-xs font-bold text-gray-400 font-montserrat uppercase tracking-wider mb-2.5'>
+            Racket Grips
+            {selectedGrip.price > 0 && (
+              <span className='ml-1.5 text-[#E8553A] normal-case tracking-normal'>
+                (+ £{selectedGrip.price.toFixed(2)} GBP)
               </span>
-              <span className='text-[10px] text-gray-400 font-lato'>
-                More Control · {MAX_TENSION} lbs
+            )}
+          </p>
+          <div className='relative'>
+            <select
+              value={gripId}
+              onChange={(e) => updateGrip(e.target.value)}
+              disabled={gripsLoading}
+              className='w-full appearance-none px-3.5 py-3 pr-9 rounded-xl border-2 border-gray-100 bg-gray-50 text-sm font-montserrat font-bold text-[#0A1F44] focus:outline-none focus:border-[#E8553A] transition-colors cursor-pointer disabled:cursor-wait disabled:opacity-60'
+            >
+              {gripsLoading ? (
+                <option value='none'>Checking available grips…</option>
+              ) : (
+                allGripOptions.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                    {g.price > 0 ? ` (+£${g.price.toFixed(2)} GBP)` : ''}
+                  </option>
+                ))
+              )}
+            </select>
+            <span className='pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400'>
+              <svg
+                width='14'
+                height='14'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='2.5'
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              >
+                <polyline points='6 9 12 15 18 9' />
+              </svg>
+            </span>
+          </div>
+          {!gripsLoading && gripOptions.length === 0 && (
+            <p className='text-[11px] text-gray-400 font-lato mt-1.5'>
+              No grip add-ons are set up yet.
+            </p>
+          )}
+          {selectedGrip.price > 0 && (
+            <div className='mt-2 bg-[#0A1F44]/5 rounded-xl px-4 py-2.5 flex justify-between'>
+              <span className='text-xs font-bold font-montserrat text-[#0A1F44]'>
+                {selectedGrip.name}
+              </span>
+              <span className='text-sm font-black font-montserrat text-[#E8553A]'>
+                +£{selectedGrip.price.toFixed(2)}
               </span>
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* Gated behind "Yes" — String Selection + Tension only, exactly like
+          smashuk.co. Full width, sits below the toggle/grips row above
+          rather than tucked under just the toggle, since it now needs to
+          span both columns. */}
+      <div
+        className={`overflow-hidden transition-all duration-300 ${enabled ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'}`}
+      >
+        <div className='border-2 border-[#E8553A]/20 rounded-xl px-4 pb-5 pt-4 space-y-5 bg-white'>
+          <div>
+            <p className='text-xs font-bold text-gray-400 font-montserrat uppercase tracking-wider mb-2.5'>
+              1. String Selection
+            </p>
+            <div className='relative'>
+              <select
+                value={selectedString.id}
+                onChange={(e) => {
+                  const opt = STRING_OPTIONS.find(
+                    (o) => o.id === e.target.value,
+                  )
+                  if (opt) updateString(opt)
+                }}
+                className='w-full appearance-none px-3.5 py-3 pr-9 rounded-xl border-2 border-gray-100 bg-gray-50 text-sm font-montserrat font-bold text-[#0A1F44] focus:outline-none focus:border-[#E8553A] transition-colors cursor-pointer'
+              >
+                {STRING_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.brand} {opt.name}
+                  </option>
+                ))}
+              </select>
+              <span className='pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400'>
+                <svg
+                  width='14'
+                  height='14'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <polyline points='6 9 12 15 18 9' />
+                </svg>
+              </span>
+            </div>
+            <p className='text-[11px] text-gray-400 font-lato mt-1.5'>
+              {selectedString.bestFor} · Recommended tension{' '}
+              {selectedString.tensionRange}
+            </p>
           </div>
 
           <div>
-            <div className='flex items-center justify-between mb-2.5'>
-              <p className='text-xs font-bold text-gray-400 font-montserrat uppercase tracking-wider'>
-                3. Grip Size
-              </p>
-              <button
-                type='button'
-                onClick={() => setShowGripGuide((v) => !v)}
-                className='text-[11px] text-[#E8553A] font-lato font-semibold underline underline-offset-2'
+            <p className='text-xs font-bold text-gray-400 font-montserrat uppercase tracking-wider mb-2.5'>
+              2. String Tension
+            </p>
+            <div className='relative'>
+              <select
+                value={tension}
+                onChange={(e) => updateTension(Number(e.target.value))}
+                className='w-full appearance-none px-3.5 py-3 pr-9 rounded-xl border-2 border-gray-100 bg-gray-50 text-sm font-montserrat font-bold text-[#0A1F44] focus:outline-none focus:border-[#E8553A] transition-colors cursor-pointer'
               >
-                {showGripGuide ? 'Hide guide' : 'How to choose?'}
-              </button>
-            </div>
-            <div className='flex gap-2'>
-              {GRIP_SIZES.map((g) => {
-                const isActive = selectedGrip === g.id
-                return (
-                  <button
-                    key={g.id}
-                    type='button'
-                    onClick={() => updateGrip(g.id)}
-                    className={`flex-1 flex flex-col items-center py-2.5 rounded-xl border-2 transition-all duration-150 ${isActive ? 'border-[#E8553A] bg-[#E8553A]/5' : 'border-gray-100 bg-gray-50 hover:border-gray-200'}`}
-                  >
-                    <span
-                      className={`text-sm font-black font-montserrat ${isActive ? 'text-[#E8553A]' : 'text-[#0A1F44]'}`}
-                    >
-                      {g.label}
-                    </span>
-                    <span className='text-[9px] text-gray-400 font-lato'>
-                      {g.desc}
-                    </span>
-                  </button>
-                )
-              })}
+                {Array.from(
+                  { length: tensionMax - tensionMin + 1 },
+                  (_, i) => tensionMin + i,
+                ).map((val) => (
+                  <option key={val} value={val}>
+                    {val}
+                  </option>
+                ))}
+              </select>
+              <span className='pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400'>
+                <svg
+                  width='14'
+                  height='14'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <polyline points='6 9 12 15 18 9' />
+                </svg>
+              </span>
             </div>
           </div>
 
@@ -339,23 +707,12 @@ function StringUpgrade({
             <div className='flex justify-between text-xs font-lato'>
               <span className='text-gray-500'>Tension</span>
               <span className='font-semibold text-[#0A1F44]'>
-                {tension} lbs ({tensionLabel})
+                {tension} lbs
               </span>
             </div>
             <div className='flex justify-between text-xs font-lato'>
-              <span className='text-gray-500'>Grip Size</span>
-              <span className='font-semibold text-[#0A1F44]'>
-                {selectedGrip} ·{' '}
-                {GRIP_SIZES.find((g) => g.id === selectedGrip)?.inches}
-              </span>
-            </div>
-            <div className='border-t border-gray-200 pt-2 flex justify-between'>
-              <span className='text-xs font-bold font-montserrat text-[#0A1F44]'>
-                Upgrade cost
-              </span>
-              <span className='text-sm font-black font-montserrat text-[#E8553A]'>
-                +£{selectedString.price}
-              </span>
+              <span className='text-gray-500'>String Upgrade</span>
+              <span className='font-semibold text-green-600'>Free</span>
             </div>
           </div>
         </div>
@@ -381,25 +738,6 @@ const BADGE_STYLES: Record<string, string> = {
 export default function ProductDetailClient({ product, related }: Props) {
   const [activeImage, setActiveImage] = useState(0)
   const [quantity, setQuantity] = useState(1)
-
-  // ── Tier pricing (e.g. Buy 2-9 = 12% off, Buy 10+ = 20% off) ────
-  // Stored in product.metadata.tier_pricing as JSON array:
-  // [{ minQty: 2, maxQty: 9, discountPct: 12 }, { minQty: 10, discountPct: 20 }]
-  const rawTiers = (product as any).metadata?.tier_pricing
-  const tierPricing: { minQty: number; maxQty?: number; discountPct: number }[] =
-    Array.isArray(rawTiers) ? rawTiers : []
-
-  // Find which tier applies for current quantity
-  const activeTier = tierPricing.find(
-    (t) => quantity >= t.minQty && (t.maxQty == null || quantity <= t.maxQty),
-  )
-  const tieredUnitPrice = activeTier
-    ? product.price * (1 - activeTier.discountPct / 100)
-    : product.price
-
-  const setQuantityWithTier = (qty: number) => {
-    setQuantity(qty)
-  }
   const [wishlisted, setWishlisted] = useState(false)
   const [adding, setAdding] = useState(false)
   const [added, setAdded] = useState(false)
@@ -416,8 +754,18 @@ export default function ProductDetailClient({ product, related }: Props) {
   const selectedVariant =
     product.variants?.find((v: any) => v.id === selectedVariantId) ??
     product.variants?.[0]
-  const [stringUpgrade, setStringUpgrade] =
-    useState<StringUpgradeSelection | null>(null)
+  // Split in two, matching the fixed StringUpgrade component: string
+  // selection/tension (free, only when upgrade = Yes) and the grip add-on
+  // (paid, always available) are independent selections now.
+  const [stringSelection, setStringSelection] =
+    useState<StringSelection | null>(null)
+  // Holds the FULL resolved grip (real Medusa productId/variantId/price),
+  // not just an id — it was already confirmed to exist in the backend at
+  // selection time (see resolveGripOptions in StringUpgrade), so
+  // add-to-cart below can use it directly with no further lookup.
+  const [selectedGrip, setSelectedGrip] = useState<RacketGripOption | null>(
+    null,
+  )
   const [activeTab, setActiveTab] = useState<
     'description' | 'specs' | 'shipping'
   >('description')
@@ -465,22 +813,50 @@ export default function ProductDetailClient({ product, related }: Props) {
 
     setAdding(true)
     try {
-      // Pass the string-upgrade selection through as line-item metadata so
-      // staff can see it on the order — it doesn't change the racket's
-      // price (matches smashuk.co's real behaviour: a free-choice service
-      // note, not a paid add-on).
-      const metadata = stringUpgrade
+      // The racket itself. String choice/tension are FREE on smashuk.co
+      // ("Free String Upgrade (+1 Day)") — no money attached, so a
+      // metadata note is enough; there's nothing to charge here.
+      const racketMetadata = stringSelection
         ? {
             string_upgrade: 'Yes',
-            string_choice: `${stringUpgrade.string.brand} ${stringUpgrade.string.name}`,
-            string_tension: `${stringUpgrade.tension} lbs`,
-            string_grip: stringUpgrade.grip,
+            string_choice: `${stringSelection.string.brand} ${stringSelection.string.name}`,
+            string_tension: `${stringSelection.tension} lbs`,
           }
         : product.stringUpgradeAvailable
           ? { string_upgrade: 'No Thanks' }
           : undefined
 
-      await addItem.mutateAsync({ variantId: variant.id, quantity, metadata })
+      await addItem.mutateAsync({
+        variantId: variant.id,
+        quantity,
+        metadata: racketMetadata,
+      })
+
+      // Racket Grips (overgrip) is the one thing here that actually costs
+      // money, so — unlike the free string upgrade above — it needs its
+      // own real Medusa line item with a real price; metadata alone never
+      // charges the customer. `selectedGrip` was already resolved against
+      // Medusa when the dropdown loaded (see resolveGripOptions in
+      // StringUpgrade) — its variantId is a real, existing variant, so we
+      // add it directly with no lookup/search needed here anymore.
+      if (selectedGrip) {
+        try {
+          await addItem.mutateAsync({
+            variantId: selectedGrip.variantId,
+            quantity, // one grip per racket ordered
+            metadata: {
+              linked_product: product.name,
+              grip_choice: selectedGrip.name,
+            },
+          })
+        } catch (gripErr) {
+          console.error('Failed to add racket grip line item:', gripErr)
+          toast.error(
+            'Racket added, but the grip add-on couldn’t be added — please contact us.',
+          )
+        }
+      }
+
       setAdded(true)
       toast.success('Added to cart!')
       setTimeout(() => setAdded(false), 3000)
@@ -604,14 +980,9 @@ export default function ProductDetailClient({ product, related }: Props) {
             {/* Price — GBP */}
             <div className='flex items-center gap-4 mb-6 pb-6 border-b border-gray-100'>
               <span className='font-montserrat font-black text-4xl text-[#0A1F44]'>
-                {formatPrice(activeTier ? tieredUnitPrice : product.price)}
+                {formatPrice(product.price)}
               </span>
-              {activeTier && (
-                <span className='text-xl text-gray-400 line-through font-lato'>
-                  {formatPrice(product.price)}
-                </span>
-              )}
-              {!activeTier && product.originalPrice && (
+              {product.originalPrice && (
                 <>
                   <span className='text-xl text-gray-400 line-through font-lato'>
                     {formatPrice(product.originalPrice)}
@@ -621,83 +992,12 @@ export default function ProductDetailClient({ product, related }: Props) {
                   </span>
                 </>
               )}
-              {activeTier && (
-                <span className='bg-[#E8553A]/10 text-[#E8553A] font-montserrat font-black text-sm px-3 py-1 rounded-full'>
-                  Save {activeTier.discountPct}%
-                </span>
-              )}
-              {stringUpgrade && (
+              {stringSelection && (
                 <span className='bg-amber-100 text-amber-700 font-montserrat font-bold text-xs px-3 py-1 rounded-full'>
                   incl. stringing
                 </span>
               )}
             </div>
-
-            {/* Get more, save more — Tier Pricing Widget */}
-            {tierPricing.length > 0 && (
-              <div className='mb-6 border border-gray-200 rounded-2xl overflow-hidden'>
-                <div className='flex items-center justify-center gap-1.5 py-2.5 bg-gray-50 border-b border-gray-200'>
-                  <span className='text-xs font-bold font-montserrat text-[#0A1F44]'>
-                    Get more, save more 🎉
-                  </span>
-                </div>
-                <div className='divide-y divide-gray-100'>
-                  {/* Tier 0 — Standard price (Buy 1) */}
-                  {(() => {
-                    const isActive = !activeTier
-                    return (
-                      <button
-                        onClick={() => setQuantityWithTier(1)}
-                        className={`w-full flex items-center px-4 py-3 text-left transition-all ${isActive ? 'bg-[#0A1F44]/5' : 'bg-white hover:bg-gray-50'}`}
-                      >
-                        <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center mr-3 ${isActive ? 'border-[#0A1F44]' : 'border-gray-300'}`}>
-                          {isActive && <div className='w-2 h-2 rounded-full bg-[#0A1F44]' />}
-                        </div>
-                        <div className='flex-1'>
-                          <p className='text-sm font-bold font-montserrat text-[#0A1F44]'>Buy 1</p>
-                          <p className='text-xs text-gray-400 font-lato'>Standard price</p>
-                        </div>
-                        <div className='text-right'>
-                          <p className='text-sm font-bold font-montserrat text-[#0A1F44]'>{formatPrice(product.price)} each</p>
-                        </div>
-                      </button>
-                    )
-                  })()}
-
-                  {/* Dynamic tiers */}
-                  {tierPricing.map((tier, i) => {
-                    const isActive = activeTier === tier
-                    const label = tier.maxQty
-                      ? `Buy ${tier.minQty}–${tier.maxQty}`
-                      : `Buy ${tier.minQty}+`
-                    const discountedPrice = product.price * (1 - tier.discountPct / 100)
-                    const saving = product.price - discountedPrice
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => setQuantityWithTier(tier.minQty)}
-                        className={`w-full flex items-center px-4 py-3 text-left transition-all ${isActive ? 'bg-[#0A1F44]/5' : 'bg-white hover:bg-gray-50'}`}
-                      >
-                        <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center mr-3 ${isActive ? 'border-[#0A1F44]' : 'border-gray-300'}`}>
-                          {isActive && <div className='w-2 h-2 rounded-full bg-[#0A1F44]' />}
-                        </div>
-                        <div className='flex-1'>
-                          <p className='text-sm font-bold font-montserrat text-[#0A1F44]'>{label}</p>
-                          <p className='text-xs text-[#E8553A] font-lato font-semibold'>Get {tier.discountPct}% off</p>
-                        </div>
-                        <div className='text-right'>
-                          <div className='flex items-center gap-1.5 justify-end'>
-                            <span className='text-xs text-gray-400 line-through font-lato'>{formatPrice(product.price)}</span>
-                            <span className='text-sm font-bold font-montserrat text-[#0A1F44]'>{formatPrice(discountedPrice)} each</span>
-                          </div>
-                          <p className='text-xs text-[#E8553A] font-lato font-semibold'>You save {formatPrice(saving)}</p>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
 
             {/* Variant picker — size/color (only rendered when the product
                 actually has more than one purchasable variant; the dashboard's
@@ -879,7 +1179,11 @@ export default function ProductDetailClient({ product, related }: Props) {
             {/* Only racket products offer this (matches smashuk.co — not
                 every product has it, e.g. shoes/bags/clothing don't) */}
             {product.stringUpgradeAvailable && (
-              <StringUpgrade onChange={(sel) => setStringUpgrade(sel)} />
+              <StringUpgrade
+                sport={product.sport}
+                onStringChange={(sel) => setStringSelection(sel)}
+                onGripChange={(grip) => setSelectedGrip(grip)}
+              />
             )}
 
             {/* Notify me — shown instead of the qty/cart controls when the
@@ -901,7 +1205,7 @@ export default function ProductDetailClient({ product, related }: Props) {
             <div className='flex items-center gap-4 mb-6'>
               <div className='flex items-center border border-gray-200 rounded-xl overflow-hidden'>
                 <button
-                  onClick={() => setQuantityWithTier(Math.max(1, quantity - 1))}
+                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
                   className='w-11 h-11 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
                 >
                   <MinusIcon size={16} />
@@ -911,7 +1215,7 @@ export default function ProductDetailClient({ product, related }: Props) {
                 </span>
                 <button
                   onClick={() =>
-                    setQuantityWithTier(Math.min(product.stock, quantity + 1))
+                    setQuantity(Math.min(product.stock, quantity + 1))
                   }
                   className='w-11 h-11 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
                 >
