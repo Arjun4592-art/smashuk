@@ -114,39 +114,6 @@ const FAQS = [
   },
 ]
 
-const PARTNERSHIP_PROGRAMMES = [
-  {
-    title: 'Club & University Partnerships',
-    desc: 'Ongoing kit, equipment and demo deals for clubs and university teams.',
-    href: '/local-store/partnerships',
-  },
-  {
-    title: 'Club Demo Programme',
-    desc: 'Let your members trial a rotating range of premium rackets at club nights.',
-    href: '/local-store/club-demo-programme',
-  },
-  {
-    title: 'Shuttlecock Partnership',
-    desc: 'Volume pricing on shuttlecocks for clubs that get through them fast.',
-    href: '/local-store/shuttlecock-partnership',
-  },
-  {
-    title: 'Tennis Ball Partnership',
-    desc: 'Regular tennis ball supply arrangements at club rates.',
-    href: '/local-store/tennis-ball-partnership',
-  },
-  {
-    title: 'Kit Printing',
-    desc: 'Custom-printed club kit, sorted for you from design to delivery.',
-    href: '/local-store/kit-printing',
-  },
-  {
-    title: 'Sponsorship',
-    desc: 'Sponsorship packages for players, teams and events.',
-    href: '/local-store/sponsorship',
-  },
-]
-
 export default async function LocalStorePage() {
   const contact = await getPublicStoreContact()
   const fullAddress = [
@@ -187,6 +154,14 @@ export default async function LocalStorePage() {
       </div>
 
       <div className='max-w-5xl mx-auto px-4 py-14'>
+        {/* Reviews - live data from the site's review system (shown right after hero, matching in-store page order) */}
+        <div className='mb-16'>
+          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
+            Customer Testimonials
+          </h2>
+          <ReviewsSlider />
+        </div>
+
         {/* Who we are */}
         <div className='max-w-3xl mx-auto text-center mb-14'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] mb-3'>
@@ -275,14 +250,6 @@ export default async function LocalStorePage() {
           </div>
         </div>
 
-        {/* Reviews - live data from the site's review system */}
-        <div className='mb-16'>
-          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
-            What Customers Say
-          </h2>
-          <ReviewsSlider />
-        </div>
-
         {/* Gift cards */}
         <div className='bg-[#FFF8E7] border border-[#FFC453]/40 rounded-2xl p-8 text-center mb-16'>
           <h2 className='font-montserrat font-black text-xl text-[#0A1F44] mb-2'>
@@ -307,32 +274,6 @@ export default async function LocalStorePage() {
 
         {/* Brands we carry - live from the catalog */}
         <BrandsBar />
-
-        {/* Partnership programmes */}
-        <div className='mb-16 mt-16'>
-          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-1'>
-            Local Partnership Programmes
-          </h2>
-          <p className='text-gray-500 font-lato text-center mb-8'>
-            Working with clubs, universities and teams across the area
-          </p>
-          <div className='grid grid-cols-1 md:grid-cols-3 gap-6'>
-            {PARTNERSHIP_PROGRAMMES.map((p) => (
-              <Link
-                key={p.href}
-                href={p.href}
-                className='block bg-white rounded-2xl border border-gray-100 p-6 hover:border-[#E8553A]/30 hover:shadow-[0_8px_24px_rgba(232,85,58,0.08)] transition-all'
-              >
-                <h3 className='font-montserrat font-bold text-base text-[#0A1F44] mb-1.5'>
-                  {p.title}
-                </h3>
-                <p className='text-sm text-gray-500 font-lato leading-relaxed'>
-                  {p.desc}
-                </p>
-              </Link>
-            ))}
-          </div>
-        </div>
 
         {/* FAQ */}
         <div className='mb-16'>
