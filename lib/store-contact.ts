@@ -32,11 +32,11 @@ const FALLBACK: PublicStoreContact = {
   email: CONTACT_EMAIL,
   phone: CONTACT_PHONE,
   address: {
-    line1: '42 Racket Court',
+    line1: '112A Hulme High Street',
     line2: '',
-    city: 'London',
-    state: 'Greater London',
-    pincode: 'SW1A 1AA',
+    city: 'Manchester',
+    state: 'Greater Manchester',
+    pincode: 'M15 5JP',
     country: 'United Kingdom',
   },
 }

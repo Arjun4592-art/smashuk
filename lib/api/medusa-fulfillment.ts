@@ -215,6 +215,8 @@ export async function fulfillOrder(
     )
   }
 
+  let deliverError: string | undefined
+
   // For POS pickup orders — customer already has the item in hand at the
   // counter the moment the sale is rung up. So after creating the fulfillment
   // (fulfilled), immediately mark it as delivered too, so Medusa's own
@@ -222,9 +224,30 @@ export async function fulfillOrder(
   // at "fulfilled". This is what makes the dashboard show "Delivered" instead
   // of "Processing" for POS pickup orders without relying on metadata alone.
   if (markDelivered) {
-    const fulfillmentId =
-      fulfillData.fulfillment?.id ??
-      fulfillData.order?.fulfillments?.[0]?.id
+    // BUG FIX: `POST /admin/orders/:id/fulfillments` returns `{ order }`,
+    // NOT `{ fulfillment }` — so `fulfillData.fulfillment?.id` was always
+    // undefined, and the fallback `fulfillData.order?.fulfillments?.[0]?.id`
+    // just grabbed whatever fulfillment happened to sit at array index 0.
+    // For any order with more than one fulfillment record (a prior return/
+    // exchange, a partial fulfillment, etc.) that's not reliably the one
+    // that was just created — "mark-as-delivered" could silently succeed
+    // against the WRONG fulfillment, leaving the real new one stuck at
+    // "fulfilled"/"Awaiting pickup" in Medusa forever. Re-fetch the order's
+    // fulfillments fresh and pick the most recently created ACTIVE one
+    // (no canceled_at/delivered_at) instead of trusting array position.
+    const freshRes = await fetcher(
+      `/admin/orders/${orderId}?fields=id,fulfillment_status,*fulfillments`,
+    )
+    const freshData = await readJson(freshRes)
+    const activeFulfillments = (freshData?.order?.fulfillments ?? []).filter(
+      (f: any) => !f.canceled_at && !f.delivered_at,
+    )
+    activeFulfillments.sort(
+      (a: any, b: any) =>
+        new Date(b.created_at ?? 0).getTime() -
+        new Date(a.created_at ?? 0).getTime(),
+    )
+    const fulfillmentId = activeFulfillments[0]?.id
 
     if (fulfillmentId) {
       const deliverRes = await fetcher(
@@ -232,21 +255,26 @@ export async function fulfillOrder(
         { method: 'POST' },
       )
       if (!deliverRes.ok) {
-        // Non-fatal — fulfillment is still created. The order will show
-        // "Processing" in the dashboard instead of "Delivered", but the
-        // sale itself is complete. Log it so it can be investigated.
+        // Non-fatal to the fulfillment itself (that part succeeded), but
+        // no longer swallowed silently — surfaced back to the caller so
+        // the POS UI can show staff a warning instead of a false "done".
         const deliverData = await readJson(deliverRes)
+        deliverError =
+          deliverData?.message ??
+          `Failed to mark fulfillment as delivered (${deliverRes.status})`
         console.warn(
           `[fulfillOrder] mark-as-delivered failed for fulfillment ${fulfillmentId}:`,
-          deliverData?.message ?? deliverRes.status,
+          deliverError,
         )
       }
     } else {
+      deliverError =
+        'Order was fulfilled, but no active fulfillment was found to mark as delivered.'
       console.warn(
-        `[fulfillOrder] markDelivered=true but no fulfillment ID found in response for order ${orderId}`,
+        `[fulfillOrder] markDelivered=true but no active fulfillment found for order ${orderId}`,
       )
     }
   }
 
-  return { alreadyFulfilled: false, fulfillment: fulfillData }
+  return { alreadyFulfilled: false, fulfillment: fulfillData, deliverError }
 }

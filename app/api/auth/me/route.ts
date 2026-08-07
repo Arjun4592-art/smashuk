@@ -6,13 +6,15 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
+import { SURFACE_COOKIES, setSurfaceCookies } from '@/lib/api/auth-cookie'
 import { isPosSessionValid } from '@/lib/api/pos-session'
+import { auth } from '@/app/api/auth/[...nextauth]/route'
+import { medusaStore } from '@/lib/medusa'
+import { deriveGoogleShadowPassword } from '@/lib/api/google-shadow'
 
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
-const PUBLISHABLE_KEY =
-  process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
+const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
 
 type Surface = 'website' | 'dashboard' | 'pos'
 
@@ -98,8 +100,7 @@ async function getAdminUser(token: string) {
   const role: 'admin' | 'staff' = isOwner ? 'admin' : 'staff'
   return {
     id: u.id,
-    name:
-      `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || u.email,
+    name: `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || u.email,
     email: u.email ?? '',
     role,
     createdAt: u.created_at,
@@ -109,7 +110,8 @@ async function getAdminUser(token: string) {
 export async function GET(req: NextRequest) {
   try {
     const cookieStore = await cookies()
-    const surface = (req.nextUrl.searchParams.get('surface') ?? 'website') as Surface
+    const surface = (req.nextUrl.searchParams.get('surface') ??
+      'website') as Surface
 
     const { authCookie, tokenCookie } = SURFACE_COOKIES[surface]
     const authRaw = cookieStore.get(authCookie)?.value
@@ -137,17 +139,74 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ user: null })
     }
 
-    // NextAuth-backed google tokens start with 'nextauth:' prefix
-    // — restore from auth-state cookie directly (Medusa can't validate them)
+    // NextAuth-backed google tokens start with 'nextauth:' prefix.
+    //
+    // This placeholder is only ever written when the Google → Medusa sync
+    // in the jwt() callback failed at OAuth time (see [...nextauth]/route.ts).
+    // BUG FIX: this used to just echo the email back as `name` forever —
+    // since this is the ONLY route the client calls on every page load, a
+    // one-time sync failure meant the customer was permanently stuck seeing
+    // "email as name, no avatar, nothing saved in Medusa", even after the
+    // backend came back up, because nothing ever retried the sync.
+    //
+    // Now: pull name/picture from the live NextAuth session as an immediate
+    // display fallback, AND retry the Medusa emailpass login/shadow-password
+    // flow. If it succeeds this time, upgrade the cookie to the real Medusa
+    // token so subsequent requests hit the normal getCustomerUser() path
+    // and the customer record actually exists in Medusa going forward.
     if (token.startsWith('nextauth:')) {
       const email = token.slice(9)
+      const session = await auth()
+      const sessionName = session?.user?.name || email
+      const sessionImage = (session?.user as any)?.image as string | undefined
+
+      try {
+        const shadowPassword = await deriveGoogleShadowPassword(email)
+        const loginResponse = await medusaStore.auth.login(
+          'customer',
+          'emailpass',
+          { email, password: shadowPassword },
+        )
+
+        if (typeof loginResponse === 'string') {
+          const customerUser = await getCustomerUser(loginResponse)
+          if (customerUser) {
+            const response = NextResponse.json({
+              user: {
+                ...customerUser,
+                // Prefer whatever's actually saved on the Medusa customer;
+                // fall back to the live Google session picture if the
+                // avatar metadata write hasn't landed yet.
+                avatar: customerUser.avatar ?? sessionImage,
+              },
+            })
+            setSurfaceCookies(
+              response.cookies,
+              'website',
+              { isAuthenticated: true, role: 'customer' },
+              loginResponse,
+              'lax',
+            )
+            return response
+          }
+        }
+      } catch (err) {
+        console.error(
+          '[api/auth/me] Retried Google → Medusa sync, still failing:',
+          err,
+        )
+      }
+
+      // Medusa still unreachable/failing — at least show real name + photo
+      // instead of the bare email, using the live NextAuth session.
       return NextResponse.json({
         user: {
           id: email,
-          name: email,
+          name: sessionName,
           email,
           role: 'customer',
           createdAt: new Date().toISOString(),
+          avatar: sessionImage,
         },
       })
     }

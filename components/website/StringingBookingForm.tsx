@@ -5,6 +5,13 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useCartStore } from '@/store/cartStore'
 import type { Product } from '@/types'
+import {
+  getStringGroupsForSport,
+  getTensionsForSport,
+} from '@/lib/stringing-options'
+
+const NO_PREFERENCE = 'No preference — advise me in-store'
+const OWN_STRING = 'Bringing my own string'
 
 // Store hours — Mon-Fri 11am-7pm, Sat 11am-5pm, Sun closed. Used to build
 // valid time-slot options for the day the customer picks.
@@ -31,6 +38,7 @@ export default function StringingBookingForm() {
   const [services, setServices] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [sport, setSport] = useState('')
+  const [stringChoice, setStringChoice] = useState('')
   const [tension, setTension] = useState('')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
@@ -54,6 +62,20 @@ export default function StringingBookingForm() {
   const selectedProduct = services.find(
     (p: any) => p.metadata?.service_sport === sport,
   )
+  // String/tension options change with the racket type — re-derived
+  // whenever `sport` changes (see lib/stringing-options.ts, shared with the
+  // /local-store/stringing/{badminton,tennis,squash} guide pages).
+  const stringGroups = useMemo(() => getStringGroupsForSport(sport), [sport])
+  const tensionOptions = useMemo(() => getTensionsForSport(sport), [sport])
+
+  // Selected racket type changed — the previous string/tension pick may not
+  // exist in the new sport's list, so reset both rather than silently
+  // carrying over an option (e.g. a tennis string) onto a badminton booking.
+  const handleSportChange = (newSport: string) => {
+    setSport(newSport)
+    setStringChoice('')
+    setTension('')
+  }
 
   const handleBook = async () => {
     if (!selectedProduct) {
@@ -70,18 +92,34 @@ export default function StringingBookingForm() {
     }
     const variant = (selectedProduct as any).variants?.[0]
     if (!variant?.id) {
-      toast.error('This service is not available to book right now — please contact us instead.')
+      toast.error(
+        'This service is not available to book right now — please contact us instead.',
+      )
       return
     }
 
     setSubmitting(true)
     try {
-      addItem(selectedProduct, 1, { id: variant.id }, {
-        booking_date: date,
-        booking_time: time,
-        tension_notes: tension || 'No preference given',
-        service_type: 'stringing',
-      })
+      const notesParts = [
+        stringChoice && stringChoice !== NO_PREFERENCE
+          ? `String: ${stringChoice}`
+          : '',
+        tension && tension !== NO_PREFERENCE ? `Tension: ${tension}` : '',
+      ].filter(Boolean)
+
+      addItem(
+        selectedProduct,
+        1,
+        { id: variant.id },
+        {
+          booking_date: date,
+          booking_time: time,
+          tension_notes: notesParts.length
+            ? notesParts.join(' · ')
+            : 'No preference given',
+          service_type: 'stringing',
+        },
+      )
       // addItem syncs to the real Medusa cart in the background — give it
       // a moment before sending the customer to the cart page.
       await new Promise((r) => setTimeout(r, 500))
@@ -106,8 +144,8 @@ export default function StringingBookingForm() {
     return (
       <div className='bg-[#FFF8E7] border border-[#FFC453]/40 rounded-2xl p-6 text-center'>
         <p className='text-sm text-gray-600 font-lato'>
-          Online booking isn’t set up yet — please use the contact button
-          below and we’ll book you in manually.
+          Online booking isn’t set up yet — please use the contact button below
+          and we’ll book you in manually.
         </p>
       </div>
     )
@@ -127,7 +165,7 @@ export default function StringingBookingForm() {
             {services.map((p: any) => (
               <button
                 key={p.id}
-                onClick={() => setSport(p.metadata.service_sport)}
+                onClick={() => handleSportChange(p.metadata.service_sport)}
                 className={`px-3 py-2.5 rounded-xl border-2 text-sm font-lato font-semibold capitalize transition-colors ${
                   sport === p.metadata.service_sport
                     ? 'border-[#E8553A] bg-[#E8553A]/5 text-[#E8553A]'
@@ -180,18 +218,54 @@ export default function StringingBookingForm() {
           </div>
         </div>
 
-        <div>
-          <label className='block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-montserrat'>
-            String & Tension (Optional)
-          </label>
-          <input
-            type='text'
-            value={tension}
-            onChange={(e) => setTension(e.target.value)}
-            placeholder='e.g. Yonex BG65, 24 lbs — or leave blank for advice in-store'
-            className='w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#E8553A] transition-colors font-lato text-[#0A1F44]'
-          />
+        <div className='grid grid-cols-2 gap-4'>
+          <div>
+            <label className='block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-montserrat'>
+              String (Optional)
+            </label>
+            <select
+              value={stringChoice}
+              onChange={(e) => setStringChoice(e.target.value)}
+              disabled={!sport}
+              className='w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#E8553A] transition-colors font-lato text-[#0A1F44] disabled:bg-gray-50 disabled:text-gray-400'
+            >
+              <option value=''>{NO_PREFERENCE}</option>
+              <option value={OWN_STRING}>{OWN_STRING}</option>
+              {stringGroups.map((g) => (
+                <optgroup key={g.group} label={g.group}>
+                  {g.items.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className='block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-montserrat'>
+              Tension (Optional)
+            </label>
+            <select
+              value={tension}
+              onChange={(e) => setTension(e.target.value)}
+              disabled={!sport}
+              className='w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#E8553A] transition-colors font-lato text-[#0A1F44] disabled:bg-gray-50 disabled:text-gray-400'
+            >
+              <option value=''>{NO_PREFERENCE}</option>
+              {tensionOptions.map((t) => (
+                <option key={t.level} value={`${t.range} (${t.level})`}>
+                  {t.range} — {t.level}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
+        {!sport && (
+          <p className='text-[11.5px] text-gray-400 font-lato -mt-2'>
+            Choose a racket type above to see string & tension options.
+          </p>
+        )}
 
         <button
           onClick={handleBook}
@@ -204,15 +278,14 @@ export default function StringingBookingForm() {
               ? `Book & Pay — ${(
                   (selectedProduct as any).variants?.[0]?.calculated_price
                     ?.calculated_amount ??
-                    (selectedProduct as any).variants?.[0]?.prices?.[0]
-                      ?.amount ??
-                    0
+                  (selectedProduct as any).variants?.[0]?.prices?.[0]?.amount ??
+                  0
                 ).toFixed(2)}`
               : 'Book Now'}
         </button>
         <p className='text-[11.5px] text-gray-400 font-lato text-center'>
-          Payment is taken online — bring your racket to us at your booked
-          time. {cartId ? '' : "You'll set up your cart on the next step."}
+          Payment is taken online — bring your racket to us at your booked time.{' '}
+          {cartId ? '' : "You'll set up your cart on the next step."}
         </p>
       </div>
     </div>

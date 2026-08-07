@@ -381,6 +381,25 @@ const BADGE_STYLES: Record<string, string> = {
 export default function ProductDetailClient({ product, related }: Props) {
   const [activeImage, setActiveImage] = useState(0)
   const [quantity, setQuantity] = useState(1)
+
+  // ── Tier pricing (e.g. Buy 2-9 = 12% off, Buy 10+ = 20% off) ────
+  // Stored in product.metadata.tier_pricing as JSON array:
+  // [{ minQty: 2, maxQty: 9, discountPct: 12 }, { minQty: 10, discountPct: 20 }]
+  const rawTiers = (product as any).metadata?.tier_pricing
+  const tierPricing: { minQty: number; maxQty?: number; discountPct: number }[] =
+    Array.isArray(rawTiers) ? rawTiers : []
+
+  // Find which tier applies for current quantity
+  const activeTier = tierPricing.find(
+    (t) => quantity >= t.minQty && (t.maxQty == null || quantity <= t.maxQty),
+  )
+  const tieredUnitPrice = activeTier
+    ? product.price * (1 - activeTier.discountPct / 100)
+    : product.price
+
+  const setQuantityWithTier = (qty: number) => {
+    setQuantity(qty)
+  }
   const [wishlisted, setWishlisted] = useState(false)
   const [adding, setAdding] = useState(false)
   const [added, setAdded] = useState(false)
@@ -585,9 +604,14 @@ export default function ProductDetailClient({ product, related }: Props) {
             {/* Price — GBP */}
             <div className='flex items-center gap-4 mb-6 pb-6 border-b border-gray-100'>
               <span className='font-montserrat font-black text-4xl text-[#0A1F44]'>
-                {formatPrice(product.price)}
+                {formatPrice(activeTier ? tieredUnitPrice : product.price)}
               </span>
-              {product.originalPrice && (
+              {activeTier && (
+                <span className='text-xl text-gray-400 line-through font-lato'>
+                  {formatPrice(product.price)}
+                </span>
+              )}
+              {!activeTier && product.originalPrice && (
                 <>
                   <span className='text-xl text-gray-400 line-through font-lato'>
                     {formatPrice(product.originalPrice)}
@@ -597,12 +621,83 @@ export default function ProductDetailClient({ product, related }: Props) {
                   </span>
                 </>
               )}
+              {activeTier && (
+                <span className='bg-[#E8553A]/10 text-[#E8553A] font-montserrat font-black text-sm px-3 py-1 rounded-full'>
+                  Save {activeTier.discountPct}%
+                </span>
+              )}
               {stringUpgrade && (
                 <span className='bg-amber-100 text-amber-700 font-montserrat font-bold text-xs px-3 py-1 rounded-full'>
                   incl. stringing
                 </span>
               )}
             </div>
+
+            {/* Get more, save more — Tier Pricing Widget */}
+            {tierPricing.length > 0 && (
+              <div className='mb-6 border border-gray-200 rounded-2xl overflow-hidden'>
+                <div className='flex items-center justify-center gap-1.5 py-2.5 bg-gray-50 border-b border-gray-200'>
+                  <span className='text-xs font-bold font-montserrat text-[#0A1F44]'>
+                    Get more, save more 🎉
+                  </span>
+                </div>
+                <div className='divide-y divide-gray-100'>
+                  {/* Tier 0 — Standard price (Buy 1) */}
+                  {(() => {
+                    const isActive = !activeTier
+                    return (
+                      <button
+                        onClick={() => setQuantityWithTier(1)}
+                        className={`w-full flex items-center px-4 py-3 text-left transition-all ${isActive ? 'bg-[#0A1F44]/5' : 'bg-white hover:bg-gray-50'}`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center mr-3 ${isActive ? 'border-[#0A1F44]' : 'border-gray-300'}`}>
+                          {isActive && <div className='w-2 h-2 rounded-full bg-[#0A1F44]' />}
+                        </div>
+                        <div className='flex-1'>
+                          <p className='text-sm font-bold font-montserrat text-[#0A1F44]'>Buy 1</p>
+                          <p className='text-xs text-gray-400 font-lato'>Standard price</p>
+                        </div>
+                        <div className='text-right'>
+                          <p className='text-sm font-bold font-montserrat text-[#0A1F44]'>{formatPrice(product.price)} each</p>
+                        </div>
+                      </button>
+                    )
+                  })()}
+
+                  {/* Dynamic tiers */}
+                  {tierPricing.map((tier, i) => {
+                    const isActive = activeTier === tier
+                    const label = tier.maxQty
+                      ? `Buy ${tier.minQty}–${tier.maxQty}`
+                      : `Buy ${tier.minQty}+`
+                    const discountedPrice = product.price * (1 - tier.discountPct / 100)
+                    const saving = product.price - discountedPrice
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setQuantityWithTier(tier.minQty)}
+                        className={`w-full flex items-center px-4 py-3 text-left transition-all ${isActive ? 'bg-[#0A1F44]/5' : 'bg-white hover:bg-gray-50'}`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center mr-3 ${isActive ? 'border-[#0A1F44]' : 'border-gray-300'}`}>
+                          {isActive && <div className='w-2 h-2 rounded-full bg-[#0A1F44]' />}
+                        </div>
+                        <div className='flex-1'>
+                          <p className='text-sm font-bold font-montserrat text-[#0A1F44]'>{label}</p>
+                          <p className='text-xs text-[#E8553A] font-lato font-semibold'>Get {tier.discountPct}% off</p>
+                        </div>
+                        <div className='text-right'>
+                          <div className='flex items-center gap-1.5 justify-end'>
+                            <span className='text-xs text-gray-400 line-through font-lato'>{formatPrice(product.price)}</span>
+                            <span className='text-sm font-bold font-montserrat text-[#0A1F44]'>{formatPrice(discountedPrice)} each</span>
+                          </div>
+                          <p className='text-xs text-[#E8553A] font-lato font-semibold'>You save {formatPrice(saving)}</p>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Variant picker — size/color (only rendered when the product
                 actually has more than one purchasable variant; the dashboard's
@@ -806,7 +901,7 @@ export default function ProductDetailClient({ product, related }: Props) {
             <div className='flex items-center gap-4 mb-6'>
               <div className='flex items-center border border-gray-200 rounded-xl overflow-hidden'>
                 <button
-                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  onClick={() => setQuantityWithTier(Math.max(1, quantity - 1))}
                   className='w-11 h-11 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
                 >
                   <MinusIcon size={16} />
@@ -816,7 +911,7 @@ export default function ProductDetailClient({ product, related }: Props) {
                 </span>
                 <button
                   onClick={() =>
-                    setQuantity(Math.min(product.stock, quantity + 1))
+                    setQuantityWithTier(Math.min(product.stock, quantity + 1))
                   }
                   className='w-11 h-11 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
                 >

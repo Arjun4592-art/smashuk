@@ -3,7 +3,12 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useCartStore } from '@/store/cartStore'
-import { SITE_NAME, FREE_SHIPPING_THRESHOLD, CONTACT_PHONE, CONTACT_EMAIL } from '@/lib/constants'
+import {
+  SITE_NAME,
+  FREE_SHIPPING_THRESHOLD,
+  CONTACT_PHONE,
+  CONTACT_EMAIL,
+} from '@/lib/constants'
 import {
   SearchIcon,
   CartIcon,
@@ -147,35 +152,44 @@ export default function Navbar() {
 
   return (
     <>
-      {/* ── Contact Info Bar (desktop only) ── */}
-      <div className='hidden lg:block bg-[#081530] text-white/70 text-[11px] font-lato'>
-        <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-1.5 flex items-center justify-end gap-5'>
-          <a
-            href={`tel:${CONTACT_PHONE}`}
-            className='hover:text-white transition-colors'
-          >
-            Need help? Call us {CONTACT_PHONE}
-          </a>
-          <a
-            href={`mailto:${CONTACT_EMAIL}`}
-            className='hover:text-white transition-colors'
-          >
-            {CONTACT_EMAIL}
-          </a>
-        </div>
-      </div>
+      {/* ── Announcement Bar ──
+          Promo text auto-scrolls (marquee) on the left; contact info
+          (phone/email) stays fixed on the right, desktop only. */}
+      <div className='bg-[#0A1F44] text-white text-xs font-lato tracking-wide'>
+        <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center'>
+          {/* Scrolling promo */}
+          <div className='flex-1 min-w-0 overflow-hidden py-2.5'>
+            <div className='flex items-center w-max animate-scroll'>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <span
+                  key={i}
+                  className='flex items-center gap-2 shrink-0 whitespace-nowrap pr-16'
+                >
+                  🚚 Free shipping on orders above £{FREE_SHIPPING_THRESHOLD}
+                  &nbsp;·&nbsp; Use code{' '}
+                  <span className='text-[#E8553A] font-bold'>SMASH10</span> for
+                  10% off &nbsp;·&nbsp; 🏆 UK&apos;s #1 Racket Sports Store
+                </span>
+              ))}
+            </div>
+          </div>
 
-      {/* ── Announcement Bar ── */}
-      <div className='bg-[#0A1F44] text-white text-xs py-2.5 text-center font-lato tracking-wide'>
-        <span className='hidden sm:inline'>
-          🚚 Free shipping on orders above £{FREE_SHIPPING_THRESHOLD} &nbsp;·&nbsp; Use code{' '}
-          <span className='text-[#E8553A] font-bold'>SMASH10</span> for 10% off
-          &nbsp;·&nbsp; 🏆 UK&apos;s #1 Racket Sports Store
-        </span>
-        <span className='sm:hidden'>
-          🚚 Free shipping above £{FREE_SHIPPING_THRESHOLD} · Code{' '}
-          <span className='text-[#E8553A] font-bold'>SMASH10</span>
-        </span>
+          {/* Fixed contact info — desktop only */}
+          <div className='hidden lg:flex items-center gap-5 pl-6 ml-4 py-1.5 shrink-0 text-white/70 border-l border-white/10'>
+            <a
+              href={`tel:${CONTACT_PHONE}`}
+              className='hover:text-white transition-colors whitespace-nowrap'
+            >
+              Need help? Call us {CONTACT_PHONE}
+            </a>
+            <a
+              href={`mailto:${CONTACT_EMAIL}`}
+              className='hover:text-white transition-colors whitespace-nowrap'
+            >
+              {CONTACT_EMAIL}
+            </a>
+          </div>
+        </div>
       </div>
 
       {/* ── Main Header ── */}
@@ -342,16 +356,24 @@ export default function Navbar() {
                           : 'opacity-0 -translate-y-1 pointer-events-none'
                       }`}
                       style={{
-                        width: `min(92vw, ${
+                        width: `min(94vw, ${
                           menu.columns.length >= 4
-                            ? '720px'
+                            ? '820px'
                             : menu.columns.length === 3
-                              ? '560px'
-                              : '420px'
+                              ? '640px'
+                              : // 2-column menus that also carry a second
+                                // featured card (e.g. Local Store's "Our
+                                // Store" + "Emergency Restring Service" tiles)
+                                // were cramped at 480px — the two image cards
+                                // barely had room to breathe. Give those the
+                                // same width as a 3-column menu.
+                                'featured2' in menu && menu.featured2
+                                ? '640px'
+                                : '480px'
                         })`,
                       }}
                     >
-                      <div className='bg-white rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.14)] border border-[#E5E7EB] p-5'>
+                      <div className='bg-white rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.14)] border border-[#E5E7EB] p-6'>
                         <div
                           className='grid gap-x-6 gap-y-4'
                           style={{
@@ -361,16 +383,16 @@ export default function Navbar() {
                         >
                           {menu.columns.map((col) => (
                             <div key={col.heading}>
-                              <p className='font-montserrat font-black text-[10px] uppercase tracking-[0.15em] text-[#9CA3AF] mb-3'>
+                              <p className='font-montserrat font-black text-[11px] uppercase tracking-[0.15em] text-[#9CA3AF] mb-3.5'>
                                 {col.heading}
                               </p>
-                              <ul className='space-y-1'>
+                              <ul className='space-y-1.5'>
                                 {col.links.map((link) => (
                                   <li key={link.href}>
                                     <Link
                                       href={link.href}
                                       onClick={() => setActiveMegaMenu(null)}
-                                      className='flex items-center gap-1.5 text-[13px] font-lato text-[#4B5563] hover:text-[#E8553A] py-1 transition-colors group/link'
+                                      className='flex items-center gap-1.5 text-sm font-lato text-[#4B5563] hover:text-[#E8553A] py-1 transition-colors group/link'
                                     >
                                       <span className='w-1 h-1 rounded-full bg-[#E5E7EB] group-hover/link:bg-[#E8553A] transition-colors shrink-0' />
                                       {link.label}
@@ -389,32 +411,59 @@ export default function Navbar() {
                               : 'grid-cols-1'
                           }`}
                         >
-                          {[menu.featured, (menu as any).featured2].filter(Boolean).map(
-                            (feat: any) => (
-                              <Link
-                                key={feat.href}
-                                href={feat.href}
-                                onClick={() => setActiveMegaMenu(null)}
-                                className='flex items-center justify-between gap-3 px-4 py-3 bg-[#F2F4F7] hover:bg-[#E8553A]/6 rounded-xl border border-transparent hover:border-[#E8553A]/20 transition-all group/feat'
-                              >
-                                <div>
-                                  <p className='font-montserrat font-black text-[13px] text-[#0A1F44] group-hover/feat:text-[#E8553A] transition-colors'>
-                                    {feat.label}
-                                  </p>
-                                  <p className='font-lato text-[11px] text-[#9CA3AF] mt-0.5'>
-                                    {feat.description}
-                                  </p>
-                                </div>
-                                <span className='flex items-center gap-1 text-[12px] font-bold font-montserrat text-[#E8553A] whitespace-nowrap shrink-0'>
-                                  {feat.cta}
-                                  <ArrowRightIcon
-                                    size={11}
-                                    className='group-hover/feat:translate-x-1 transition-transform'
+                          {[menu.featured, (menu as any).featured2]
+                            .filter(Boolean)
+                            .map((feat: any) =>
+                              feat.image ? (
+                                // Image-card style tile (used by Local Store —
+                                // matches the photo + label + description promo
+                                // cards from the original store's mega menu).
+                                <Link
+                                  key={feat.href}
+                                  href={feat.href}
+                                  onClick={() => setActiveMegaMenu(null)}
+                                  className='block rounded-xl overflow-hidden border border-transparent hover:border-[#E8553A]/20 transition-all group/feat bg-[#F2F4F7]'
+                                >
+                                  {/* TODO: replace src in mega-menu-data.ts with your own photo */}
+                                  <img
+                                    src={feat.image}
+                                    alt={feat.label}
+                                    className='w-full h-32 object-cover'
                                   />
-                                </span>
-                              </Link>
-                            ),
-                          )}
+                                  <div className='px-4 py-3'>
+                                    <p className='font-montserrat font-black text-sm text-[#0A1F44] group-hover/feat:text-[#E8553A] transition-colors'>
+                                      {feat.label}
+                                    </p>
+                                    <p className='font-lato text-[12px] text-[#9CA3AF] mt-0.5 line-clamp-2'>
+                                      {feat.description}
+                                    </p>
+                                  </div>
+                                </Link>
+                              ) : (
+                                <Link
+                                  key={feat.href}
+                                  href={feat.href}
+                                  onClick={() => setActiveMegaMenu(null)}
+                                  className='flex items-center justify-between gap-3 px-4 py-3.5 bg-[#F2F4F7] hover:bg-[#E8553A]/6 rounded-xl border border-transparent hover:border-[#E8553A]/20 transition-all group/feat'
+                                >
+                                  <div>
+                                    <p className='font-montserrat font-black text-sm text-[#0A1F44] group-hover/feat:text-[#E8553A] transition-colors'>
+                                      {feat.label}
+                                    </p>
+                                    <p className='font-lato text-[12px] text-[#9CA3AF] mt-0.5'>
+                                      {feat.description}
+                                    </p>
+                                  </div>
+                                  <span className='flex items-center gap-1 text-[13px] font-bold font-montserrat text-[#E8553A] whitespace-nowrap shrink-0'>
+                                    {feat.cta}
+                                    <ArrowRightIcon
+                                      size={11}
+                                      className='group-hover/feat:translate-x-1 transition-transform'
+                                    />
+                                  </span>
+                                </Link>
+                              ),
+                            )}
                         </div>
                       </div>
                     </div>

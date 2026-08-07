@@ -101,6 +101,11 @@ export default function EditProductPage({
     metaKeywords: '',
   })
 
+  // Tier pricing — stored separately since it's an array
+  const [tierPricing, setTierPricing] = useState<
+    { minQty: number; maxQty?: number; discountPct: number }[]
+  >([])
+
   const [variants, setVariants] = useState<Variant[]>([
     { id: '1', size: '', color: '', sku: '', price: '', stock: '' },
   ])
@@ -194,7 +199,12 @@ export default function EditProductPage({
           'cost_price',
           'low_stock_alert',
           'taxable',
+          'tier_pricing',
         ])
+        // Load tier pricing
+        if (Array.isArray(p.metadata?.tier_pricing)) {
+          setTierPricing(p.metadata.tier_pricing)
+        }
         if (Array.isArray(p.metadata?.specs) && p.metadata.specs.length > 0) {
           setSpecs(p.metadata.specs)
         } else if (p.metadata) {
@@ -224,9 +234,7 @@ export default function EditProductPage({
                 v.options?.find((o: any) => o.option?.title === 'Color')
                   ?.value ?? '',
               sku: v.sku ?? '',
-              price: v.prices?.[0]?.amount
-                ? String(v.prices[0].amount)
-                : '',
+              price: v.prices?.[0]?.amount ? String(v.prices[0].amount) : '',
               stock: String(v.inventory_quantity ?? ''),
             })),
           )
@@ -460,6 +468,7 @@ export default function EditProductPage({
         cost_price: form.costPrice ? parseFloat(form.costPrice) : undefined,
         low_stock_alert: form.lowStockAlert ? Number(form.lowStockAlert) : 5,
         taxable: form.taxable,
+        tier_pricing: tierPricing.length > 0 ? tierPricing : undefined,
       },
     }
   }
@@ -1167,6 +1176,168 @@ export default function EditProductPage({
                         className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.taxable ? 'right-0.5' : 'left-0.5'}`}
                       />
                     </button>
+                  </div>
+
+                  {/* ── Volume / Tier Pricing ── */}
+                  <div className='border border-[#E1E3E5] rounded-lg overflow-hidden'>
+                    <div className='flex items-center justify-between px-4 py-3 bg-[#F6F6F7] border-b border-[#E1E3E5]'>
+                      <div>
+                        <p className='text-[13px] font-medium text-[#202223]'>
+                          Volume / Tier Pricing
+                        </p>
+                        <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
+                          e.g. Buy 2–9 = 12% off, Buy 10+ = 20% off
+                        </p>
+                      </div>
+                      <button
+                        onClick={() =>
+                          setTierPricing((prev) => [
+                            ...prev,
+                            {
+                              minQty: (prev[prev.length - 1]?.maxQty ?? 1) + 1,
+                              maxQty: undefined,
+                              discountPct: 10,
+                            },
+                          ])
+                        }
+                        className='flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-[#008060] border border-[#008060]/30 rounded-lg hover:bg-[#008060]/5 transition-colors bg-white'
+                      >
+                        + Add tier
+                      </button>
+                    </div>
+
+                    {tierPricing.length === 0 ? (
+                      <div className='px-4 py-6 text-center'>
+                        <p className='text-[12.5px] text-[#8C9196]'>
+                          No tiers yet. Click "Add tier" to set volume
+                          discounts.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className='divide-y divide-[#F1F1F1]'>
+                        {/* Header row */}
+                        <div className='grid grid-cols-[1fr_1fr_1fr_auto] gap-3 px-4 py-2 bg-[#FAFAFA]'>
+                          <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                            Min Qty
+                          </span>
+                          <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                            Max Qty
+                          </span>
+                          <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                            Discount %
+                          </span>
+                          <span className='w-8' />
+                        </div>
+                        {tierPricing.map((tier, i) => (
+                          <div
+                            key={i}
+                            className='grid grid-cols-[1fr_1fr_1fr_auto] gap-3 items-center px-4 py-3'
+                          >
+                            <input
+                              type='number'
+                              min='1'
+                              value={tier.minQty}
+                              onChange={(e) => {
+                                const updated = [...tierPricing]
+                                updated[i] = {
+                                  ...updated[i],
+                                  minQty: Number(e.target.value),
+                                }
+                                setTierPricing(updated)
+                              }}
+                              className='w-full px-2.5 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                              placeholder='2'
+                            />
+                            <input
+                              type='number'
+                              min='1'
+                              value={tier.maxQty ?? ''}
+                              onChange={(e) => {
+                                const updated = [...tierPricing]
+                                updated[i] = {
+                                  ...updated[i],
+                                  maxQty: e.target.value
+                                    ? Number(e.target.value)
+                                    : undefined,
+                                }
+                                setTierPricing(updated)
+                              }}
+                              className='w-full px-2.5 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                              placeholder='∞ (no limit)'
+                            />
+                            <div className='relative'>
+                              <input
+                                type='number'
+                                min='1'
+                                max='99'
+                                value={tier.discountPct}
+                                onChange={(e) => {
+                                  const updated = [...tierPricing]
+                                  updated[i] = {
+                                    ...updated[i],
+                                    discountPct: Number(e.target.value),
+                                  }
+                                  setTierPricing(updated)
+                                }}
+                                className='w-full pl-2.5 pr-6 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                                placeholder='10'
+                              />
+                              <span className='absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#8C9196]'>
+                                %
+                              </span>
+                            </div>
+                            <button
+                              onClick={() =>
+                                setTierPricing((prev) =>
+                                  prev.filter((_, j) => j !== i),
+                                )
+                              }
+                              className='w-8 h-8 flex items-center justify-center text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg bg-transparent border-none cursor-pointer text-base'
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        {/* Preview */}
+                        {form.price && (
+                          <div className='px-4 py-3 bg-[#F9F9F9] border-t border-[#E1E3E5]'>
+                            <p className='text-[11.5px] font-semibold text-[#6D7175] mb-2'>
+                              Preview (base price £{form.price})
+                            </p>
+                            <div className='space-y-1'>
+                              <p className='text-[11.5px] text-[#8C9196]'>
+                                Buy 1 →{' '}
+                                <strong className='text-[#202223]'>
+                                  £{parseFloat(form.price).toFixed(2)}
+                                </strong>{' '}
+                                each
+                              </p>
+                              {tierPricing.map((t, i) => {
+                                const discounted = (
+                                  parseFloat(form.price) *
+                                  (1 - t.discountPct / 100)
+                                ).toFixed(2)
+                                const label = t.maxQty
+                                  ? `${t.minQty}–${t.maxQty}`
+                                  : `${t.minQty}+`
+                                return (
+                                  <p
+                                    key={i}
+                                    className='text-[11.5px] text-[#8C9196]'
+                                  >
+                                    Buy {label} →{' '}
+                                    <strong className='text-[#008060]'>
+                                      £{discounted}
+                                    </strong>{' '}
+                                    each ({t.discountPct}% off)
+                                  </p>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

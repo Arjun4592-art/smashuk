@@ -7,6 +7,7 @@ import NextAuth from 'next-auth'
 import Google from 'next-auth/providers/google'
 import Credentials from 'next-auth/providers/credentials'
 import { medusaStore } from '@/lib/medusa'
+import { deriveGoogleShadowPassword } from '@/lib/api/google-shadow'
 
 // ARCHITECTURE NOTE: Medusa's `auth-google` provider only supports its own
 // full authorization-code REDIRECT flow — confirmed live: passing the
@@ -26,21 +27,9 @@ import { medusaStore } from '@/lib/medusa'
 // Uses the globally available Web Crypto API (`crypto.subtle`) instead of
 // importing Node's `crypto` module — works the same in both the Node and
 // Edge runtimes with no extra import.
-async function deriveGoogleShadowPassword(email: string): Promise<string> {
-  const secret = process.env.NEXTAUTH_SECRET
-  if (!secret) {
-    throw new Error(
-      'NEXTAUTH_SECRET is required to derive the Google shadow password',
-    )
-  }
-  const data = new TextEncoder().encode(
-    `google-shadow:${email.toLowerCase()}:${secret}`,
-  )
-  const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
+// (moved to lib/api/google-shadow.ts so /api/auth/me can reuse it to retry
+// the sync on a later request if it failed during the original OAuth
+// callback — see the comment there for why that retry matters)
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [

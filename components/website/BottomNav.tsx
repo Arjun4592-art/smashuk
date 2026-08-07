@@ -123,28 +123,62 @@ export default function BottomNav() {
                         </div>
                       ))}
                     </div>
-                    <div className='mt-5 pt-4 border-t border-[#F2F4F7]'>
-                      <Link
-                        href={menu.featured.href}
-                        onClick={() => setActiveMenu(null)}
-                        className='flex items-center justify-between px-4 py-3 bg-[#F2F4F7] hover:bg-[#E8553A]/6 rounded-xl border border-transparent hover:border-[#E8553A]/20 transition-all group/feat'
-                      >
-                        <div>
-                          <p className='font-montserrat font-black text-[13px] text-[#0A1F44] group-hover/feat:text-[#E8553A] transition-colors'>
-                            {menu.featured.label}
-                          </p>
-                          <p className='font-lato text-[11px] text-[#9CA3AF] mt-0.5'>
-                            {menu.featured.description}
-                          </p>
-                        </div>
-                        <span className='flex items-center gap-1 text-[12px] font-bold font-montserrat text-[#E8553A] whitespace-nowrap ml-4'>
-                          {menu.featured.cta}
-                          <ArrowRightIcon
-                            size={11}
-                            className='group-hover/feat:translate-x-1 transition-transform'
-                          />
-                        </span>
-                      </Link>
+                    <div
+                      className={`mt-5 pt-4 border-t border-[#F2F4F7] grid gap-3 ${
+                        'featured2' in menu && (menu as any).featured2
+                          ? 'grid-cols-1 sm:grid-cols-2'
+                          : 'grid-cols-1'
+                      }`}
+                    >
+                      {[menu.featured, (menu as any).featured2].filter(Boolean).map(
+                        (feat: any) =>
+                          feat.image ? (
+                            <Link
+                              key={feat.href}
+                              href={feat.href}
+                              onClick={() => setActiveMenu(null)}
+                              className='block rounded-xl overflow-hidden border border-transparent hover:border-[#E8553A]/20 transition-all group/feat bg-[#F2F4F7]'
+                            >
+                              {/* TODO: replace src in mega-menu-data.ts with your own photo */}
+                              <img
+                                src={feat.image}
+                                alt={feat.label}
+                                className='w-full h-24 object-cover'
+                              />
+                              <div className='px-3 py-2.5'>
+                                <p className='font-montserrat font-black text-[13px] text-[#0A1F44] group-hover/feat:text-[#E8553A] transition-colors'>
+                                  {feat.label}
+                                </p>
+                                <p className='font-lato text-[11px] text-[#9CA3AF] mt-0.5 line-clamp-2'>
+                                  {feat.description}
+                                </p>
+                              </div>
+                            </Link>
+                          ) : (
+                            <Link
+                              key={feat.href}
+                              href={feat.href}
+                              onClick={() => setActiveMenu(null)}
+                              className='flex items-center justify-between px-4 py-3 bg-[#F2F4F7] hover:bg-[#E8553A]/6 rounded-xl border border-transparent hover:border-[#E8553A]/20 transition-all group/feat'
+                            >
+                              <div>
+                                <p className='font-montserrat font-black text-[13px] text-[#0A1F44] group-hover/feat:text-[#E8553A] transition-colors'>
+                                  {feat.label}
+                                </p>
+                                <p className='font-lato text-[11px] text-[#9CA3AF] mt-0.5'>
+                                  {feat.description}
+                                </p>
+                              </div>
+                              <span className='flex items-center gap-1 text-[12px] font-bold font-montserrat text-[#E8553A] whitespace-nowrap ml-4'>
+                                {feat.cta}
+                                <ArrowRightIcon
+                                  size={11}
+                                  className='group-hover/feat:translate-x-1 transition-transform'
+                                />
+                              </span>
+                            </Link>
+                          ),
+                      )}
                     </div>
                   </div>
                 </div>

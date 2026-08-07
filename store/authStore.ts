@@ -2,6 +2,7 @@
 
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { signOut } from 'next-auth/react'
 import type { User } from '@/types'
 import type { Surface } from '@/lib/api/auth-cookie'
 
@@ -36,12 +37,30 @@ export const useAuthStore = create<AuthState>()(
       // silently logged the dashboard out too (and vice versa).
       logout: (surface: Surface): void => {
         set({ user: null, isAuthenticated: false, isLoggingOut: true })
-        fetch('/api/auth/logout', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ surface }),
-        })
+
+        // BUG FIX: /api/auth/logout only ever clears THIS app's own
+        // surface cookies (smashuk-auth / smashuk-token etc). It never
+        // touched NextAuth's own session cookie. For customers who signed
+        // in with Google, that NextAuth session kept living on completely
+        // independently — so the moment they landed back on /login,
+        // useSession() there still saw a logged-in Google session and the
+        // "sync website session" effect silently logged them straight
+        // back in. Only the website surface is ever backed by NextAuth
+        // (dashboard/pos use their own PIN/password auth, no NextAuth
+        // session exists for them), so only sign out of NextAuth here.
+        const requests: Promise<unknown>[] = [
+          fetch('/api/auth/logout', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ surface }),
+          }),
+        ]
+        if (surface === 'website') {
+          requests.push(signOut({ redirect: false }))
+        }
+
+        Promise.all(requests)
           .catch((err) => console.error('Logout error:', err))
           .finally(() => set({ isLoggingOut: false }))
       },

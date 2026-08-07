@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { usePOSStore } from '@/store/posStore'
 import type { ReturnItem } from '@/store/posStore'
 import { markPOSOrderReturned, type PosOrderRecord } from '@/lib/api/pos'
@@ -33,6 +33,23 @@ export default function ReturnModal({ orders, onReturned, onClose }: Props) {
   >({})
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Lock background scroll while open. The Orders list scrolls inside its
+  // own #pos-orders-scroll-area container (not <body>), so that has to be
+  // locked directly too — see same fix in OrderDetailModal.tsx.
+  useEffect(() => {
+    const scrollEl = document.getElementById('pos-orders-scroll-area')
+    const prevBodyOverflow = document.body.style.overflow
+    const prevElOverflow = scrollEl?.style.overflow ?? ''
+
+    document.body.style.overflow = 'hidden'
+    if (scrollEl) scrollEl.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow
+      if (scrollEl) scrollEl.style.overflow = prevElOverflow
+    }
+  }, [])
 
   const filteredOrders = completedOrders.filter(
     (o) =>
@@ -106,9 +123,11 @@ export default function ReturnModal({ orders, onReturned, onClose }: Props) {
       // write to Medusa's real inventory. A true inventory reversal on
       // return would need Medusa's Inventory API and is a separate piece
       // of work from making order history itself Medusa-backed.
-      usePOSStore.getState().restoreStock(
-        items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
-      )
+      usePOSStore
+        .getState()
+        .restoreStock(
+          items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+        )
       onReturned(selectedOrder.medusaOrderId ?? selectedOrder.id)
       setStep('success')
     } catch (err: unknown) {
@@ -375,7 +394,10 @@ export default function ReturnModal({ orders, onReturned, onClose }: Props) {
             )}
 
             {error && (
-              <p className='px-5 -mt-2 mb-3 text-xs' style={{ color: '#D82C0D' }}>
+              <p
+                className='px-5 -mt-2 mb-3 text-xs'
+                style={{ color: '#D82C0D' }}
+              >
                 {error}
               </p>
             )}

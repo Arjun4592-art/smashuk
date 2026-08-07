@@ -154,6 +154,7 @@ export async function PUT(
     // "delivered". For a pickup confirmation on an already-fulfilled
     // order, explicitly push it the rest of the way to "delivered".
     let delivered = false
+    let deliverError = result.deliverError
     if (markDelivered && result.alreadyFulfilled) {
       try {
         const deliverResult = await markOrderDelivered(id, medusaServiceFetch)
@@ -162,6 +163,7 @@ export async function PUT(
         // Order may already be delivered, or genuinely can't be (e.g.
         // canceled) — don't fail the whole request, the fulfillment state
         // itself is still valid; just surface nothing changed.
+        deliverError = deliverErr?.message ?? 'Failed to mark as delivered'
         console.warn(
           '[API] POS order PUT — markOrderDelivered fallback failed:',
           deliverErr?.message,
@@ -173,6 +175,10 @@ export async function PUT(
       ok: true,
       action,
       alreadyFulfilled: !!result.alreadyFulfilled && !delivered,
+      // Non-fatal: fulfillment itself succeeded even if this is set. Lets
+      // the POS UI warn staff that Medusa still needs a manual "mark as
+      // delivered/picked up" instead of silently claiming success.
+      deliverError,
     })
   } catch (err: any) {
     console.error('[API] POS order PUT (fulfill) error:', err)

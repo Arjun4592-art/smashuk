@@ -15,7 +15,12 @@ const STATUS_STYLES: Record<string, string> = {
 }
 
 function formatCurrency(amount: number) {
-  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)
+  return new Intl.NumberFormat('en-GB', {
+    style: 'currency',
+    currency: 'GBP',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)
 }
 
 const STATUSES = ['All', 'Active', 'Draft', 'Archived']
@@ -292,7 +297,9 @@ export default function ProductsPage() {
   // metadata.specs = [{label, value}] shape the storefront's Specifications
   // tab reads (see app/api/admin/seed/route.ts), so CSV-imported products
   // show specs exactly like seeded ones instead of an empty tab.
-  const parseSpecifications = (raw: string): { label: string; value: string }[] => {
+  const parseSpecifications = (
+    raw: string,
+  ): { label: string; value: string }[] => {
     if (!raw || !raw.trim()) return []
     return raw
       .split(';')
@@ -348,7 +355,8 @@ export default function ProductsPage() {
       if (catRes.ok) {
         const catData = await catRes.json()
         ;(catData.categories ?? catData.product_categories ?? []).forEach(
-          (c: any) => categoryMap.set(String(c.name).toLowerCase().trim(), c.id),
+          (c: any) =>
+            categoryMap.set(String(c.name).toLowerCase().trim(), c.id),
         )
       }
     } catch {
@@ -404,14 +412,23 @@ export default function ProductsPage() {
         status,
         categories: categoryId ? [{ id: categoryId }] : [],
         thumbnail: imageUrls[0] || undefined,
-        images: imageUrls.length > 0 ? imageUrls.map((url) => ({ url })) : undefined,
+        images:
+          imageUrls.length > 0 ? imageUrls.map((url) => ({ url })) : undefined,
         options: [{ title: 'Default', values: ['Default'] }],
         variants: [
           {
             title: 'Default',
             sku: getField(row, 'SKU') || undefined,
             manage_inventory: true,
-            prices: price > 0 ? [{ amount: Math.round(price * 100) / 100, currency_code: 'gbp' }] : [],
+            prices:
+              price > 0
+                ? [
+                    {
+                      amount: Math.round(price * 100) / 100,
+                      currency_code: 'gbp',
+                    },
+                  ]
+                : [],
             options: { Default: 'Default' },
           },
         ],
@@ -524,7 +541,8 @@ export default function ProductsPage() {
                     />
                   </div>
                   <p className='text-[12.5px] text-[#8C9196]'>
-                    {importProgress.done} of {importProgress.total} rows processed…
+                    {importProgress.done} of {importProgress.total} rows
+                    processed…
                   </p>
                 </div>
               ) : (
@@ -763,7 +781,7 @@ export default function ProductsPage() {
                       className='w-4 h-4 rounded accent-[#008060] cursor-pointer'
                     />
                   </th>
-                  <th className='px-4 py-3 text-left text-[12px] font-semibold text-[#6D7175] uppercase tracking-wide'>
+                  <th className='px-4 py-3 text-left text-[12px] font-semibold text-[#6D7175] uppercase tracking-wide w-[35%] max-w-[300px]'>
                     Product
                   </th>
                   <th className='px-4 py-3 text-left text-[12px] font-semibold text-[#6D7175] uppercase tracking-wide'>
@@ -845,8 +863,8 @@ export default function ProductsPage() {
                           className='w-4 h-4 rounded accent-[#008060] cursor-pointer'
                         />
                       </td>
-                      <td className='px-4 py-3'>
-                        <div className='flex items-center gap-3'>
+                      <td className='px-4 py-3 max-w-[300px] w-[35%]'>
+                        <div className='flex items-center gap-3 min-w-0'>
                           {product.image ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -862,7 +880,7 @@ export default function ProductsPage() {
                           <div className='min-w-0'>
                             <Link
                               href={`/dashboard/products/${product.id}`}
-                              className='text-[13px] font-medium text-[#202223] hover:text-[#008060] no-underline transition-colors truncate block'
+                              className='text-[13px] font-medium text-[#202223] hover:text-[#008060] no-underline transition-colors truncate block max-w-[220px]'
                             >
                               {product.name}
                             </Link>

@@ -315,34 +315,79 @@ function calcScore(page: Partial<SEOPage>): number {
 // ─── Static page seed (shown while loading) ───────────────────────
 const STATIC_SEED: SEOPage[] = [
   {
-    id: 'static-home', title: 'Home Page', path: '/', type: 'home',
-    storageType: 'static', pageKey: 'home',
-    metaTitle: '', metaDescription: '', metaKeywords: '',
-    ogImage: '', canonical: '', noIndex: false, score: 0,
+    id: 'static-home',
+    title: 'Home Page',
+    path: '/',
+    type: 'home',
+    storageType: 'static',
+    pageKey: 'home',
+    metaTitle: '',
+    metaDescription: '',
+    metaKeywords: '',
+    ogImage: '',
+    canonical: '',
+    noIndex: false,
+    score: 0,
   },
   {
-    id: 'static-shop', title: 'Shop Page', path: '/shop', type: 'shop',
-    storageType: 'static', pageKey: 'shop',
-    metaTitle: '', metaDescription: '', metaKeywords: '',
-    ogImage: '', canonical: '', noIndex: false, score: 0,
+    id: 'static-shop',
+    title: 'Shop Page',
+    path: '/shop',
+    type: 'shop',
+    storageType: 'static',
+    pageKey: 'shop',
+    metaTitle: '',
+    metaDescription: '',
+    metaKeywords: '',
+    ogImage: '',
+    canonical: '',
+    noIndex: false,
+    score: 0,
   },
   {
-    id: 'static-about', title: 'About Page', path: '/about', type: 'home',
-    storageType: 'static', pageKey: 'about',
-    metaTitle: '', metaDescription: '', metaKeywords: '',
-    ogImage: '', canonical: '', noIndex: false, score: 0,
+    id: 'static-about',
+    title: 'About Page',
+    path: '/about',
+    type: 'home',
+    storageType: 'static',
+    pageKey: 'about',
+    metaTitle: '',
+    metaDescription: '',
+    metaKeywords: '',
+    ogImage: '',
+    canonical: '',
+    noIndex: false,
+    score: 0,
   },
   {
-    id: 'static-contact', title: 'Contact Page', path: '/contact', type: 'home',
-    storageType: 'static', pageKey: 'contact',
-    metaTitle: '', metaDescription: '', metaKeywords: '',
-    ogImage: '', canonical: '', noIndex: false, score: 0,
+    id: 'static-contact',
+    title: 'Contact Page',
+    path: '/contact',
+    type: 'home',
+    storageType: 'static',
+    pageKey: 'contact',
+    metaTitle: '',
+    metaDescription: '',
+    metaKeywords: '',
+    ogImage: '',
+    canonical: '',
+    noIndex: false,
+    score: 0,
   },
   {
-    id: 'static-local-store', title: 'Local Store Page', path: '/local-store', type: 'home',
-    storageType: 'static', pageKey: 'local-store',
-    metaTitle: '', metaDescription: '', metaKeywords: '',
-    ogImage: '', canonical: '', noIndex: false, score: 0,
+    id: 'static-local-store',
+    title: 'Local Store Page',
+    path: '/local-store',
+    type: 'home',
+    storageType: 'static',
+    pageKey: 'local-store',
+    metaTitle: '',
+    metaDescription: '',
+    metaKeywords: '',
+    ogImage: '',
+    canonical: '',
+    noIndex: false,
+    score: 0,
   },
 ]
 
@@ -999,7 +1044,7 @@ export default function DashboardSEOPage() {
                 OG Preview
               </h3>
               <div className='border border-[#E1E3E5] rounded-xl overflow-hidden max-w-100'>
-                <div className='aspect-video bg-gradient-to-br from-[#0a1628] to-[#162847] flex items-center justify-center'>
+                <div className='aspect-video bg-linear-to-br from-[#0a1628] to-[#162847] flex items-center justify-center'>
                   <div className='text-white/20 text-center'>
                     <div className='flex justify-center mb-2 text-white/30'>
                       {Icons.image}
@@ -1015,8 +1060,8 @@ export default function DashboardSEOPage() {
                     Smash Pro — Premium Racket Sports Equipment UK
                   </p>
                   <p className='text-[12px] text-[#6D7175] mt-0.5 line-clamp-2'>
-                    Shop premium badminton, tennis, padel and squash
-                    equipment with fast UK-wide delivery.
+                    Shop premium badminton, tennis, padel and squash equipment
+                    with fast UK-wide delivery.
                   </p>
                 </div>
               </div>

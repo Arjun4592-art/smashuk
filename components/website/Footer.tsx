@@ -34,7 +34,7 @@ const QUICK_LINKS = [
 
 const PARTNERSHIP_LINKS = [
   { label: 'Club Partnership Programme', href: '/local-store/partnerships' },
-  { label: 'Club Demo Programme', href: '/local-store/racket-demo' },
+  { label: 'Club Demo Programme', href: '/local-store/club-demo-programme' },
   {
     label: 'Shuttlecock Partnership',
     href: '/local-store/shuttlecock-partnership',

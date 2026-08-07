@@ -106,7 +106,7 @@ export default function GiftCardPurchaseClient({ product, variants }: Props) {
         {/* ── Left: live card preview ── */}
         <div>
           <div className='sticky top-28'>
-            <div className='relative aspect-[1.6/1] rounded-2xl overflow-hidden shadow-xl bg-gradient-to-br from-[#0A1F44] via-[#132a5c] to-[#E8553A]'>
+            <div className='relative aspect-[1.6/1] rounded-2xl overflow-hidden shadow-xl bg-linear-to-br from-[#0A1F44] via-[#132a5c] to-[#E8553A]'>
               {/* Decorative texture */}
               <div className='absolute inset-0 opacity-[0.07]'>
                 <div className='absolute -right-8 -top-8 w-56 h-56 rounded-full border-[24px] border-white' />

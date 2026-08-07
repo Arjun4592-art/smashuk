@@ -10,7 +10,13 @@ import {
   ChevronRightIcon,
 } from '@/components/ui/Icons'
 
-type StatSlot = 'products' | 'brands' | 'rating' | 'delivery' | 'authentic' | 'returns'
+type StatSlot =
+  | 'products'
+  | 'brands'
+  | 'rating'
+  | 'delivery'
+  | 'authentic'
+  | 'returns'
 
 // BUG FIX: each slide's stat numbers (500+ Products, 20+ Top Brands,
 // 4.9★ Avg Rating, etc.) used to be hardcoded and never matched the real
@@ -86,7 +92,9 @@ const STATIC_STAT_COPY: Record<
 function buildStats(
   slots: StatSlot[],
   sport: string,
-  bySport: Record<string, { productCount: number; brandCount: number }> | undefined,
+  bySport:
+    | Record<string, { productCount: number; brandCount: number }>
+    | undefined,
   avgRating: number | null | undefined,
 ) {
   const sportStats = bySport?.[sport]
@@ -121,7 +129,12 @@ export default function Hero() {
     () =>
       STATIC_SLIDES.map((s) => ({
         ...s,
-        stats: buildStats(s.statSlots, s.sport, brandStats?.bySport, brandStats?.avgRating),
+        stats: buildStats(
+          s.statSlots,
+          s.sport,
+          brandStats?.bySport,
+          brandStats?.avgRating,
+        ),
       })),
     [brandStats],
   )
@@ -171,7 +184,7 @@ export default function Hero() {
               alt={s.sport}
               className='w-full h-full object-cover'
             />
-            <div className='absolute inset-0 bg-gradient-to-r from-[#0A1F44]/92 via-[#0A1F44]/55 to-[#0A1F44]/10' />
+            <div className='absolute inset-0 bg-linear-to-r from-[#0A1F44]/92 via-[#0A1F44]/55 to-[#0A1F44]/10' />
           </div>
         ))}
       </div>
@@ -254,7 +267,6 @@ export default function Hero() {
               ))}
             </div>
           </div>
-
         </div>
       </div>
 

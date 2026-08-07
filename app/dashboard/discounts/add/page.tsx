@@ -230,8 +230,15 @@ type CustomerEligibility = 'all' | 'specific' | 'new_customers'
 
 interface AutoRule {
   id: string
-  type: 'min_amount' | 'min_quantity' | 'specific_product' | 'first_order'
+  type:
+    | 'min_amount'
+    | 'min_quantity'
+    | 'specific_product'
+    | 'specific_category'
+    | 'first_order'
   value: string
+  // For specific_product: stores selected product objects
+  selectedProducts?: { id: string; title: string; thumbnail?: string }[]
 }
 
 const DISCOUNT_TYPES = [
@@ -294,9 +301,16 @@ const AUTO_RULE_OPTIONS = [
   },
   {
     type: 'specific_product' as const,
-    label: 'Specific product in cart',
-    desc: 'Product ID required',
-    placeholder: 'prod_xxxx',
+    label: 'Specific products',
+    desc: 'Search & select products',
+    placeholder: '',
+    prefix: '',
+  },
+  {
+    type: 'specific_category' as const,
+    label: 'Specific category',
+    desc: 'Apply to a product category',
+    placeholder: '',
     prefix: '',
   },
   {
@@ -455,9 +469,15 @@ function buildPromotionPayload(form: any, autoRules: AutoRule[]) {
         operator: 'gte',
         values: [{ value: rule.value }],
       })
-    if (rule.type === 'specific_product' && rule.value)
+    if (rule.type === 'specific_product' && rule.selectedProducts?.length)
       rules.push({
         attribute: 'product_id',
+        operator: 'in',
+        values: rule.selectedProducts.map((p) => ({ value: p.id })),
+      })
+    if (rule.type === 'specific_category' && rule.value)
+      rules.push({
+        attribute: 'product_category_id',
         operator: 'in',
         values: [{ value: rule.value }],
       })
@@ -540,6 +560,66 @@ function AddDiscountPageContent() {
 
   const [autoRules, setAutoRules] = useState<AutoRule[]>([])
   const [autoEnabled, setAutoEnabled] = useState(false)
+
+  // ── Product search modal state ───────────────────────────────────
+  const [productModalRuleId, setProductModalRuleId] = useState<string | null>(
+    null,
+  )
+  const [productSearch, setProductSearch] = useState('')
+  const [productSearchResults, setProductSearchResults] = useState<
+    { id: string; title: string; thumbnail?: string }[]
+  >([])
+  const [productSearchLoading, setProductSearchLoading] = useState(false)
+
+  // ── Category list state ──────────────────────────────────────────
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>(
+    [],
+  )
+
+  // Fetch categories once
+  useEffect(() => {
+    fetch('/api/admin/categories?limit=100')
+      .then((r) => r.json())
+      .then((d) =>
+        setCategories(
+          (d.product_categories ?? []).map((c: any) => ({
+            id: c.id,
+            name: c.name,
+          })),
+        ),
+      )
+      .catch(() => {})
+  }, [])
+
+  // Product search debounce
+  useEffect(() => {
+    if (!productModalRuleId) return
+    if (!productSearch.trim()) {
+      setProductSearchResults([])
+      return
+    }
+    setProductSearchLoading(true)
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/products?q=${encodeURIComponent(productSearch)}&limit=10`,
+        )
+        const data = await res.json()
+        setProductSearchResults(
+          (data.products ?? []).map((p: any) => ({
+            id: p.id,
+            title: p.title,
+            thumbnail: p.thumbnail,
+          })),
+        )
+      } catch {
+        setProductSearchResults([])
+      } finally {
+        setProductSearchLoading(false)
+      }
+    }, 350)
+    return () => clearTimeout(t)
+  }, [productSearch, productModalRuleId])
 
   // ── Edit mode: fetch existing promotion and prefill the form ─────
   // Previously there was no way to edit a discount at all — the list page
@@ -643,6 +723,23 @@ function AddDiscountPageContent() {
   const updateAutoRule = (id: string, value: string) =>
     setAutoRules((prev) => prev.map((r) => (r.id === id ? { ...r, value } : r)))
 
+  const toggleProductInRule = (
+    ruleId: string,
+    product: { id: string; title: string; thumbnail?: string },
+  ) => {
+    setAutoRules((prev) =>
+      prev.map((r) => {
+        if (r.id !== ruleId) return r
+        const existing = r.selectedProducts ?? []
+        const already = existing.find((p) => p.id === product.id)
+        const updated = already
+          ? existing.filter((p) => p.id !== product.id)
+          : [...existing, product]
+        return { ...r, selectedProducts: updated }
+      }),
+    )
+  }
+
   const previewValue = () => {
     if (form.type === 'percentage')
       return form.value ? `${form.value}% off` : '—'
@@ -709,7 +806,13 @@ function AddDiscountPageContent() {
             label: 'Auto rules configured',
             done:
               autoRules.length > 0 &&
-              autoRules.every((r) => r.type === 'first_order' || !!r.value),
+              autoRules.every(
+                (r) =>
+                  r.type === 'first_order' ||
+                  (r.type === 'specific_product'
+                    ? (r.selectedProducts?.length ?? 0) > 0
+                    : !!r.value),
+              ),
           },
         ]
       : []),
@@ -925,8 +1028,8 @@ function AddDiscountPageContent() {
                     />
                   </div>
                   <p className='col-span-2 text-[11.5px] text-[#B0B5BA] flex items-center gap-1'>
-                    {Icons.info} Applies automatically at checkout once the
-                    cart has this many items — no code needed.
+                    {Icons.info} Applies automatically at checkout once the cart
+                    has this many items — no code needed.
                   </p>
                 </div>
               )}
@@ -1024,15 +1127,14 @@ function AddDiscountPageContent() {
                             <p className='text-[12.5px] font-medium text-[#202223]'>
                               {opt.label}
                             </p>
-                            {rule.type !== 'first_order' && (
+
+                            {/* Numeric inputs: min_amount, min_quantity */}
+                            {(rule.type === 'min_amount' ||
+                              rule.type === 'min_quantity') && (
                               <div className='mt-1.5 max-w-[200px]'>
                                 <Input
                                   prefix={opt.prefix}
-                                  type={
-                                    rule.type === 'specific_product'
-                                      ? 'text'
-                                      : 'number'
-                                  }
+                                  type='number'
                                   value={rule.value}
                                   onChange={(e) =>
                                     updateAutoRule(
@@ -1045,6 +1147,64 @@ function AddDiscountPageContent() {
                                 />
                               </div>
                             )}
+
+                            {/* Specific products — search & multi-select */}
+                            {rule.type === 'specific_product' && (
+                              <div className='mt-1.5'>
+                                {(rule.selectedProducts ?? []).length > 0 && (
+                                  <div className='flex flex-wrap gap-1.5 mb-2'>
+                                    {(rule.selectedProducts ?? []).map((p) => (
+                                      <span
+                                        key={p.id}
+                                        className='flex items-center gap-1 px-2 py-0.5 bg-[#F2F7F5] border border-[#008060]/20 rounded-full text-[11px] text-[#008060] font-medium'
+                                      >
+                                        {p.title}
+                                        <button
+                                          onClick={() =>
+                                            toggleProductInRule(rule.id, p)
+                                          }
+                                          className='text-[#8C9196] hover:text-[#D82C0D] bg-transparent border-none cursor-pointer p-0 leading-none'
+                                        >
+                                          ×
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                <button
+                                  onClick={() => {
+                                    setProductModalRuleId(rule.id)
+                                    setProductSearch('')
+                                    setProductSearchResults([])
+                                  }}
+                                  className='text-[11.5px] text-[#2C6ECB] hover:underline bg-transparent border-none cursor-pointer p-0'
+                                >
+                                  + Search & add products
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Specific category — dropdown */}
+                            {rule.type === 'specific_category' && (
+                              <div className='mt-1.5 max-w-[220px]'>
+                                <select
+                                  value={rule.value}
+                                  onChange={(e) =>
+                                    updateAutoRule(rule.id, e.target.value)
+                                  }
+                                  className='w-full text-[12.5px] border border-[#E1E3E5] rounded-lg px-2.5 py-1.5 bg-white text-[#202223] focus:outline-none focus:border-[#008060]'
+                                >
+                                  <option value=''>— Select category —</option>
+                                  {categories.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            {/* First order */}
                             {rule.type === 'first_order' && (
                               <p className='text-[11.5px] text-[#008060] mt-0.5'>
                                 Applies on customer&apos;s first order
@@ -1497,6 +1657,159 @@ function AddDiscountPageContent() {
           </div>
         </div>
       </div>
+
+      {/* ── Product Search Modal ─────────────────────────────── */}
+      {productModalRuleId &&
+        (() => {
+          const rule = autoRules.find((r) => r.id === productModalRuleId)
+          if (!rule) return null
+          const selected = rule.selectedProducts ?? []
+          return (
+            <div
+              className='fixed inset-0 z-50 flex items-center justify-center p-4'
+              style={{ background: 'rgba(0,0,0,0.45)' }}
+            >
+              <div
+                className='bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col'
+                style={{ maxHeight: '80vh' }}
+              >
+                {/* Header */}
+                <div className='flex items-center justify-between px-5 py-4 border-b border-[#E1E3E5]'>
+                  <div>
+                    <h3 className='text-[14px] font-semibold text-[#202223]'>
+                      Select Products
+                    </h3>
+                    <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
+                      Discount applies only to selected products
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setProductModalRuleId(null)}
+                    className='w-7 h-7 flex items-center justify-center text-[#8C9196] hover:text-[#202223] bg-transparent border-none cursor-pointer rounded-lg hover:bg-[#F6F6F7]'
+                  >
+                    <svg
+                      width='14'
+                      height='14'
+                      viewBox='0 0 24 24'
+                      fill='none'
+                      stroke='currentColor'
+                      strokeWidth='2'
+                      strokeLinecap='round'
+                    >
+                      <path d='M18 6L6 18M6 6l12 12' />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Search input */}
+                <div className='px-5 py-3 border-b border-[#F1F1F1]'>
+                  <div className='flex items-center gap-2 border border-[#E1E3E5] rounded-lg px-3 py-2 bg-[#F9F9F9]'>
+                    <svg
+                      width='14'
+                      height='14'
+                      viewBox='0 0 24 24'
+                      fill='none'
+                      stroke='#8C9196'
+                      strokeWidth='1.5'
+                      strokeLinecap='round'
+                    >
+                      <circle cx='11' cy='11' r='7.5' />
+                      <path d='M18.5 18.5L22 22' />
+                    </svg>
+                    <input
+                      autoFocus
+                      type='text'
+                      value={productSearch}
+                      onChange={(e) => setProductSearch(e.target.value)}
+                      placeholder='Search products...'
+                      className='flex-1 text-[13px] bg-transparent border-none outline-none text-[#202223] placeholder-[#8C9196]'
+                    />
+                    {productSearchLoading && (
+                      <span className='text-[#8C9196]'>{Icons.spinner}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Results */}
+                <div className='flex-1 overflow-y-auto px-5 py-3 space-y-1.5'>
+                  {!productSearch.trim() && (
+                    <p className='text-[12px] text-[#8C9196] text-center py-6'>
+                      Type to search products
+                    </p>
+                  )}
+                  {productSearch.trim() &&
+                    !productSearchLoading &&
+                    productSearchResults.length === 0 && (
+                      <p className='text-[12px] text-[#8C9196] text-center py-6'>
+                        No products found
+                      </p>
+                    )}
+                  {productSearchResults.map((p) => {
+                    const isSelected = !!selected.find((s) => s.id === p.id)
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() =>
+                          toggleProductInRule(productModalRuleId, p)
+                        }
+                        className={`w-full flex items-center gap-3 p-2.5 rounded-xl border transition-all text-left cursor-pointer ${isSelected ? 'border-[#008060]/30 bg-[#F2F7F5]' : 'border-[#E1E3E5] bg-white hover:border-[#008060]/20 hover:bg-[#F9FAF9]'}`}
+                      >
+                        {p.thumbnail ? (
+                          <img
+                            src={p.thumbnail}
+                            alt=''
+                            className='w-9 h-9 rounded-lg object-cover shrink-0 border border-[#E1E3E5]'
+                          />
+                        ) : (
+                          <div className='w-9 h-9 rounded-lg bg-[#F6F6F7] shrink-0 flex items-center justify-center text-[#8C9196]'>
+                            <svg
+                              width='16'
+                              height='16'
+                              viewBox='0 0 24 24'
+                              fill='none'
+                              stroke='currentColor'
+                              strokeWidth='1.5'
+                            >
+                              <rect x='3' y='3' width='18' height='18' rx='2' />
+                              <path d='M3 9h18M9 21V9' />
+                            </svg>
+                          </div>
+                        )}
+                        <div className='flex-1 min-w-0'>
+                          <p className='text-[12.5px] font-medium text-[#202223] truncate'>
+                            {p.title}
+                          </p>
+                          <p className='text-[11px] text-[#8C9196] truncate'>
+                            {p.id}
+                          </p>
+                        </div>
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border-2 transition-all ${isSelected ? 'bg-[#008060] border-[#008060] text-white' : 'border-[#C9CDD2] bg-white'}`}
+                        >
+                          {isSelected && Icons.check}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Footer */}
+                <div className='px-5 py-3 border-t border-[#E1E3E5] flex items-center justify-between'>
+                  <p className='text-[12px] text-[#6D7175]'>
+                    {selected.length} product{selected.length !== 1 ? 's' : ''}{' '}
+                    selected
+                  </p>
+                  <button
+                    onClick={() => setProductModalRuleId(null)}
+                    className='px-4 py-2 bg-[#008060] text-white text-[13px] font-medium rounded-lg hover:bg-[#006B4F] transition-colors border-none cursor-pointer'
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
     </div>
   )
 }

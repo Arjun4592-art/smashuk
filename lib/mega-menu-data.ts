@@ -2,13 +2,11 @@
 // mobile drawer) and the new BottomNav (which now owns the sport
 // dropdowns previously rendered inline in the top nav).
 
-
 // Shared mega-menu data — used by both the top Navbar (desktop hover
 // mega-menus + mobile drawer + search overlay) and BottomNav (mobile
 // bottom bar). Structure/columns are modelled on smashuk.co's own mega
 // menus (Rackets / Shoes / Accessories / Popular columns per sport, plus
 // one or two promo tiles on the right).
-
 
 export const MEGA_MENUS = {
   badminton: {
@@ -291,17 +289,23 @@ export const MEGA_MENUS = {
       {
         heading: 'Store Services',
         links: [
-          { label: 'Stringing Services', href: '/local-store#stringing' },
-          { label: 'Racket Trial Service', href: '/local-store#trial' },
+          { label: 'Stringing Services', href: '/local-store/stringing' },
+          { label: 'Racket Trial Service', href: '/local-store/racket-demo' },
           { label: 'Visit Us', href: '/local-store' },
         ],
       },
       {
         heading: 'Partnership Programme',
         links: [
-          { label: 'Club / University Partnerships', href: '/local-store#partnerships' },
-          { label: 'Club Demo Racket', href: '/local-store#demo' },
-          { label: 'Kit Printing Services', href: '/local-store#kit-printing' },
+          {
+            label: 'Club / University Partnerships',
+            href: '/local-store/partnerships',
+          },
+          {
+            label: 'Club Demo Racket',
+            href: '/local-store/club-demo-programme',
+          },
+          { label: 'Kit Printing Services', href: '/local-store/kit-printing' },
         ],
       },
     ],
@@ -310,6 +314,17 @@ export const MEGA_MENUS = {
       description: 'Local racket specialists — tailored advice for your game.',
       href: '/local-store',
       cta: 'Visit Store',
+      // TODO: replace with your own in-store photo
+      image: '/local-store/menu-store.jpg',
+    },
+    featured2: {
+      label: 'Emergency Restring Service',
+      description:
+        'Need a racket restrung in time for a game? Contact us to arrange an on-the-spot stringing service.',
+      href: '/local-store/stringing',
+      cta: 'Book Now',
+      // TODO: replace with your own racket/stringing photo
+      image: '/local-store/menu-emergency-restring.jpg',
     },
   },
 }

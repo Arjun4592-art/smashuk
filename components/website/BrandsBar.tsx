@@ -122,8 +122,8 @@ export default function BrandsBar() {
 
       {/* ── Row 1 — Cards scroll forward ── */}
       <div className='relative mb-3'>
-        <div className='absolute left-0 top-0 bottom-0 w-20 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none' />
-        <div className='absolute right-0 top-0 bottom-0 w-20 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none' />
+        <div className='absolute left-0 top-0 bottom-0 w-20 bg-linear-to-r from-white to-transparent z-10 pointer-events-none' />
+        <div className='absolute right-0 top-0 bottom-0 w-20 bg-linear-to-l from-white to-transparent z-10 pointer-events-none' />
 
         <div className='overflow-hidden'>
           <div className='flex items-center gap-3.5 py-1.5 w-max animate-scroll'>
@@ -159,8 +159,8 @@ export default function BrandsBar() {
 
       {/* ── Row 2 — Pills scroll reverse ── */}
       <div className='relative'>
-        <div className='absolute left-0 top-0 bottom-0 w-20 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none' />
-        <div className='absolute right-0 top-0 bottom-0 w-20 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none' />
+        <div className='absolute left-0 top-0 bottom-0 w-20 bg-linear-to-r from-white to-transparent z-10 pointer-events-none' />
+        <div className='absolute right-0 top-0 bottom-0 w-20 bg-linear-to-l from-white to-transparent z-10 pointer-events-none' />
 
         <div className='overflow-hidden'>
           <div className='flex items-center gap-3.5 w-max animate-scroll-reverse'>

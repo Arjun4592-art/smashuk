@@ -27,7 +27,7 @@ const CATEGORIES = [
     icon: '🏓',
     label: 'Padel',
     image:
-      'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=600&q=80',
+      'https://images.pexels.com/photos/33641987/pexels-photo-33641987.jpeg?w=600&auto=compress&cs=tinysrgb',
     count: 48,
   },
   {
@@ -35,7 +35,7 @@ const CATEGORIES = [
     icon: '🥎',
     label: 'Squash',
     image:
-      'https://images.unsplash.com/photo-1547347298-4074fc3086f0?w=600&q=80',
+      'https://images.pexels.com/photos/7648075/pexels-photo-7648075.jpeg?w=600&auto=compress&cs=tinysrgb',
     count: 36,
   },
   {
@@ -59,7 +59,7 @@ const CATEGORIES = [
     icon: '🎒',
     label: 'Racket Bags',
     image:
-      'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=600&q=80',
+      'https://images.unsplash.com/photo-1724352012670-aae65f2bbd84?w=600&q=80',
     count: 28,
   },
   {
@@ -113,7 +113,7 @@ export default function CategoryFilter() {
   }, [])
 
   return (
-    <section className='py-16 mt-10 bg-[#F2F4F7]'>
+    <section className='py-16 bg-[#F2F4F7]'>
       <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
         {/* ── Header ── */}
         <div className='flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-10'>
@@ -171,7 +171,7 @@ export default function CategoryFilter() {
               />
 
               {/* Dark overlay — stronger at bottom */}
-              <div className='absolute inset-0 bg-gradient-to-t from-[#0A1F44]/95 via-[#0A1F44]/40 to-transparent transition-opacity duration-300 group-hover:from-[#0A1F44]' />
+              <div className='absolute inset-0 bg-linear-to-t from-[#0A1F44]/95 via-[#0A1F44]/40 to-transparent transition-opacity duration-300 group-hover:from-[#0A1F44]' />
 
               {/* Top row */}
               <div className='absolute top-3 left-3 right-3 flex items-start justify-between'>

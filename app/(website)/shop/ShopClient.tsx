@@ -1,7 +1,7 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 import { useMedusaProducts as useStoreProducts } from '@/hooks/useProducts'
 import { normalizeProduct, matchesBadgeFilter } from '@/lib/api/store'
 import ProductGrid from '@/components/website/ProductGrid'
@@ -50,6 +50,27 @@ export default function ShopClient() {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
   const [mobileOpen, setMobileOpen] = useState(false)
 
+  // BUG FIX: the sidebar's Sport pills live in client state (`filters.sports`)
+  // and never got reset when the URL's `?sport=` param changed — so clicking
+  // "Badminton" in the navbar (setting filters.sports=['badminton']) then
+  // clicking "Sale 🔥" (which navigates to /shop?badge=SALE with NO sport
+  // param) left the stale 'badminton' selection in place, since the page
+  // component itself doesn't remount on a client-side search-param change.
+  // Result: Sale kept showing only the last-selected sport instead of all.
+  // Syncing filters.sports to the URL's sport param whenever it changes
+  // fixes this: navbar sport links narrow to that sport, and Sale (which has
+  // no sport param) clears the selection so all sports show.
+  useEffect(() => {
+    setFilters((f) => ({ ...f, sports: sport ? [sport] : [] }))
+  }, [sport])
+
+  // Same idea for Category: the navbar mega-menu's ?category= param (e.g.
+  // "rackets") drives the sidebar's Category selection, and gets cleared
+  // the same way when navigating somewhere that doesn't set it (e.g. Sale).
+  useEffect(() => {
+    setFilters((f) => ({ ...f, categories: category ? [category] : [] }))
+  }, [category])
+
   // Fetch products from Medusa
   const { data, isLoading, isError } = useStoreProducts({ limit: 100 })
 
@@ -63,7 +84,6 @@ export default function ShopClient() {
     // Out-of-stock products are never shown in the shop listing.
     let result = products.filter((p) => p.inStock)
 
-    if (sport) result = result.filter((p) => p.sport === sport)
     if (badge)
       // BUG FIX: this used to require an explicit metadata.badge tag,
       // which almost no product actually has set (the dashboard field is
@@ -74,10 +94,6 @@ export default function ShopClient() {
       // date, rating) for SALE / NEW / BESTSELLER so the links work even
       // when no product has been manually tagged.
       result = result.filter((p) => matchesBadgeFilter(p, badge))
-    // category is a Medusa category handle, e.g. "badminton-rackets" — nav
-    // links pass the short form ("rackets", "shoes", "bags"), so match by
-    // substring rather than requiring an exact handle.
-    if (category) result = result.filter((p) => p.category?.includes(category))
     if (brandParam)
       result = result.filter(
         (p) => p.brand?.toLowerCase() === brandParam.toLowerCase(),
@@ -107,11 +123,21 @@ export default function ShopClient() {
           p.sport.toLowerCase().includes(q.toLowerCase()),
       )
 
-    // BUG FIX: the sidebar's Sport pills updated `filters.sports` but this
-    // filter function never read that field — so clicking a sport in the
-    // sidebar didn't change the results at all.
+    // Sport filtering — `filters.sports` is now the single source of truth
+    // (kept in sync with the URL's ?sport= param by the effect above), so
+    // there's no separate/conflicting filter on the raw `sport` param here.
     if (filters.sports.length)
       result = result.filter((p) => filters.sports.includes(p.sport))
+    // Category filtering — `filters.categories` is the single source of
+    // truth (synced with the URL's ?category= param above). Substring
+    // match keeps it compatible with the navbar's short tokens ("rackets")
+    // as well as full handles picked from the sidebar ("badminton-rackets").
+    if (filters.categories.length)
+      result = result.filter((p) =>
+        filters.categories.some(
+          (c) => p.category?.includes(c) || c.includes(p.category ?? ''),
+        ),
+      )
     if (filters.brands.length)
       result = result.filter((p) => filters.brands.includes(p.brand))
     if (filters.badges.length)
@@ -147,18 +173,7 @@ export default function ShopClient() {
     }
 
     return result
-  }, [
-    products,
-    sport,
-    badge,
-    category,
-    brandParam,
-    gender,
-    level,
-    style,
-    q,
-    filters,
-  ])
+  }, [products, sport, badge, brandParam, gender, level, style, q, filters])
 
   // Same filtering as `filtered` above, but WITHOUT the specs filter AND
   // without the sidebar's own brand selection — this is what the sidebar
@@ -169,17 +184,21 @@ export default function ShopClient() {
   // not narrowing by all of them at once).
   const categoryScopedProducts = useMemo(() => {
     let result = products.filter((p) => p.inStock)
-    if (sport) result = result.filter((p) => p.sport === sport)
     if (badge) result = result.filter((p) => matchesBadgeFilter(p, badge))
-    if (category) result = result.filter((p) => p.category?.includes(category))
     if (brandParam)
       result = result.filter(
         (p) => p.brand?.toLowerCase() === brandParam.toLowerCase(),
       )
     if (filters.sports.length)
       result = result.filter((p) => filters.sports.includes(p.sport))
+    if (filters.categories.length)
+      result = result.filter((p) =>
+        filters.categories.some(
+          (c) => p.category?.includes(c) || c.includes(p.category ?? ''),
+        ),
+      )
     return result
-  }, [products, sport, badge, category, brandParam, filters.sports])
+  }, [products, badge, brandParam, filters.sports, filters.categories])
 
   // Which sport(s) are currently narrowing the listing — the sidebar's own
   // Sport pills take priority, falling back to the URL's ?sport= (e.g. from
@@ -337,6 +356,11 @@ export default function ShopClient() {
               allProducts={products}
               activeSports={effectiveSports}
               categoryProducts={categoryScopedProducts}
+              // On a dedicated sport page (navbar's ?sport=... link), hide
+              // the Sport pills — go straight into that sport's categories.
+              // Generic pages (plain /shop, or Sale which has no ?sport=)
+              // keep the Sport pills so all sports stay browsable.
+              hideSportSection={!!sport}
             />
           </div>
 
@@ -378,6 +402,7 @@ export default function ShopClient() {
                   allProducts={products}
                   activeSports={effectiveSports}
                   categoryProducts={categoryScopedProducts}
+                  hideSportSection={!!sport}
                 />
               </div>
             </>

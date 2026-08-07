@@ -16,6 +16,12 @@ import type { Product } from '@/types'
 export interface FilterState {
   sports: string[]
   brands: string[]
+  // Product category within the selected sport(s) — e.g. "Rackets",
+  // "Shoes", "Strings", "Bags". Values are the raw Medusa category handle
+  // (e.g. "badminton-rackets"); matching is substring-based so it stays
+  // compatible with the short tokens the navbar mega-menu sends
+  // (e.g. "rackets").
+  categories: string[]
   priceRange: [number, number]
   inStockOnly: boolean
   minRating: number | null
@@ -49,6 +55,14 @@ interface ShopFilterSidebarProps {
   // it's reading from the products actually in view rather than a fixed
   // per-category list.
   categoryProducts?: Product[]
+  // True when the page itself is already locked to one sport (i.e. the
+  // navbar's ?sport= link brought the person here, e.g. "Badminton" in the
+  // top nav). In that case the Sport pills are redundant — the person is
+  // already on a dedicated sport page — so the sidebar hides them and
+  // leads straight into that sport's Category options instead. Pages that
+  // aren't sport-locked (plain /shop, or /shop?badge=SALE) keep showing
+  // the Sport pills so the person can narrow down to one.
+  hideSportSection?: boolean
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -118,6 +132,25 @@ function resolveSwatchColor(value: string): string | null {
   }
   return null
 }
+// Turns a raw Medusa category handle (e.g. "badminton-rackets") into a
+// clean display label ("Rackets") by stripping a leading sport slug if
+// present, then title-casing what's left. Falls back to title-casing the
+// whole handle when it doesn't start with a known sport slug.
+function formatCategoryLabel(handle: string): string {
+  let rest = handle
+  for (const s of SPORTS) {
+    if (rest.startsWith(`${s.slug}-`)) {
+      rest = rest.slice(s.slug.length + 1)
+      break
+    }
+  }
+  return rest
+    .split('-')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
 const MIN_PRICE = 0
 // BUG FIX: this used to be 100000 (i.e. £100,000) with presets like
 // "£10k–£30k" — clearly copy-pasted from a different, much higher-ticket
@@ -139,6 +172,7 @@ const PRICE_PRESETS: { label: string; range: [number, number] }[] = [
 export const DEFAULT_FILTERS: FilterState = {
   sports: [],
   brands: [],
+  categories: [],
   priceRange: [MIN_PRICE, MAX_PRICE],
   inStockOnly: false,
   minRating: null,
@@ -201,6 +235,7 @@ export default function ShopFilterSidebar({
   allProducts,
   activeSports = [],
   categoryProducts,
+  hideSportSection = false,
 }: ShopFilterSidebarProps) {
   // Brands that actually have at least one product for the currently
   // selected sport(s). Undefined `allProducts` (or no sport selected)
@@ -227,8 +262,59 @@ export default function ShopFilterSidebar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSports.join(',')])
 
+  // Same cleanup, but for Category: if the sport changes and a selected
+  // category no longer has any matching products in the new sport, drop it.
+  useEffect(() => {
+    if (!allProducts) return
+    const validHandles = new Set(
+      allProducts
+        .filter((p) => !activeSports.length || activeSports.includes(p.sport))
+        .map((p) => p.category)
+        .filter(Boolean),
+    )
+    const stillValid = filters.categories.filter((c) =>
+      [...validHandles].some((h) => h.includes(c) || c.includes(h)),
+    )
+    if (stillValid.length !== filters.categories.length) {
+      onChange({ ...filters, categories: stillValid })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSports.join(',')])
+
+  // Category options for the currently selected sport(s) — e.g. Rackets /
+  // Shoes / Strings / Bags for Badminton. Scoped by sport + brand + badge
+  // (like sportCounts) but ignores the category selection itself, since
+  // that's the dimension being chosen here.
+  const categoryOptions = (() => {
+    const map = new Map<string, number>()
+    if (!allProducts)
+      return [] as { handle: string; label: string; count: number }[]
+    for (const p of allProducts) {
+      if (!p.inStock) continue
+      if (activeSports.length && !activeSports.includes(p.sport)) continue
+      if (filters.brands.length && !filters.brands.includes(p.brand)) continue
+      if (
+        filters.badges.length &&
+        !filters.badges.some((b) => matchesBadgeFilter(p, b))
+      )
+        continue
+      if (!p.category) continue
+      map.set(p.category, (map.get(p.category) ?? 0) + 1)
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([handle, count]) => ({
+        handle,
+        count,
+        label: formatCategoryLabel(handle),
+      }))
+  })()
+
   const toggle = useCallback(
-    <K extends 'sports' | 'brands' | 'badges'>(key: K, value: string) => {
+    <K extends 'sports' | 'brands' | 'badges' | 'categories'>(
+      key: K,
+      value: string,
+    ) => {
       const arr = filters[key] as string[]
       onChange({
         ...filters,
@@ -501,58 +587,102 @@ export default function ShopFilterSidebar({
 
         {/* ── Body ── */}
         <div className='px-5 py-2'>
-          {/* ── Sport ── */}
-          <Section title='Sport' count={filters.sports.length || undefined}>
-            <div className='flex flex-wrap gap-1.5'>
-              {SPORTS.map((s) => {
-                const active = filters.sports.includes(s.slug)
-                const count = sportCounts.get(s.slug) ?? 0
-                return (
-                  <button
-                    key={s.slug}
-                    type='button'
-                    onClick={() => toggle('sports', s.slug)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold font-lato border transition-all duration-150 ${
-                      active
-                        ? 'bg-[#0A1F44] text-white border-[#0A1F44] shadow-sm'
-                        : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#0A1F44]/20 hover:text-[#0A1F44]'
-                    }`}
-                  >
-                    <span>{s.icon}</span>
-                    <span>{s.label}</span>
-                    <span
-                      className={`text-[10px] ${active ? 'text-white/60' : 'text-[#9CA3AF]'}`}
+          {/* ── Sport ──
+              Hidden when the page is already locked to one sport via the
+              navbar (?sport=...) — no point offering to switch sports on a
+              dedicated sport page. Shown on generic pages (/shop, Sale)
+              where the person hasn't picked a sport yet. */}
+          {!hideSportSection && (
+            <Section title='Sport' count={filters.sports.length || undefined}>
+              <div className='flex flex-wrap gap-1.5'>
+                {SPORTS.map((s) => {
+                  const active = filters.sports.includes(s.slug)
+                  const count = sportCounts.get(s.slug) ?? 0
+                  return (
+                    <button
+                      key={s.slug}
+                      type='button'
+                      onClick={() => toggle('sports', s.slug)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold font-lato border transition-all duration-150 ${
+                        active
+                          ? 'bg-[#0A1F44] text-white border-[#0A1F44] shadow-sm'
+                          : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#0A1F44]/20 hover:text-[#0A1F44]'
+                      }`}
                     >
-                      ({count})
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </Section>
+                      <span>{s.icon}</span>
+                      <span>{s.label}</span>
+                      <span
+                        className={`text-[10px] ${active ? 'text-white/60' : 'text-[#9CA3AF]'}`}
+                      >
+                        ({count})
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </Section>
+          )}
 
-          {/* ── Brand ── */}
+          {/* ── Category (sport-specific: Rackets / Shoes / Strings / Bags...) ── */}
+          {/* Only shown once a sport is selected — with no sport picked,
+              categories collide across sports (e.g. Badminton Rackets,
+              Tennis Rackets, Padel Rackets all display as just "Rackets"),
+              so the list would show confusing duplicate-looking entries. */}
+          {activeSports.length > 0 && categoryOptions.length > 0 && (
+            <Section
+              title='Category'
+              count={filters.categories.length || undefined}
+            >
+              <div className='flex flex-wrap gap-1.5'>
+                {categoryOptions.map((c) => {
+                  const active = filters.categories.some(
+                    (v) => c.handle.includes(v) || v.includes(c.handle),
+                  )
+                  return (
+                    <button
+                      key={c.handle}
+                      type='button'
+                      onClick={() => toggle('categories', c.handle)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold font-lato border transition-all duration-150 ${
+                        active
+                          ? 'bg-[#0A1F44] text-white border-[#0A1F44] shadow-sm'
+                          : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#0A1F44]/20 hover:text-[#0A1F44]'
+                      }`}
+                    >
+                      <span>{c.label}</span>
+                      <span
+                        className={`text-[10px] ${active ? 'text-white/60' : 'text-[#9CA3AF]'}`}
+                      >
+                        ({c.count})
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </Section>
+          )}
+
+          {/* ── Brand ──
+              Only brands with actual matching products (for the current
+              sport/category/badge selection) are listed — greyed-out,
+              zero-count brands used to clutter the list, so they're
+              filtered out entirely instead of shown disabled. */}
           <Section title='Brand' count={filters.brands.length || undefined}>
             <div className='space-y-0.5 max-h-52 overflow-y-auto pr-1 scrollbar-none'>
-              {BRANDS.map((b) => {
+              {BRANDS.filter((b) => {
                 const active = filters.brands.includes(b)
                 const count = brandCounts.get(b) ?? 0
-                const disabled =
-                  (availableBrands !== null && !availableBrands.has(b)) ||
-                  (!active && count === 0)
+                const unavailable =
+                  availableBrands !== null && !availableBrands.has(b)
+                return active || (!unavailable && count > 0)
+              }).map((b) => {
+                const active = filters.brands.includes(b)
+                const count = brandCounts.get(b) ?? 0
                 return (
                   <label
                     key={b}
-                    onClick={() => {
-                      if (disabled) return
-                      toggle('brands', b)
-                    }}
-                    aria-disabled={disabled}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all duration-150 ${
-                      disabled
-                        ? 'opacity-40 cursor-not-allowed'
-                        : 'cursor-pointer'
-                    } ${
+                    onClick={() => toggle('brands', b)}
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl cursor-pointer transition-all duration-150 ${
                       active
                         ? 'bg-[#E8553A]/6 border border-[#E8553A]/20'
                         : 'hover:bg-[#F2F4F7] border border-transparent'
