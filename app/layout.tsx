@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter, Sora } from 'next/font/google'
+import { Inter, Poppins, Sora } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 import { Toaster } from 'sonner'
@@ -13,6 +13,13 @@ import {
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',
+  display: 'swap',
+})
+
+const poppins = Poppins({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-poppins',
   display: 'swap',
 })
 
@@ -78,7 +85,7 @@ export default function RootLayout({
   return (
     <html
       lang='en'
-      className={`${inter.variable} ${sora.variable}`}
+      className={`${inter.variable} ${poppins.variable} ${sora.variable}`}
       suppressHydrationWarning
     >
       <body className='font-inter antialiased' suppressHydrationWarning>

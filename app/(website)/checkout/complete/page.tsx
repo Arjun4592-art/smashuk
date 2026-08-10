@@ -88,6 +88,31 @@ function CompleteInner() {
         const isPickupOrder = isPickupOption(shippingMethodName)
         const address = cart.shipping_address
 
+        // This page only ever runs after an off-site redirect (Amazon Pay,
+        // Revolut Pay) — card confirms same-page and never lands here (see
+        // the file header comment). Look up which of the two the customer
+        // actually used instead of hardcoding 'card', so orders paid via
+        // Amazon Pay / Revolut Pay are correctly tagged for staff.
+        const paymentIntentId = searchParams.get('payment_intent')
+        let actualPaymentMethod = 'card'
+        if (paymentIntentId) {
+          try {
+            const methodRes = await fetch('/api/store/payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                action: 'get-method',
+                paymentIntentId,
+              }),
+            })
+            const methodData = await methodRes.json()
+            actualPaymentMethod = methodData?.payment_method ?? 'card'
+          } catch {
+            // Non-fatal — falls back to 'card' below
+          }
+        }
+
         const completeRes = await fetch('/api/store/payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -96,7 +121,7 @@ function CompleteInner() {
             action: 'complete',
             cartId,
             metadata: {
-              payment_method: 'card',
+              payment_method: actualPaymentMethod,
               ...(isPickupOrder
                 ? {
                     fulfillment_type: 'pickup',

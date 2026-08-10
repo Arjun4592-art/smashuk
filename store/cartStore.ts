@@ -3,7 +3,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Product } from '@/types'
-import { createCart, addToCart } from '@/lib/api/store'
+import {
+  createCart,
+  addToCart,
+  getCart,
+  removeFromCart,
+  updateCartItem,
+} from '@/lib/api/store'
+import { GIFT_CARD_PRODUCT_HANDLE } from '@/lib/constants'
 
 export interface CartItem {
   product: Product
@@ -83,7 +90,21 @@ function computeTotals(
   taxRate: number = DEFAULT_TAX_RATE,
 ) {
   const subtotal = items.reduce((s, i) => s + i.product.price * i.quantity, 0)
-  const shipping = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_COST
+  // Gift cards are digital/emailed — they never incur shipping and don't
+  // count toward the free-shipping threshold. Shipping is £0 whenever the
+  // cart has no physical (non-gift-card) items at all, and is otherwise
+  // based only on the physical-items subtotal reaching the threshold.
+  const physicalItems = items.filter(
+    (i) => i.product.slug !== GIFT_CARD_PRODUCT_HANDLE,
+  )
+  const physicalSubtotal = physicalItems.reduce(
+    (s, i) => s + i.product.price * i.quantity,
+    0,
+  )
+  const shipping =
+    physicalItems.length === 0 || physicalSubtotal >= FREE_SHIPPING_THRESHOLD
+      ? 0
+      : SHIPPING_COST
   const taxable = Math.max(0, subtotal - discountAmount)
   const tax = Math.round(taxable * taxRate * 100) / 100
   // Gift cards apply to the payable total (post-tax), same as Medusa nets
@@ -175,7 +196,28 @@ export const useCartStore = create<CartState>()(
         }
       },
 
+      // BUG FIX: this used to only update local Zustand state — it never
+      // touched the real Medusa cart at all (unlike addItem, which already
+      // synced in the background). That meant the moment a customer
+      // removed an item on /cart, the local UI and the real Medusa cart
+      // diverged: the item vanished from the screen, but Medusa's cart
+      // still held it. Checkout's own cart-validation effect only rebuilds
+      // the cart when Medusa's cart is completely EMPTY, so a cart with
+      // one stale leftover item sailed straight through — the customer
+      // could end up charged (via Stripe/Medusa `complete`) for an item
+      // they had explicitly removed from their cart. Now mirrors addItem's
+      // pattern: update local state immediately for a responsive UI, then
+      // sync the real cart in the background by finding the matching
+      // Medusa line item (matched on variant_id, same as how it was added)
+      // and deleting it there too.
       removeItem: (productId, variantId) => {
+        const state0 = get()
+        const removedItem = state0.items.find(
+          (i) => i.product.id === productId && i.variant?.id === variantId,
+        )
+        const effectiveVariantId =
+          variantId ?? (removedItem?.product as any)?.variants?.[0]?.id
+
         set((state) => {
           const newItems = state.items.filter(
             (i) => !(i.product.id === productId && i.variant?.id === variantId),
@@ -190,13 +232,47 @@ export const useCartStore = create<CartState>()(
             ),
           }
         })
+
+        const cartId = get().cartId
+        if (cartId && effectiveVariantId) {
+          ;(async () => {
+            try {
+              const medusaCart = await getCart(cartId)
+              const lineItem = (medusaCart?.items ?? []).find(
+                (li: any) => li.variant_id === effectiveVariantId,
+              )
+              if (lineItem) {
+                await removeFromCart(cartId, lineItem.id)
+              }
+            } catch (err) {
+              console.error(
+                'Failed to sync item removal with backend cart:',
+                err,
+              )
+            }
+          })()
+        }
       },
 
+      // BUG FIX: same issue as removeItem above — quantity changes on
+      // /cart only ever updated local state, never the real Medusa cart.
+      // A customer dropping a quantity from 3 to 1 would see "1" on
+      // screen but still be charged for 3 at checkout, since Medusa's own
+      // cart (what Stripe/`complete` actually bills) was never told about
+      // the change. Now syncs the real line item's quantity in the
+      // background the same way removeItem does.
       updateQuantity: (productId, quantity, variantId) => {
         if (quantity <= 0) {
           get().removeItem(productId, variantId)
           return
         }
+        const state0 = get()
+        const targetItem = state0.items.find(
+          (i) => i.product.id === productId && i.variant?.id === variantId,
+        )
+        const effectiveVariantId =
+          variantId ?? (targetItem?.product as any)?.variants?.[0]?.id
+
         set((state) => {
           const newItems = state.items.map((i) =>
             i.product.id === productId && i.variant?.id === variantId
@@ -213,6 +289,26 @@ export const useCartStore = create<CartState>()(
             ),
           }
         })
+
+        const cartId = get().cartId
+        if (cartId && effectiveVariantId) {
+          ;(async () => {
+            try {
+              const medusaCart = await getCart(cartId)
+              const lineItem = (medusaCart?.items ?? []).find(
+                (li: any) => li.variant_id === effectiveVariantId,
+              )
+              if (lineItem) {
+                await updateCartItem(cartId, lineItem.id, quantity)
+              }
+            } catch (err) {
+              console.error(
+                'Failed to sync quantity change with backend cart:',
+                err,
+              )
+            }
+          })()
+        }
       },
 
       applyCoupon: async (code) => {

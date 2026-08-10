@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { SITE_NAME } from '@/lib/constants'
+import LuxuryHero from '@/components/website/local-store/LuxuryHero'
 
 export const metadata = {
   title: `Club Demo Racket Programme | Free Try Before You Buy | ${SITE_NAME}`,
@@ -85,24 +86,17 @@ const MEMBER_BENEFITS = [
 export default function ClubDemoProgrammePage() {
   return (
     <div className='bg-white'>
-      <div className='relative bg-[#0A1F44] text-white overflow-hidden'>
-        <img
-          src='/local-store/club-demo-hero.jpg'
-          alt='Club demo racket programme'
-          className='absolute inset-0 w-full h-full object-cover opacity-30'
-        />
-        <div className='relative max-w-5xl mx-auto px-4 py-14 text-center'>
-          <span className='inline-block bg-[#E8553A] text-white text-xs font-montserrat font-bold px-3 py-1 rounded-full mb-4'>
-            100% FREE for clubs
-          </span>
-          <h1 className='font-montserrat font-black text-3xl md:text-4xl mb-3'>
-            Club Demo Racket Programme
-          </h1>
-          <p className='text-white/70 font-lato max-w-xl mx-auto'>
-            Try before you buy — free racket demos at your club
-          </p>
-        </div>
-      </div>
+      <LuxuryHero
+        eyebrow='100% FREE for clubs'
+        title='Club Demo Racket Programme'
+        subtitle='Try before you buy — free racket demos at your club'
+        image='/local-store/club-demo-hero.jpg'
+        imageAlt='Club demo racket programme'
+        breadcrumbs={[
+          { label: 'Local Store', href: '/local-store' },
+          { label: 'Club Demo Programme' },
+        ]}
+      />
 
       <div className='max-w-5xl mx-auto px-4 py-14'>
         {/* Intro */}
@@ -122,14 +116,14 @@ export default function ClubDemoProgrammePage() {
           </p>
           <Link
             href='/contact'
-            className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
+            className='ls-btn-shine inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
           >
             Book Your Demo Day
           </Link>
         </div>
 
         {/* How It Works */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
             How It Works
           </h2>
@@ -137,7 +131,7 @@ export default function ClubDemoProgrammePage() {
             {HOW_IT_WORKS.map((h) => (
               <div
                 key={h.step}
-                className='bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100'
+                className='ls-card reveal bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100'
               >
                 <span className='font-montserrat font-black text-2xl text-[#E8553A]/30'>
                   {h.step}
@@ -154,7 +148,7 @@ export default function ClubDemoProgrammePage() {
         </div>
 
         {/* Why Our Demo Programme Works */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
             Why Our Demo Programme Works
           </h2>
@@ -162,7 +156,7 @@ export default function ClubDemoProgrammePage() {
             {WHY_IT_WORKS.map((w) => (
               <div
                 key={w.title}
-                className='bg-white rounded-2xl border border-gray-100 p-6 text-center'
+                className='ls-card reveal bg-white rounded-2xl border border-gray-100 p-6 text-center'
               >
                 <span className='text-2xl'>{w.icon}</span>
                 <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mt-2 mb-1.5'>
@@ -177,7 +171,7 @@ export default function ClubDemoProgrammePage() {
         </div>
 
         {/* Sports We Cover */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
             Sports We Cover
           </h2>
@@ -185,7 +179,7 @@ export default function ClubDemoProgrammePage() {
             {SPORTS.map((s) => (
               <div
                 key={s.title}
-                className='bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100 text-center'
+                className='ls-card reveal bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100 text-center'
               >
                 <span className='text-3xl'>{s.icon}</span>
                 <h3 className='font-montserrat font-bold text-lg text-[#0A1F44] mt-3 mb-1.5'>
@@ -218,7 +212,7 @@ export default function ClubDemoProgrammePage() {
         </div>
 
         {/* Book a Demo Day */}
-        <div className='bg-[#0A1F44] rounded-2xl p-8 text-white text-center'>
+        <div className='reveal-scale bg-[#0A1F44] rounded-2xl p-8 text-white text-center'>
           <h2 className='font-montserrat font-black text-xl mb-2'>
             Book a Demo Day for Your Club
           </h2>
@@ -240,7 +234,7 @@ export default function ClubDemoProgrammePage() {
           </div>
           <Link
             href='/contact'
-            className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
+            className='ls-btn-shine inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
           >
             Book Your Demo Day
           </Link>

@@ -9,6 +9,13 @@ export const SITE_OG_IMAGE = '/icons/og-image.jpg'
 export const CONTACT_EMAIL = 'info@smashuk.co'
 export const CONTACT_PHONE = '0161 536 3594'
 
+// Handle of the gift card product created in Medusa Admin (variants are
+// the denominations: £10/£25/£50/etc). Gift cards are digital/emailed —
+// they should never trigger a shipping charge or count toward the
+// free-shipping threshold's "physical goods" logic. Used by cartStore's
+// computeTotals to exclude gift card line items from the shipping calc.
+export const GIFT_CARD_PRODUCT_HANDLE = 'gift-card-product'
+
 // ─── POS Staff ──────────────────────────────────────────────────
 export const POS_STAFF = [
   {

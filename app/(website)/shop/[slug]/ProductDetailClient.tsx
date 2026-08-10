@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useCart } from '@/hooks/useCart'
 import { formatPrice } from '@/lib/api/store'
+import { SITE_URL } from '@/lib/constants'
 import ProductGrid from '@/components/website/ProductGrid'
 import ProductImageZoom from '@/components/website/ProductImageZoom'
 import {
@@ -16,11 +17,16 @@ import {
   ChevronRightIcon,
   MinusIcon,
   PlusIcon,
+  FacebookIcon,
+  TwitterIcon,
+  MailIcon,
+  CopyIcon,
 } from '@/components/ui/Icons'
 import toast from 'react-hot-toast'
 import ProductReviews from '@/components/website/ProductReviews'
 import SizeGuideModal from '@/components/website/SizeGuideModal'
 import NotifyStockForm from '@/components/website/NotifyStockForm'
+import { recordRecentlyViewed } from '@/lib/recently-viewed'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -392,21 +398,518 @@ function getTensionRangeForSport(sport?: string) {
   )
 }
 
-// ─── StringUpgrade Component ──────────────────────────────────────────────────
-//
-// IMPORTANT STRUCTURE NOTE (fixed per smashuk.co reference):
-// "Free String Upgrade" (Yes/No) and "Racket Grips" are two INDEPENDENT
-// fields on smashuk.co. Racket Grips is ALWAYS visible and selectable,
-// regardless of whether String Upgrade is Yes or No — it is NOT nested
-// inside the Yes-only collapsible panel. Only "String Selection" and
-// "String Tension" are gated behind the Yes toggle, because those two only
-// make sense once you've said yes to stringing.
-//
-// Previously this component nested Racket Grips inside the same
-// max-h-0/collapse block as String Selection/Tension, so the grip dropdown
-// never rendered until the customer selected "Yes" for the free upgrade —
-// that's now fixed below: Racket Grips renders in its own block, outside
-// the `enabled` conditional, right after the toggle.
+// ─── SocialShare ──────────────────────────────────────────────────────────────
+// Matches smashuk.co's product-page share row (Facebook / Twitter-X / Email +
+// copy-link). smashuk.co repeats this twice on the page (top and bottom of the
+// gallery) — that's just Shopify's default theme markup duplicating itself,
+// so here it's rendered once, right under the title, which is enough for the
+// same functionality.
+
+function SocialShare({ url, title }: { url: string; title: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const shareLinks = [
+    {
+      label: 'Facebook',
+      icon: <FacebookIcon size={16} />,
+      href: `https://www.facebook.com/sharer.php?u=${encodeURIComponent(url)}`,
+    },
+    {
+      label: 'Twitter',
+      icon: <TwitterIcon size={16} />,
+      href: `https://twitter.com/intent/tweet?text=${encodeURIComponent(title)}&url=${encodeURIComponent(url)}`,
+    },
+    {
+      label: 'Email',
+      icon: <MailIcon size={16} />,
+      href: `mailto:?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(url)}`,
+    },
+  ]
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error('Could not copy link')
+    }
+  }
+
+  return (
+    <div className='flex items-center gap-2 mb-5'>
+      <span className='text-xs font-semibold text-gray-400 font-lato mr-1'>
+        Share:
+      </span>
+      {shareLinks.map((link) => (
+        <a
+          key={link.label}
+          href={link.href}
+          target='_blank'
+          rel='noopener noreferrer'
+          aria-label={`Share on ${link.label}`}
+          className='w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#E8553A] hover:border-[#E8553A] transition-colors'
+        >
+          {link.icon}
+        </a>
+      ))}
+      <button
+        type='button'
+        onClick={handleCopy}
+        aria-label='Copy link'
+        className='w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#E8553A] hover:border-[#E8553A] transition-colors'
+      >
+        {copied ? <CheckIconInline /> : <CopyIcon size={14} />}
+      </button>
+    </div>
+  )
+}
+
+function CheckIconInline() {
+  return (
+    <svg
+      width='14'
+      height='14'
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='2.5'
+      strokeLinecap='round'
+      strokeLinejoin='round'
+      className='text-green-500'
+    >
+      <polyline points='20 6 9 17 4 12' />
+    </svg>
+  )
+}
+
+// ─── BuyingGuide ────────────────────────────────────────────────────────────
+// smashuk.co's "Quick Guide" content is NOT one-size-fits-all — checked
+// across live product pages and every category has its own guide:
+//   - Badminton rackets: accordion — Purpose of Play / Weight Class /
+//     Balance Point / String Tension / Shaft Flexibility / Grip Size
+//   - Tennis rackets: accordion — Purpose of Play / Weight / Balance /
+//     String Pattern / Choosing the Right Grip Size (two methods + a size
+//     table) — different wording and different weight/grip numbers to
+//     badminton, so this is its OWN content set, not a reskin.
+//   - Padel rackets: a single reference TABLE (Criteria / Description),
+//     linking out to the padel guide blog post — no accordion, no strings
+//     (padel rackets don't have strings at all).
+//   - Squash rackets / bags / balls / apparel / grips: smashuk.co doesn't
+//     show a buying guide on these product types at all, so this component
+//     renders nothing for them.
+//   - Shoes: a completely different shape — one long-form article ("The
+//     Ultimate Guide to Buying ___ Shoes") rather than an accordion, so
+//     it's its own component below (ShoeBuyingGuide).
+
+type GuideSection = { title: string; items: string[] }
+
+const BADMINTON_RACKET_GUIDE: GuideSection[] = [
+  {
+    title: 'Purpose of Play',
+    items: [
+      'Beginners: opt for even-balanced rackets — easier to learn on and versatile across shots.',
+      'Intermediate players: consider a slightly head-heavy racket for power, or head-light for speed, depending on your style.',
+      'Advanced players: usually have specific preferences — power, speed, or control — matched to their playing style.',
+    ],
+  },
+  {
+    title: 'Weight Class',
+    items: [
+      'Ultralight (5U/6U/7U): easiest to control, quick swing — good for beginners and defensive players.',
+      'Standard (4U): balanced feel — good for intermediate players.',
+      'Heavy (3U): emphasises power, harder to manoeuvre — preferred by advanced players.',
+    ],
+  },
+  {
+    title: 'Balance Point',
+    items: [
+      'Head-Heavy: emphasises power, ideal for smashing.',
+      'Even Balance: a mix of power and speed, good for all-court play.',
+      'Head-Light: emphasises speed and quick reflexes, ideal for the front court and doubles.',
+    ],
+  },
+  {
+    title: 'String Tension',
+    items: [
+      'Beginners: lower end of the range — a larger, more forgiving sweet spot.',
+      'Intermediate: mid-range — a good mix of power and control.',
+      'Advanced: higher end of the range — precise control, but needs consistent technique.',
+    ],
+  },
+  {
+    title: 'Shaft Flexibility',
+    items: [
+      'Flexible: easier for beginners, generates power with less effort but can compromise accuracy.',
+      'Medium: balanced flex, suits most intermediate players.',
+      'Stiff: preferred by advanced players — precise, but needs good technique to generate power.',
+    ],
+  },
+  {
+    title: 'Grip Size',
+    items: [
+      'Smaller hands: G5 or smaller.',
+      'Average hands: G4.',
+      'Larger hands: G3.',
+    ],
+  },
+]
+
+const TENNIS_RACKET_GUIDE: GuideSection[] = [
+  {
+    title: 'Purpose of Play',
+    items: [
+      'Beginners: a larger head size gives more power and a bigger sweet spot — forgiving on off-centre hits.',
+      'Intermediate players: a mid-plus head size balances power and control.',
+      'Advanced players: often prefer smaller head sizes for precision, but it needs consistent technique.',
+    ],
+  },
+  {
+    title: 'Weight',
+    items: [
+      'Lighter (260–280g): easier to manoeuvre — good for beginners, juniors, or slower swing speeds.',
+      'Medium (280–310g): a mix of power and control — suits many intermediate players.',
+      'Heavier (310g+): more stability and power, but needs good technique — preferred by many advanced players.',
+    ],
+  },
+  {
+    title: 'Balance',
+    items: [
+      'Head-Heavy: more power, especially for shorter swings.',
+      'Even-Balance: a balanced feel, suits a broad range of players.',
+      'Head-Light: easier to manoeuvre — favoured by advanced players and net play in doubles.',
+    ],
+  },
+  {
+    title: 'String Pattern',
+    items: [
+      'Open (16x18 or 16x19): more spin and power, but strings wear faster.',
+      'Dense (18x20): more control and better string durability.',
+    ],
+  },
+  {
+    title: 'Choosing the Right Grip Size',
+    items: [
+      'Ruler test: measure from the middle of your palm to the tip of your ring finger — 4 to 4⅜ inches suits most adults.',
+      'On-racket test: hold the racket for a backhand — there should be a finger\u2019s width of space between your fingers and the base of your thumb.',
+      'Common sizes: G0 = 4", G1 = 4⅛", G2 = 4¼", G3 = 4⅜", G4 = 4½", G5 = 4⅝".',
+      'When in doubt, go smaller — an overgrip can build a grip up, but you can\u2019t reduce one.',
+    ],
+  },
+]
+
+// Only one section open at a time — native <details>/<summary> elements are
+// independent of each other by default, so previously opening one section
+// never closed the others that were already open. Tracking the currently
+// open section's title in state, and driving each <details>'s `open` prop
+// from that state (with onToggle syncing it back), makes them mutually
+// exclusive like a proper accordion.
+// Custom accordion — deliberately NOT using native <details>/<summary>.
+// Native details elements each manage their own open/closed state in the
+// browser itself; even when driving the `open` attribute from React state,
+// the browser's own default toggle action fires first on click, which can
+// race with React's re-render in some setups. Using a plain button + div
+// with max-height/opacity transitions puts 100% of the open/close logic in
+// React state, so exactly one section can ever be open: clicking a closed
+// section opens it and closes whatever else was open; clicking the
+// already-open section closes it.
+function RacketBuyingGuide({ sport }: { sport?: string }) {
+  const sections =
+    sport?.toLowerCase().trim() === 'tennis'
+      ? TENNIS_RACKET_GUIDE
+      : BADMINTON_RACKET_GUIDE
+  const guideHref =
+    sport?.toLowerCase().trim() === 'tennis'
+      ? '/blogs/tennis'
+      : '/blogs/news/badminton-racket-guide'
+  const title =
+    sport?.toLowerCase().trim() === 'tennis'
+      ? 'Tennis Racket Quick Guide'
+      : 'Quick Badminton Racket Guide'
+
+  const [openSection, setOpenSection] = useState<string | null>(null)
+
+  const handleToggle = (sectionTitle: string) => {
+    setOpenSection((current) =>
+      current === sectionTitle ? null : sectionTitle,
+    )
+  }
+
+  return (
+    <div className='mt-10 pt-8 border-t border-gray-100 text-left'>
+      <h2 className='font-montserrat font-black text-lg text-[#0A1F44] mb-1 text-left'>
+        {title}
+      </h2>
+      <p className='text-xs text-gray-400 font-lato mb-4 text-left'>
+        Not in a rush? Check out our{' '}
+        <Link
+          href={guideHref}
+          className='underline decoration-gray-300 hover:decoration-[#E8553A] hover:text-[#E8553A]'
+        >
+          detailed racket guide
+        </Link>
+        .
+      </p>
+      <div className='divide-y divide-gray-100 border-t border-b border-gray-100'>
+        {sections.map((section) => {
+          const isOpen = openSection === section.title
+          return (
+            <div key={section.title} className='py-3'>
+              <button
+                type='button'
+                onClick={() => handleToggle(section.title)}
+                aria-expanded={isOpen}
+                className='w-full cursor-pointer flex items-center justify-between font-montserrat font-bold text-sm text-[#0A1F44] text-left'
+              >
+                {section.title}
+                <span
+                  className={`text-[#E8553A] transition-transform duration-200 text-lg leading-none ${isOpen ? 'rotate-45' : ''}`}
+                >
+                  +
+                </span>
+              </button>
+              <div
+                className={`overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-[400px] opacity-100 mt-2' : 'max-h-0 opacity-0'}`}
+              >
+                <ul className='space-y-1.5 pl-1'>
+                  {section.items.map((item) => (
+                    <li
+                      key={item}
+                      className='text-sm text-gray-500 font-lato leading-relaxed list-disc list-inside text-left'
+                    >
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── PadelRacketGuide ─────────────────────────────────────────────────────────
+// Padel rackets on smashuk.co get a reference TABLE, not an accordion — and
+// completely different content, since padel rackets are solid (no strings,
+// no string tension) and have their own shapes/thickness/hole-pattern
+// vocabulary. Links out to the real padel guide blog post, matching
+// smashuk.co.
+
+const PADEL_GUIDE_ROWS: { criteria: string; description: string[] }[] = [
+  {
+    criteria: 'Basic Components',
+    description: [
+      'Frame: Carbon Fibre (power) or Fiberglass (control)',
+      'Core: Soft foam (control) or Hard foam (power)',
+    ],
+  },
+  {
+    criteria: 'Racket Shapes',
+    description: [
+      'Diamond: power, high sweet spot',
+      'Round: balanced, centred sweet spot',
+      'Teardrop: mix, slightly higher sweet spot',
+    ],
+  },
+  {
+    criteria: 'Weight',
+    description: [
+      'Light (360–375g): beginners, women',
+      'Medium (375–390g): balanced, most players',
+      'Heavy (390g+): advanced players',
+    ],
+  },
+  {
+    criteria: 'Balance',
+    description: [
+      'Head-Heavy: power',
+      'Head-Light: control',
+      'Even Balance: mix of both',
+    ],
+  },
+  {
+    criteria: 'Surface & Texture',
+    description: ['Smooth: control', 'Rough/Textured: spin'],
+  },
+  {
+    criteria: 'Racket Thickness',
+    description: ['Typically 36–38mm: thicker = more power'],
+  },
+  {
+    criteria: 'Hole Patterns',
+    description: ['Varies: larger holes = more elastic racket'],
+  },
+  {
+    criteria: 'Player\u2019s Level/Style',
+    description: [
+      'Beginners: round, medium-weight, soft core',
+      'Intermediate: teardrop, medium-hard core',
+      'Advanced: diamond, hard core',
+    ],
+  },
+  {
+    criteria: 'Additional Features',
+    description: ['Anti-vibration systems', 'Reinforced edges'],
+  },
+  {
+    criteria: 'Budget',
+    description: ['Set a price range before shopping'],
+  },
+  {
+    criteria: 'Test Before Buying',
+    description: ['Always recommended to get a feel'],
+  },
+  {
+    criteria: 'Consider the Grip',
+    description: ['Ensure comfort — it can be changed'],
+  },
+  {
+    criteria: 'Recommendations',
+    description: ['Seek insights from players, coaches, or reviews'],
+  },
+]
+
+function PadelRacketGuide() {
+  return (
+    <div className='mt-10 pt-8 border-t border-gray-100'>
+      <h2 className='font-montserrat font-black text-lg text-[#0A1F44] mb-1'>
+        Padel Racket Quick Guide
+      </h2>
+      <p className='text-xs text-gray-400 font-lato mb-4'>
+        This table simplifies the detailed information into easily digestible
+        points. Refer back to the{' '}
+        <Link
+          href='/blogs/padel/the-ultimate-guide-to-choosing-the-perfect-padel-racket'
+          className='underline decoration-gray-300 hover:decoration-[#E8553A] hover:text-[#E8553A]'
+        >
+          detailed guide
+        </Link>{' '}
+        for a more in-depth understanding.
+      </p>
+      <div className='rounded-xl border border-gray-100 overflow-hidden'>
+        {PADEL_GUIDE_ROWS.map((row, i) => (
+          <div
+            key={row.criteria}
+            className={`flex flex-col sm:flex-row gap-1 sm:gap-4 px-4 py-3 ${i % 2 === 0 ? 'bg-gray-50' : 'bg-white'}`}
+          >
+            <span className='sm:w-1/3 text-sm font-bold text-[#0A1F44] font-montserrat shrink-0'>
+              {row.criteria}
+            </span>
+            <div className='sm:w-2/3 space-y-0.5'>
+              {row.description.map((line) => (
+                <p
+                  key={line}
+                  className='text-sm text-gray-500 font-lato leading-relaxed'
+                >
+                  {line}
+                </p>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── ShoeBuyingGuide ──────────────────────────────────────────────────────────
+// Shoes get a completely different guide shape on smashuk.co — one long-form
+// article ("The Ultimate Guide to Buying ___ Shoes") rather than an
+// accordion. Sport name is swapped in so it reads correctly for badminton,
+// tennis, and padel shoes alike.
+
+function ShoeBuyingGuide({ sport }: { sport?: string }) {
+  const sportLabel = sport
+    ? sport.charAt(0).toUpperCase() + sport.slice(1).toLowerCase()
+    : 'Racket Sport'
+
+  return (
+    <div className='mt-10 pt-8 border-t border-gray-100 max-w-2xl'>
+      <h2 className='font-montserrat font-black text-lg text-[#0A1F44] mb-4'>
+        The Ultimate Guide to Buying {sportLabel} Shoes
+      </h2>
+
+      <div className='space-y-5 text-sm text-gray-500 font-lato leading-relaxed'>
+        <div>
+          <p className='font-montserrat font-bold text-[#0A1F44] mb-1.5'>
+            Why special shoes for {sportLabel}?
+          </p>
+          <p>
+            {sportLabel} demands agility, speed, and precision. The right
+            footwear enhances performance by offering grip, cushioning, and
+            stability, reducing the risk of injuries — unlike regular sneakers,
+            these shoes are built specifically for the sport&apos;s demands.
+          </p>
+        </div>
+
+        <div>
+          <p className='font-montserrat font-bold text-[#0A1F44] mb-1.5'>
+            Key factors to consider
+          </p>
+          <ul className='space-y-1.5 list-disc list-inside'>
+            <li>
+              <strong className='text-[#0A1F44]'>Sole type</strong> — gum sole
+              for indoor wooden courts (superior grip), rubber sole for
+              cement/concrete outdoor courts.
+            </li>
+            <li>
+              <strong className='text-[#0A1F44]'>Cushioning</strong> —
+              especially in the midsole, for comfort and shock absorption.
+            </li>
+            <li>
+              <strong className='text-[#0A1F44]'>Ventilation</strong> —
+              breathable material keeps feet dry and prevents blisters.
+            </li>
+            <li>
+              <strong className='text-[#0A1F44]'>Weight</strong> — a lightweight
+              shoe improves mobility without sacrificing support.
+            </li>
+            <li>
+              <strong className='text-[#0A1F44]'>Ankle support</strong> —
+              important if you have a history of ankle injuries.
+            </li>
+            <li>
+              <strong className='text-[#0A1F44]'>Shape & fit</strong> — choose a
+              design that fits your foot shape snugly but comfortably.
+            </li>
+            <li>
+              <strong className='text-[#0A1F44]'>Durability</strong> — the sport
+              is demanding on footwear, so build quality matters.
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <p className='font-montserrat font-bold text-[#0A1F44] mb-1.5'>
+            Trending features
+          </p>
+          <ul className='space-y-1.5 list-disc list-inside'>
+            <li>
+              Anti-twist outsoles — reduce the chance of rolling an ankle.
+            </li>
+            <li>
+              Energy return technology — better jumps and swifter movement.
+            </li>
+            <li>Reinforced toe caps — protect toes, extend shoe lifespan.</li>
+          </ul>
+        </div>
+
+        <div>
+          <p className='font-montserrat font-bold text-[#0A1F44] mb-1.5'>
+            Setting a budget
+          </p>
+          <p>
+            High-end, pro-endorsed shoes aren&apos;t the only option — plenty of
+            mid-range pairs offer excellent performance. Set a budget and find
+            the best shoe within it.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function StringUpgrade({
   sport,
@@ -769,6 +1272,12 @@ export default function ProductDetailClient({ product, related }: Props) {
   const [activeTab, setActiveTab] = useState<
     'description' | 'specs' | 'shipping'
   >('description')
+
+  // Track this product as viewed for the "Recently viewed" rail on the cart
+  // page (localStorage-only, no backend call).
+  useEffect(() => {
+    recordRecentlyViewed(product.id)
+  }, [product.id])
   const [showSizeGuide, setShowSizeGuide] = useState(false)
 
   // Shoes and apparel are the categories that actually need a size chart
@@ -783,6 +1292,26 @@ export default function ProductDetailClient({ product, related }: Props) {
     categoryLower.includes('apparel') ||
     categoryLower.includes('sock')
   const showSizeGuideLink = isShoe || isApparel
+
+  // Buying-guide content is genuinely different per category+sport on
+  // smashuk.co (checked live across badminton/tennis/padel rackets and
+  // shoe product pages) — not a single reskinned block. Squash rackets,
+  // bags, balls, apparel, grips etc. don't get a guide at all on
+  // smashuk.co, so isRacket/isShoe below intentionally exclude them.
+  const nameLower = (product.name ?? '').toLowerCase()
+  const sportLower = (product.sport ?? '').toLowerCase().trim()
+  const isRacket =
+    (categoryLower.includes('racket') ||
+      categoryLower.includes('racquet') ||
+      nameLower.includes('racket') ||
+      nameLower.includes('racquet')) &&
+    sportLower !== 'squash'
+  const racketGuideSport =
+    sportLower === 'padel'
+      ? 'padel'
+      : sportLower === 'tennis'
+        ? 'tennis'
+        : 'badminton'
 
   const { addItem } = useCart()
 
@@ -936,6 +1465,15 @@ export default function ProductDetailClient({ product, related }: Props) {
                 ))}
               </div>
             )}
+
+            {/* Buying guide now lives in the LEFT/image column, right below
+                the thumbnails — moved out of the right (Product Info)
+                column per request. */}
+            {isRacket && racketGuideSport === 'padel' && <PadelRacketGuide />}
+            {isRacket && racketGuideSport !== 'padel' && (
+              <RacketBuyingGuide sport={racketGuideSport} />
+            )}
+            {isShoe && <ShoeBuyingGuide sport={product.sport} />}
           </div>
 
           {/* Product Info */}
@@ -953,6 +1491,11 @@ export default function ProductDetailClient({ product, related }: Props) {
             <h1 className='font-montserrat font-black text-3xl text-[#0A1F44] mb-4 leading-tight'>
               {product.name}
             </h1>
+
+            <SocialShare
+              url={`${SITE_URL}/shop/${product.slug}`}
+              title={product.name}
+            />
 
             <div className='flex items-center gap-3 mb-5'>
               <div className='flex items-center gap-1'>
@@ -1101,33 +1644,69 @@ export default function ProductDetailClient({ product, related }: Props) {
               )}
 
               {activeTab === 'shipping' && (
-                <div className='space-y-4'>
-                  {[
-                    {
-                      title: 'Free Delivery',
-                      desc: 'Free shipping on all orders above £50. Standard delivery in 2–4 business days.',
-                    },
-                    {
-                      title: '7-Day Returns',
-                      desc: 'Not satisfied? Return within 7 days of delivery for a full refund. Items must be unused and in original packaging.',
-                    },
-                    {
-                      title: '100% Authentic',
-                      desc: 'All products sourced directly from official brand distributors. Authenticity guaranteed.',
-                    },
-                  ].map((item) => (
-                    <div key={item.title} className='flex gap-3'>
-                      <div className='w-1.5 h-1.5 rounded-full bg-[#E8553A] mt-2 shrink-0' />
-                      <div>
-                        <p className='text-sm font-semibold text-[#0A1F44] font-montserrat mb-0.5'>
-                          {item.title}
-                        </p>
-                        <p className='text-sm text-gray-500 font-lato'>
-                          {item.desc}
-                        </p>
-                      </div>
+                <div className='space-y-6'>
+                  <div>
+                    <p className='text-sm font-black text-[#0A1F44] font-montserrat mb-2'>
+                      Shipping Policy
+                    </p>
+                    <div className='space-y-3'>
+                      {[
+                        'Free shipping on all orders exceeding £80.',
+                        'Standard shipping orders are dispatched via Royal Mail.',
+                        'Express shipping orders are dispatched via Royal Mail Special Delivery.',
+                        'Usual shipping duration for UK customers is 1–3 working days.',
+                        'Opted for our racket restringing service? Add an extra day to the shipping time.',
+                      ].map((line) => (
+                        <div key={line} className='flex gap-3'>
+                          <div className='w-1.5 h-1.5 rounded-full bg-[#E8553A] mt-2 shrink-0' />
+                          <p className='text-sm text-gray-500 font-lato'>
+                            {line}
+                          </p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+
+                  <div>
+                    <p className='text-sm font-black text-[#0A1F44] font-montserrat mb-2'>
+                      Return Policy
+                    </p>
+                    <div className='space-y-3'>
+                      {[
+                        'Return any item within a 30-day window, provided it\u2019s in original condition, unused, and with tags intact.',
+                        'Return labels can be provided at a subsidised fee if needed.',
+                        'Rackets that have been re-strung are NOT eligible for return.',
+                        'Rackets with the plastic wrapping removed and/or a grip applied are not eligible for return.',
+                      ].map((line) => (
+                        <div key={line} className='flex gap-3'>
+                          <div className='w-1.5 h-1.5 rounded-full bg-[#E8553A] mt-2 shrink-0' />
+                          <p className='text-sm text-gray-500 font-lato'>
+                            {line}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                    <Link
+                      href='/pages/refund-and-return-policy'
+                      className='inline-block mt-2 text-xs font-bold text-[#0A1F44] underline decoration-gray-300 hover:decoration-[#E8553A] hover:text-[#E8553A] transition-colors'
+                    >
+                      Read our full return/exchange policy
+                    </Link>
+                  </div>
+
+                  <div>
+                    <p className='text-sm font-black text-[#0A1F44] font-montserrat mb-2'>
+                      Warranty
+                    </p>
+                    <div className='flex gap-3'>
+                      <div className='w-1.5 h-1.5 rounded-full bg-[#E8553A] mt-2 shrink-0' />
+                      <p className='text-sm text-gray-500 font-lato'>
+                        All items purchased come with a 1-month warranty. In the
+                        event of any product issues, we&apos;ll work with the
+                        manufacturer to get it resolved promptly.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -1139,13 +1718,16 @@ export default function ProductDetailClient({ product, related }: Props) {
                   <>
                     <div className='w-2 h-2 rounded-full bg-green-500' />
                     <span className='text-sm text-green-600 font-semibold font-lato'>
-                      In Stock — {product.stock}{' '}
-                      {product.stock === 1 ? 'unit' : 'units'} available
-                      {product.stock <= 10 && product.stock > 0 && (
-                        <span className='text-red-500 font-bold'>
-                          {' '}
-                          (Only {product.stock} left!)
-                        </span>
+                      {product.stock < 5 ? (
+                        <>
+                          In Stock{' '}
+                          <span className='text-red-500 font-bold'>
+                            (Only {product.stock}{' '}
+                            {product.stock === 1 ? 'unit' : 'units'} left!)
+                          </span>
+                        </>
+                      ) : (
+                        'In Stock'
                       )}
                     </span>
                   </>
@@ -1274,6 +1856,19 @@ export default function ProductDetailClient({ product, related }: Props) {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Who we are — matches smashuk.co's team blurb shown on product pages */}
+        <div className='mt-16 pt-8 border-t border-gray-100 max-w-2xl'>
+          <h2 className='font-montserrat font-black text-sm text-[#0A1F44] uppercase tracking-wider mb-2'>
+            Who we are
+          </h2>
+          <p className='text-sm text-gray-500 font-lato leading-relaxed'>
+            With a team coming from a diverse background, we&apos;re run by
+            players who are actively playing at club to county level in
+            badminton, tennis and squash. We love to share our knowledge, so
+            feel free to give us a ring with any questions!
+          </p>
         </div>
 
         {/* Customer Reviews Section */}

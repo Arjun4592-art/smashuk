@@ -24,7 +24,10 @@ import {
   getCart,
 } from '@/lib/api/store'
 import { useAuthStore } from '@/store/authStore'
-import { FREE_SHIPPING_THRESHOLD } from '@/lib/constants'
+import {
+  FREE_SHIPPING_THRESHOLD,
+  GIFT_CARD_PRODUCT_HANDLE,
+} from '@/lib/constants'
 import toast from 'react-hot-toast'
 import { loadStripe } from '@stripe/stripe-js'
 import {
@@ -39,17 +42,26 @@ const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '',
 )
 
-// Stripe's own PaymentElement already surfaces Card + UPI (and any other
-// method enabled in the Stripe Dashboard) inside a single embedded form.
-// Stripe is the only payment method the website accepts — no Cash on
-// Delivery / Bank Transfer.
+// Stripe's own PaymentElement already surfaces Card + UPI + Amazon Pay +
+// Revolut Pay (whichever the Stripe Dashboard has enabled for this
+// account/region) inside a single embedded form — this is just the
+// fallback sent as order metadata if the actual selected type couldn't be
+// read back from Stripe for some reason (see selectedPaymentType below).
 const PAYMENT_METHOD = 'card'
 
 // Renders the actual Stripe card form (must live inside <Elements> to use
 // useStripe/useElements) and exposes confirmPayment() to the parent via a
 // ref, so the parent's single "Place Order" button can drive it.
 const StripeCardBlock = forwardRef(function StripeCardBlock(
-  { onReady, returnUrl }: { onReady?: () => void; returnUrl: string },
+  {
+    onReady,
+    onMethodChange,
+    returnUrl,
+  }: {
+    onReady?: () => void
+    onMethodChange?: (type: string) => void
+    returnUrl: string
+  },
   ref,
 ) {
   const stripe = useStripe()
@@ -90,15 +102,21 @@ const StripeCardBlock = forwardRef(function StripeCardBlock(
   // pay.google.com in a loop that can run for minutes, and PaymentElement
   // doesn't fire `onReady` until every payment method (wallets included)
   // has finished resolving. That's exactly what was stuck at "Loading
-  // payment options…" indefinitely. This app only ever accepts card (see
-  // PAYMENT_METHOD above) — wallets aren't wired into confirmPayment()
-  // anyway — so turn them off explicitly instead of relying on
-  // auto-detection.
+  // payment options…" indefinitely. Apple/Google Pay aren't wired into
+  // confirmPayment() (no return_url path back for them), so turn them off
+  // explicitly instead of relying on auto-detection. Amazon Pay and
+  // Revolut Pay ARE wired in (confirmPayment always passes a return_url,
+  // and /checkout/complete finalizes the order for whichever off-site
+  // method the customer used) — listed explicitly so they render
+  // alongside Card in a predictable order rather than left to
+  // auto-detection ordering.
   return (
     <PaymentElement
       onReady={onReady}
+      onChange={(e) => onMethodChange?.(e.value.type)}
       options={{
         wallets: { applePay: 'never', googlePay: 'never' },
+        paymentMethodOrder: ['card', 'amazon_pay', 'revolut_pay'],
       }}
     />
   )
@@ -114,9 +132,45 @@ export default function CheckoutPage() {
     total,
     discountAmount,
     couponCode,
+    giftCards,
+    giftCardTotal,
     cartId,
     clearCart,
+    applyCoupon,
+    removeCoupon,
+    applyGiftCard,
+    removeGiftCard,
   } = useCartStore()
+
+  // Single "Discount code or gift card" field (matches the reference
+  // checkout's combined input) — tries it as a coupon first, then as a
+  // gift card code if that fails, same two systems the cart page exposes
+  // separately.
+  const [promoInput, setPromoInput] = useState('')
+  const [promoLoading, setPromoLoading] = useState(false)
+  const [promoError, setPromoError] = useState('')
+
+  const handleApplyPromo = async () => {
+    const code = promoInput.trim().toUpperCase()
+    if (!code) return
+    setPromoLoading(true)
+    setPromoError('')
+    const couponResult = await applyCoupon(code)
+    if (couponResult.success) {
+      setPromoInput('')
+      setPromoLoading(false)
+      return
+    }
+    const giftCardResult = await applyGiftCard(code)
+    setPromoLoading(false)
+    if (giftCardResult.success) {
+      setPromoInput('')
+    } else {
+      setPromoError(
+        giftCardResult.error ?? couponResult.error ?? 'Invalid code',
+      )
+    }
+  }
   const router = useRouter()
   const [placing, setPlacing] = useState(false)
   const [cardClientSecret, setCardClientSecret] = useState('')
@@ -130,7 +184,49 @@ export default function CheckoutPage() {
   const [checkoutStep, setCheckoutStep] = useState<'details' | 'payment'>(
     'details',
   )
+  // Ship vs Pickup toggle shown above the address form (matches the
+  // Ship/Pickup segmented control on the reference checkout). Selecting
+  // Pickup pre-selects the Store Pickup delivery option below once it's
+  // loaded; selecting Ship falls back to the resolved home-delivery
+  // option. The address form itself is still collected either way — Medusa
+  // requires a shipping address on the cart regardless of fulfillment type.
+  const [deliveryMode, setDeliveryMode] = useState<'ship' | 'pickup'>('ship')
+
+  // Store's own address — used two ways for Pickup orders: (1) shown to the
+  // customer so they know where to collect from, and (2) submitted as the
+  // cart's "shipping address" in place of a customer-entered address, since
+  // Medusa requires a shipping address on the cart regardless of fulfillment
+  // type and a pickup order has nowhere else for that to come from. Same
+  // source of truth as the Footer and the order-detail "Collect In-Store"
+  // card (lib/store-contact.ts via /api/store/store-info).
+  const [storeContact, setStoreContact] = useState<{
+    name: string
+    email: string
+    phone: string
+    address: {
+      line1: string
+      line2: string
+      city: string
+      state: string
+      pincode: string
+      country: string
+    }
+  } | null>(null)
+  useEffect(() => {
+    fetch('/api/store/store-info')
+      .then((r) => r.json())
+      .then(setStoreContact)
+      .catch(() => {
+        /* Pickup will just show a blank location card if this fails */
+      })
+  }, [])
+
   const [paymentElementReady, setPaymentElementReady] = useState(false)
+  // Which method the customer currently has selected inside the Payment
+  // Element (card / amazon_pay / revolut_pay) — drives both the badge text
+  // below and the metadata sent when the order is completed, instead of
+  // always hardcoding 'card' regardless of what was actually used.
+  const [selectedPaymentType, setSelectedPaymentType] = useState('card')
   const cardRef = useRef<{ confirmPayment: () => Promise<void> }>(null)
 
   // BUG FIX: this used to always use the hardcoded FREE_SHIPPING_THRESHOLD
@@ -307,6 +403,14 @@ export default function CheckoutPage() {
     }
   }, [cartId])
 
+  // Gift cards are digital/emailed — they never ship, so they shouldn't
+  // count toward the £80 free-delivery threshold check below. A cart with
+  // only gift cards should always resolve to free delivery regardless of
+  // its £ subtotal.
+  const physicalSubtotal = items
+    .filter((i) => i.product.slug !== GIFT_CARD_PRODUCT_HANDLE)
+    .reduce((s, i) => s + i.product.price * i.quantity, 0)
+
   const isPickupOption = (name: string) => /pickup|store|collect/i.test(name)
   const pickupOption = shippingOptions.find((o) => isPickupOption(o.name ?? ''))
   // REVERTED: previously trusted Medusa's own conditional calculated_price
@@ -329,7 +433,7 @@ export default function CheckoutPage() {
   const freeDeliveryOption = shippingOptions.find(isFreeDeliveryOption)
   const paidDeliveryOption = shippingOptions.find(isPaidDeliveryOption)
   const resolvedDeliveryOption =
-    (subtotal >= freeShippingThreshold
+    (physicalSubtotal >= freeShippingThreshold
       ? freeDeliveryOption
       : paidDeliveryOption) ??
     freeDeliveryOption ??
@@ -353,18 +457,58 @@ export default function CheckoutPage() {
     : resolvedDeliveryOption
       ? resolvedDeliveryAmount
       : shipping // options still loading — fall back to the estimate briefly
-  const displayTotal = subtotal - discountAmount + displayShipping + tax
+  // BUG FIX: this never subtracted giftCardTotal, so the "Pay £X" button
+  // text (and the summary Total) showed the pre-gift-card amount even
+  // though Medusa's real cart total (and therefore what Stripe actually
+  // charges) already nets the gift card credit off. Match cartStore's own
+  // computeTotals formula, which does subtract it.
+  const displayTotal = Math.max(
+    0,
+    subtotal - discountAmount + displayShipping + tax - giftCardTotal,
+  )
   // Re-resolves if the customer adds/removes items and crosses £80 after
   // already picking Delivery — this now genuinely swaps to a different
   // option id (Free Shipping vs Royal Mail), unlike the reverted approach
   // where it was the same id with a Medusa-computed price that changed.
   useEffect(() => {
+    if (deliveryMode === 'pickup') {
+      if (pickupOption && selectedShippingOptionId !== pickupOption.id) {
+        setSelectedShippingOptionId(pickupOption.id)
+      }
+      return
+    }
     if (!resolvedDeliveryOption) return
-    if (pickupOption && selectedShippingOptionId === pickupOption.id) return
     if (selectedShippingOptionId !== resolvedDeliveryOption.id) {
       setSelectedShippingOptionId(resolvedDeliveryOption.id)
     }
-  }, [resolvedDeliveryOption?.id, pickupOption, selectedShippingOptionId])
+  }, [
+    deliveryMode,
+    resolvedDeliveryOption?.id,
+    pickupOption,
+    selectedShippingOptionId,
+  ])
+
+  // BUG FIX: even with wallets disabled above, PaymentElement's onReady
+  // still waits on Stripe's background fraud-detection/Link "advanced
+  // fraud signals" pings (the get-cookie / out-*.js / m.stripe.network
+  // calls visible in DevTools → Network) before firing. On a plain
+  // http://localhost dev origin (not https, not a domain Stripe has ever
+  // seen) those pings can sit "(pending)" indefinitely — third-party
+  // cookies for m.stripe.network get blocked, the request never
+  // resolves, and onReady simply never fires, leaving "Loading payment
+  // options…" spinning forever even though the card fields underneath
+  // are already fully interactive. This is a known dev-environment-only
+  // Stripe.js quirk, not something fixable from Stripe Dashboard config
+  // or from the paymentMethodOrder/wallets options. Fall back to
+  // revealing the form after a few seconds regardless — a real failure
+  // to load surfaces its own error via Stripe (e.g. inside the iframe)
+  // rather than staying on this spinner, so this timeout only ever
+  // fires in the "actually fine, onReady just never fired" case.
+  useEffect(() => {
+    if (!cardClientSecret || paymentElementReady) return
+    const timer = setTimeout(() => setPaymentElementReady(true), 4000)
+    return () => clearTimeout(timer)
+  }, [cardClientSecret, paymentElementReady])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }))
@@ -455,14 +599,21 @@ export default function CheckoutPage() {
       return
     }
 
-    if (
-      !form.name ||
-      !form.email ||
-      !form.line1 ||
-      !form.city ||
-      !form.pincode
-    ) {
+    // Pickup orders only need contact details from the customer — the
+    // address itself is the store's, not theirs, so line1/city/pincode
+    // aren't required (and aren't even shown in the form) for Pickup.
+    const contactFieldsMissing = !form.name || !form.email
+    const shipAddressFieldsMissing =
+      deliveryMode === 'ship' && (!form.line1 || !form.city || !form.pincode)
+    if (contactFieldsMissing || shipAddressFieldsMissing) {
       toast.error('Please fill all required fields.')
+      return
+    }
+
+    if (deliveryMode === 'pickup' && !storeContact) {
+      toast.error(
+        'Could not load the pickup location — please try again in a moment.',
+      )
       return
     }
 
@@ -481,17 +632,34 @@ export default function CheckoutPage() {
     try {
       const [firstName, ...rest] = form.name.split(' ')
 
-      const shippingAddress = {
-        first_name: firstName,
-        last_name: rest.join(' ') || '',
-        address_1: form.line1,
-        address_2: form.line2 || undefined,
-        city: form.city,
-        province: form.state,
-        postal_code: form.pincode,
-        country_code: 'gb',
-        phone: form.phone || undefined,
-      }
+      // Pickup: submit the store's own address (not the customer's) so
+      // Medusa's cart requirement is satisfied, but the customer's contact
+      // details still travel on it — staff need those, not the store's own
+      // phone/name, to know who's collecting the order.
+      const shippingAddress =
+        deliveryMode === 'pickup' && storeContact
+          ? {
+              first_name: firstName,
+              last_name: rest.join(' ') || '',
+              address_1: storeContact.address.line1,
+              address_2: storeContact.address.line2 || undefined,
+              city: storeContact.address.city,
+              province: storeContact.address.state,
+              postal_code: storeContact.address.pincode,
+              country_code: 'gb',
+              phone: form.phone || undefined,
+            }
+          : {
+              first_name: firstName,
+              last_name: rest.join(' ') || '',
+              address_1: form.line1,
+              address_2: form.line2 || undefined,
+              city: form.city,
+              province: form.state,
+              postal_code: form.pincode,
+              country_code: 'gb',
+              phone: form.phone || undefined,
+            }
 
       const billingAddress = billingSameAsShipping
         ? undefined
@@ -581,7 +749,7 @@ export default function CheckoutPage() {
           action: 'complete',
           cartId,
           metadata: {
-            payment_method: PAYMENT_METHOD,
+            payment_method: selectedPaymentType || PAYMENT_METHOD,
             ...(isPickupOrder
               ? {
                   fulfillment_type: 'pickup',
@@ -654,9 +822,38 @@ export default function CheckoutPage() {
         <div className='grid grid-cols-1 lg:grid-cols-3 gap-8'>
           {/* Form */}
           <div className='lg:col-span-2 space-y-5'>
+            {/* Ship / Pickup toggle */}
+            <div className='grid grid-cols-2 gap-0 border border-gray-200 rounded-2xl overflow-hidden bg-white'>
+              <button
+                type='button'
+                onClick={() => setDeliveryMode('ship')}
+                className={`flex items-center justify-center gap-2 py-3.5 font-montserrat font-bold text-sm transition-colors ${
+                  deliveryMode === 'ship'
+                    ? 'bg-[#0A1F44] text-white'
+                    : 'text-gray-400 hover:bg-gray-50'
+                }`}
+              >
+                🚚 Ship
+              </button>
+              <button
+                type='button'
+                onClick={() => setDeliveryMode('pickup')}
+                disabled={!pickupOption}
+                className={`flex items-center justify-center gap-2 py-3.5 font-montserrat font-bold text-sm transition-colors border-l border-gray-200 ${
+                  deliveryMode === 'pickup'
+                    ? 'bg-[#0A1F44] text-white'
+                    : 'text-gray-400 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-transparent'
+                }`}
+              >
+                🏬 Pickup
+              </button>
+            </div>
+
             <div className='bg-white rounded-2xl p-6 border border-gray-100'>
               <h2 className='font-montserrat font-black text-xl text-[#0A1F44] mb-5'>
-                Shipping Address
+                {deliveryMode === 'pickup'
+                  ? 'Contact Details'
+                  : 'Shipping Address'}
               </h2>
               <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
                 {[
@@ -675,29 +872,40 @@ export default function CheckoutPage() {
                     label: 'Phone',
                     placeholder: '+44 7700 900000',
                   },
-                  {
-                    name: 'pincode',
-                    label: 'Postcode *',
-                    placeholder: 'SW1A 1AA',
-                  },
-                  {
-                    name: 'line1',
-                    label: 'Address Line 1 *',
-                    placeholder: '10 Downing Street',
-                    colSpan: true,
-                  },
-                  {
-                    name: 'line2',
-                    label: 'Address Line 2 (Optional)',
-                    placeholder: 'Flat / Apartment',
-                    colSpan: true,
-                  },
-                  { name: 'city', label: 'City *', placeholder: 'London' },
-                  {
-                    name: 'state',
-                    label: 'County',
-                    placeholder: 'Greater London',
-                  },
+                  // Ship-only — a Pickup order has no address to collect
+                  // from the customer; it's collected in-store instead
+                  // (see the Pickup Location card below).
+                  ...(deliveryMode === 'ship'
+                    ? [
+                        {
+                          name: 'pincode',
+                          label: 'Postcode *',
+                          placeholder: 'SW1A 1AA',
+                        },
+                        {
+                          name: 'line1',
+                          label: 'Address Line 1 *',
+                          placeholder: '10 Downing Street',
+                          colSpan: true,
+                        },
+                        {
+                          name: 'line2',
+                          label: 'Address Line 2 (Optional)',
+                          placeholder: 'Flat / Apartment',
+                          colSpan: true,
+                        },
+                        {
+                          name: 'city',
+                          label: 'City *',
+                          placeholder: 'London',
+                        },
+                        {
+                          name: 'state',
+                          label: 'County',
+                          placeholder: 'Greater London',
+                        },
+                      ]
+                    : []),
                 ].map((field) => (
                   <div
                     key={field.name}
@@ -717,115 +925,42 @@ export default function CheckoutPage() {
                   </div>
                 ))}
               </div>
-            </div>
 
-            <div className='bg-white rounded-2xl p-6 border border-gray-100'>
-              <h2 className='font-montserrat font-black text-xl text-[#0A1F44] mb-5'>
-                Delivery Method
-              </h2>
-              {shippingLoading ? (
-                <p className='text-sm text-gray-400 font-lato'>
-                  Loading delivery options…
-                </p>
-              ) : shippingOptions.length === 0 ? (
-                <p className='text-sm text-gray-400 font-lato'>
-                  No delivery options available.
-                </p>
-              ) : (
-                <div className='space-y-2.5'>
-                  {/* Home Delivery — Royal Mail's shipping option now has
-                      its own conditional pricing rule in Medusa Admin
-                      (£4.99 below £80 cart total, £0 at/above it), so
-                      whatever calculated_price comes back for it IS
-                      already the correct price — no separate frontend
-                      £80 check needed, no second "Free Shipping" option
-                      to juggle. Single source of truth in Medusa. */}
-                  {resolvedDeliveryOption && (
-                    <button
-                      onClick={() =>
-                        setSelectedShippingOptionId(resolvedDeliveryOption.id)
-                      }
-                      className={`w-full flex items-center justify-between gap-3 p-4 rounded-xl border-2 transition-all text-left ${
-                        selectedShippingOptionId === resolvedDeliveryOption.id
-                          ? 'border-[#E8553A] bg-[#E8553A]/5'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <div className='flex items-center gap-3'>
-                        <span className='text-xl'>🚚</span>
-                        <div>
-                          <p
-                            className={`font-lato font-semibold text-sm ${
-                              selectedShippingOptionId ===
-                              resolvedDeliveryOption.id
-                                ? 'text-[#E8553A]'
-                                : 'text-[#0A1F44]'
-                            }`}
-                          >
-                            Home Delivery{' '}
-                            <span className='font-normal text-gray-400'>
-                              (1-3 days)
-                            </span>
-                          </p>
-                          <p className='text-xs text-gray-400 font-lato'>
-                            {resolvedDeliveryAmount === 0
-                              ? `Free on orders above ${formatCurrency(freeShippingThreshold)}`
-                              : `Add ${formatCurrency(Math.max(freeShippingThreshold - subtotal, 0))} more for free delivery`}
-                          </p>
-                        </div>
+              {/* Pickup Location — read-only, shown instead of an address
+                  form. This is where the order gets collected, not
+                  something the customer fills in. Same store address used
+                  on the order-detail "Collect In-Store" card. */}
+              {deliveryMode === 'pickup' && (
+                <div className='mt-4 pt-4 border-t border-gray-100'>
+                  <p className='text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 font-montserrat'>
+                    Pickup Location
+                  </p>
+                  {storeContact ? (
+                    <div className='flex items-start gap-3 p-4 rounded-xl bg-[#F2F4F7]'>
+                      <span className='text-xl'>🏬</span>
+                      <div>
+                        <p className='font-lato font-semibold text-sm text-[#0A1F44]'>
+                          {storeContact.name}
+                        </p>
+                        <p className='text-xs text-gray-500 font-lato mt-0.5 leading-relaxed'>
+                          {storeContact.address.line1}
+                          {storeContact.address.line2
+                            ? `, ${storeContact.address.line2}`
+                            : ''}
+                          <br />
+                          {[
+                            storeContact.address.city,
+                            storeContact.address.pincode,
+                          ]
+                            .filter(Boolean)
+                            .join(', ')}
+                        </p>
                       </div>
-                      <span
-                        className={`font-montserrat font-bold text-sm ${
-                          selectedShippingOptionId === resolvedDeliveryOption.id
-                            ? 'text-[#E8553A]'
-                            : 'text-[#0A1F44]'
-                        }`}
-                      >
-                        {resolvedDeliveryAmount === 0
-                          ? 'FREE'
-                          : formatCurrency(resolvedDeliveryAmount)}
-                      </span>
-                    </button>
-                  )}
-
-                  {pickupOption && (
-                    <button
-                      onClick={() =>
-                        setSelectedShippingOptionId(pickupOption.id)
-                      }
-                      className={`w-full flex items-center justify-between gap-3 p-4 rounded-xl border-2 transition-all text-left ${
-                        selectedShippingOptionId === pickupOption.id
-                          ? 'border-[#E8553A] bg-[#E8553A]/5'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <div className='flex items-center gap-3'>
-                        <span className='text-xl'>🏬</span>
-                        <div>
-                          <p
-                            className={`font-lato font-semibold text-sm ${
-                              selectedShippingOptionId === pickupOption.id
-                                ? 'text-[#E8553A]'
-                                : 'text-[#0A1F44]'
-                            }`}
-                          >
-                            Store Pickup
-                          </p>
-                          <p className='text-xs text-gray-400 font-lato'>
-                            Collect from our store — no delivery wait
-                          </p>
-                        </div>
-                      </div>
-                      <span
-                        className={`font-montserrat font-bold text-sm ${
-                          selectedShippingOptionId === pickupOption.id
-                            ? 'text-[#E8553A]'
-                            : 'text-[#0A1F44]'
-                        }`}
-                      >
-                        FREE
-                      </span>
-                    </button>
+                    </div>
+                  ) : (
+                    <p className='text-sm text-gray-400 font-lato'>
+                      Loading pickup location…
+                    </p>
                   )}
                 </div>
               )}
@@ -908,10 +1043,73 @@ export default function CheckoutPage() {
                 Order Summary
               </h3>
 
+              {/* Discount code or gift card */}
+              <div className='mb-5'>
+                {couponCode || giftCards.length > 0 ? (
+                  <div className='space-y-2'>
+                    {couponCode && (
+                      <div className='flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2'>
+                        <p className='font-montserrat font-bold text-green-700 text-xs'>
+                          {couponCode}
+                        </p>
+                        <button
+                          onClick={removeCoupon}
+                          className='text-red-400 hover:text-red-600 text-xs font-lato'
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                    {giftCards.map((gc) => (
+                      <div
+                        key={gc.code}
+                        className='flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2'
+                      >
+                        <p className='font-montserrat font-bold text-green-700 text-xs'>
+                          {gc.code}
+                        </p>
+                        <button
+                          onClick={() => removeGiftCard(gc.code)}
+                          className='text-red-400 hover:text-red-600 text-xs font-lato'
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className='flex gap-2'>
+                    <input
+                      type='text'
+                      value={promoInput}
+                      onChange={(e) =>
+                        setPromoInput(e.target.value.toUpperCase())
+                      }
+                      placeholder='Discount code or gift card'
+                      disabled={promoLoading}
+                      onKeyDown={(e) => e.key === 'Enter' && handleApplyPromo()}
+                      className='flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#E8553A] transition-colors font-lato disabled:opacity-60'
+                    />
+                    <button
+                      onClick={handleApplyPromo}
+                      disabled={promoLoading}
+                      className='bg-gray-100 hover:bg-gray-200 text-[#0A1F44] font-montserrat font-bold px-4 py-2.5 rounded-lg transition-colors text-sm disabled:opacity-60 shrink-0'
+                    >
+                      {promoLoading ? '…' : 'Apply'}
+                    </button>
+                  </div>
+                )}
+                {promoError && (
+                  <p className='text-xs text-red-500 font-lato mt-1.5'>
+                    {promoError}
+                  </p>
+                )}
+              </div>
+
               <div className='space-y-3 mb-5 max-h-48 overflow-y-auto'>
                 {items.map((item) => (
                   <div
-                    key={item.product.id}
+                    key={`${item.product.id}-${item.variant?.id}`}
                     className='flex items-center gap-3'
                   >
                     <div className='w-12 h-12 rounded-lg overflow-hidden bg-gray-50 shrink-0 border border-gray-100'>
@@ -955,34 +1153,44 @@ export default function CheckoutPage() {
                     <span>-{formatCurrency(discountAmount)}</span>
                   </div>
                 )}
+                {giftCardTotal > 0 && (
+                  <div className='flex justify-between text-green-600'>
+                    <span>Gift card</span>
+                    <span>-{formatCurrency(giftCardTotal)}</span>
+                  </div>
+                )}
                 <div className='flex justify-between'>
                   <span className='text-gray-500'>Shipping</span>
-                  <span
-                    className={
-                      displayShipping === 0
-                        ? 'text-green-600 font-semibold'
-                        : 'font-semibold'
-                    }
-                  >
-                    {displayShipping === 0
-                      ? 'FREE'
-                      : formatCurrency(displayShipping)}
-                  </span>
-                </div>
-                <div className='flex justify-between'>
-                  <span className='text-gray-500'>
-                    VAT ({Math.round(taxRate * 100)}%)
-                  </span>
-                  <span className='font-semibold'>{formatCurrency(tax)}</span>
+                  {!cartId ||
+                  (shippingLoading && shippingOptions.length === 0) ? (
+                    <span className='text-gray-400 text-xs'>
+                      Enter shipping address to view methods
+                    </span>
+                  ) : (
+                    <span
+                      className={
+                        displayShipping === 0
+                          ? 'text-green-600 font-semibold'
+                          : 'font-semibold'
+                      }
+                    >
+                      {displayShipping === 0
+                        ? 'FREE'
+                        : formatCurrency(displayShipping)}
+                    </span>
+                  )}
                 </div>
                 <div className='flex justify-between border-t border-gray-100 pt-3 text-base'>
                   <span className='font-montserrat font-black text-[#0A1F44]'>
                     Total
                   </span>
                   <span className='font-montserrat font-black text-[#0A1F44] text-xl'>
-                    {formatCurrency(displayTotal)}
+                    GBP {formatCurrency(displayTotal)}
                   </span>
                 </div>
+                <p className='text-xs text-gray-400 font-lato text-right -mt-1'>
+                  Including {formatCurrency(tax)} in taxes
+                </p>
               </div>
 
               {checkoutStep === 'details' && (
@@ -1038,9 +1246,19 @@ export default function CheckoutPage() {
               </div>
 
               <div className='flex items-center gap-3 p-4 rounded-xl border-2 border-[#E8553A] bg-[#E8553A]/5'>
-                <span className='text-2xl'>💳</span>
+                <span className='text-2xl'>
+                  {selectedPaymentType === 'amazon_pay'
+                    ? '🅰️'
+                    : selectedPaymentType === 'revolut_pay'
+                      ? '💠'
+                      : '💳'}
+                </span>
                 <span className='font-lato font-semibold text-sm text-[#E8553A]'>
-                  Card (Stripe — secure checkout)
+                  {selectedPaymentType === 'amazon_pay'
+                    ? 'Amazon Pay (Stripe — secure checkout)'
+                    : selectedPaymentType === 'revolut_pay'
+                      ? 'Revolut Pay (Stripe — secure checkout)'
+                      : 'Card (Stripe — secure checkout)'}
                 </span>
               </div>
 
@@ -1077,6 +1295,7 @@ export default function CheckoutPage() {
                         <StripeCardBlock
                           ref={cardRef}
                           onReady={() => setPaymentElementReady(true)}
+                          onMethodChange={setSelectedPaymentType}
                           returnUrl={
                             typeof window !== 'undefined'
                               ? `${window.location.origin}/checkout/complete?cart_id=${cartId}`

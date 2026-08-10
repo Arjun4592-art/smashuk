@@ -2,13 +2,7 @@ import { notFound } from 'next/navigation'
 import { getProduct, normalizeProduct } from '@/lib/api/store'
 import GiftCardPurchaseClient from './GiftCardPurchaseClient'
 import type { Metadata } from 'next'
-import { SITE_NAME } from '@/lib/constants'
-
-// Handle of the gift card product created in Medusa Admin (Products → the
-// one whose variants are the denominations: £10/£25/£50/etc). If you gave
-// it a different handle when creating it in Admin, update this constant to
-// match — everything else on this page is driven off it.
-const GIFT_CARD_PRODUCT_HANDLE = 'gift-card-product'
+import { SITE_NAME, GIFT_CARD_PRODUCT_HANDLE } from '@/lib/constants'
 
 export const metadata: Metadata = {
   title: `Gift Cards | ${SITE_NAME}`,

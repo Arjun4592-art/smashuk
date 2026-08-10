@@ -46,34 +46,6 @@ export default function OrderDetailPage({
   const isPickup = order?.metadata?.fulfillment_type === 'pickup'
   const displayStatus = order ? getDisplayOrderStatus(order) : 'pending'
 
-  // Pickup orders don't have a courier to track — they get directions to
-  // the store instead. Fetched only when needed, not for every order.
-  const [storeAddress, setStoreAddress] = useState<{
-    name: string
-    address: { line1: string; line2: string; city: string; state: string; pincode: string; country: string }
-  } | null>(null)
-  useEffect(() => {
-    if (!isPickup) return
-    fetch('/api/store/store-info')
-      .then((res) => res.json())
-      .then(setStoreAddress)
-      .catch(() => {})
-  }, [isPickup])
-
-  const directionsUrl = storeAddress
-    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-        [
-          storeAddress.name,
-          storeAddress.address.line1,
-          storeAddress.address.city,
-          storeAddress.address.pincode,
-          storeAddress.address.country,
-        ]
-          .filter(Boolean)
-          .join(', '),
-      )}`
-    : null
-
   // Order is delivered if status is completed or fulfillment_status is fulfilled
   const isDelivered =
     order?.status === 'completed' ||
@@ -202,9 +174,7 @@ export default function OrderDetailPage({
                           </p>
                         </div>
                         <span className='font-montserrat font-black text-sm text-[#0A1F44]'>
-                          {formatCurrency(
-                            item.unit_price * item.quantity,
-                          )}
+                          {formatCurrency(item.unit_price * item.quantity)}
                         </span>
                       </div>
 
@@ -259,9 +229,7 @@ export default function OrderDetailPage({
                 {!!order.shipping_total && (
                   <div className='flex items-center justify-between text-sm font-lato text-gray-500'>
                     <span>Shipping</span>
-                    <span>
-                      {formatCurrency(order.shipping_total ?? 0)}
-                    </span>
+                    <span>{formatCurrency(order.shipping_total ?? 0)}</span>
                   </div>
                 )}
                 <div className='flex items-center justify-between font-montserrat font-black text-[#0A1F44] pt-1'>
@@ -298,24 +266,6 @@ export default function OrderDetailPage({
                   This order is being handed to you at our store — there&apos;s
                   no courier delivery for pickup orders.
                 </p>
-                {storeAddress?.address && (
-                  <p className='text-xs text-gray-400 font-lato mt-2 leading-relaxed'>
-                    {storeAddress.address.line1}
-                    {storeAddress.address.line2 ? `, ${storeAddress.address.line2}` : ''}
-                    <br />
-                    {[storeAddress.address.city, storeAddress.address.pincode]
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                )}
-                <a
-                  href={directionsUrl ?? '#'}
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  className='mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#E8553A] hover:underline font-lato'
-                >
-                  📍 Get Directions →
-                </a>
               </div>
             ) : (
               <div className='bg-white rounded-2xl border border-gray-100 p-5'>

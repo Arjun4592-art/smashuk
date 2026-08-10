@@ -68,7 +68,7 @@ export default function ContactPage() {
     {
       icon: <ClockIcon size={20} />,
       label: 'Hours',
-      value: 'Mon–Fri 11am–7pm · Sat 11am–5pm · Sun closed',
+      value: 'Tue–Sun 11am–7pm · Sat 11am–5pm · Mon closed',
     },
   ]
 

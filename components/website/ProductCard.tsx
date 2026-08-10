@@ -71,11 +71,11 @@ export default function ProductCard({
       <Link href={`/shop/${product.slug}`} className='group block'>
         <div className='flex gap-4 bg-white border border-[#E5E7EB] rounded-2xl p-4 hover:border-[#E8553A]/30 hover:shadow-[0_4px_20px_rgba(232,85,58,0.08)] transition-all duration-300'>
           {/* Image */}
-          <div className='relative w-28 h-28 sm:w-36 sm:h-36 rounded-xl overflow-hidden bg-[#F2F4F7] shrink-0'>
+          <div className='relative w-28 h-28 sm:w-36 sm:h-36 rounded-xl overflow-hidden bg-[#F2F4F7] pt-3 shrink-0'>
             <img
               src={product.images[0]}
               alt={product.name}
-              className='w-full h-full object-cover group-hover:scale-105 transition-transform duration-500'
+              className='w-full h-full pt-3 object-cover group-hover:scale-105 transition-transform duration-500'
             />
             {displayBadge && (
               <span
@@ -183,211 +183,214 @@ export default function ProductCard({
   // ── Grid View ──────────────────────────────────────────────
   return (
     <>
-    <Link href={`/shop/${product.slug}`} className='group block'>
-      <div className='bg-white border border-[#E5E7EB] rounded-2xl overflow-hidden hover:border-[#E8553A]/35 hover:shadow-[0_8px_32px_rgba(232,85,58,0.10)] transition-all duration-300 hover:-translate-y-1'>
-        {/* ── Image Container ── */}
-        <div className='relative aspect-square bg-[#F2F4F7] overflow-hidden'>
-          <img
-            src={product.images[0]}
-            alt={product.name}
-            className='w-full h-full object-cover group-hover:scale-[1.07] transition-transform duration-700'
-          />
+      <Link href={`/shop/${product.slug}`} className='group block'>
+        <div className='bg-white border border-[#E5E7EB] rounded-2xl overflow-hidden hover:border-[#E8553A]/35 hover:shadow-[0_8px_32px_rgba(232,85,58,0.10)] transition-all duration-300 hover:-translate-y-1'>
+          {/* ── Image Container ── */}
+          <div className='relative aspect-square bg-[#F2F4F7] overflow-hidden'>
+            <img
+              src={product.images[0]}
+              alt={product.name}
+              className='w-full h-full object-cover group-hover:scale-[1.07] transition-transform duration-700'
+            />
 
-          {/* Hover Overlay */}
-          <div className='absolute inset-0 bg-[#0A1F44]/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-5 gap-3'>
-            {/* Quick view */}
-            <button
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                setShowQuickView(true)
-              }}
-              aria-label='Quick view'
-              className='w-10 h-10 bg-white rounded-full flex items-center justify-center text-[#0A1F44] hover:bg-[#E8553A] hover:text-white transition-all shadow-lg translate-y-4 group-hover:translate-y-0 duration-200'
-            >
-              <svg
-                width={15}
-                height={15}
-                viewBox='0 0 24 24'
-                fill='none'
-                stroke='currentColor'
-                strokeWidth='2'
-                strokeLinecap='round'
-                strokeLinejoin='round'
+            {/* Hover Overlay */}
+            <div className='absolute inset-0 bg-[#0A1F44]/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-5 gap-3'>
+              {/* Quick view */}
+              <button
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setShowQuickView(true)
+                }}
+                aria-label='Quick view'
+                className='w-10 h-10 bg-white rounded-full flex items-center justify-center text-[#0A1F44] hover:bg-[#E8553A] hover:text-white transition-all shadow-lg translate-y-4 group-hover:translate-y-0 duration-200'
               >
-                <path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z' />
-                <circle cx='12' cy='12' r='3' />
-              </svg>
-            </button>
+                <svg
+                  width={15}
+                  height={15}
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z' />
+                  <circle cx='12' cy='12' r='3' />
+                </svg>
+              </button>
 
-            {/* Add to cart */}
+              {/* Add to cart */}
+              <button
+                onClick={handleAddToCart}
+                disabled={!product.inStock}
+                aria-label='Add to cart'
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg translate-y-4 group-hover:translate-y-0 duration-300 ${
+                  added
+                    ? 'bg-[#10B981] text-white'
+                    : 'bg-white text-[#0A1F44] hover:bg-[#E8553A] hover:text-white'
+                }`}
+              >
+                {added ? <CheckIcon size={15} /> : <CartIcon size={15} />}
+              </button>
+
+              {/* Wishlist */}
+              <button
+                onClick={handleWishlist}
+                aria-label='Wishlist'
+                className='w-10 h-10 bg-white rounded-full flex items-center justify-center transition-all shadow-lg translate-y-4 group-hover:translate-y-0 duration-[400ms] hover:bg-[#E8553A]/10'
+              >
+                <HeartIcon
+                  size={15}
+                  filled={wishlisted}
+                  className={wishlisted ? 'text-[#E8553A]' : 'text-[#0A1F44]'}
+                />
+              </button>
+            </div>
+
+            {/* Badges — top left */}
+            {displayBadge && (
+              <span
+                className={`absolute top-3 left-3 text-[9px] font-black px-2.5 py-1 rounded-full font-montserrat tracking-wide ${BADGE_STYLES[displayBadge]}`}
+              >
+                {displayBadge}
+              </span>
+            )}
+
+            {/* Discount — top right */}
+            {discount > 0 && (
+              <span className='absolute top-3 right-3 text-[9px] font-black px-2 py-1 rounded-full bg-[#10B981] text-white font-montserrat'>
+                -{discount}%
+              </span>
+            )}
+
+            {/* Wishlist shortcut — top right (when no discount) */}
+            {discount === 0 && (
+              <button
+                onClick={handleWishlist}
+                aria-label='Wishlist'
+                className='absolute top-3 right-3 w-8 h-8 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-sm hover:bg-white transition-colors'
+              >
+                <HeartIcon
+                  size={14}
+                  filled={wishlisted}
+                  className={wishlisted ? 'text-[#E8553A]' : 'text-[#9CA3AF]'}
+                />
+              </button>
+            )}
+
+            {/* Out of stock */}
+            {!product.inStock && (
+              <div className='absolute inset-0 bg-white/75 flex items-center justify-center'>
+                <span className='font-montserrat font-bold text-sm text-[#4B5563] bg-white px-4 py-2 rounded-full border border-[#E5E7EB] shadow-sm'>
+                  Out of Stock
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* ── Info ── */}
+          <div className='p-4 pb-3'>
+            {/* Brand + Sport */}
+            <div className='flex items-center justify-between mb-1.5'>
+              <p className='text-[10px] text-[#E8553A] font-bold font-lato uppercase tracking-wider'>
+                {product.brand}
+              </p>
+              <p className='text-[10px] text-[#9CA3AF] font-lato capitalize'>
+                {product.sport}
+              </p>
+            </div>
+
+            {/* Name */}
+            <h3 className='font-montserrat font-bold text-[#0A1F44] text-[13px] leading-snug mb-2.5 line-clamp-2 group-hover:text-[#E8553A] transition-colors duration-200'>
+              {product.name}
+            </h3>
+
+            {/* Rating */}
+            <div className='flex items-center gap-1.5 mb-3'>
+              <div className='flex items-center gap-0.5'>
+                {[...Array(5)].map((_, i) => (
+                  <StarIcon
+                    key={i}
+                    size={10}
+                    filled={i < Math.floor(product.rating)}
+                    className={
+                      i < Math.floor(product.rating)
+                        ? 'text-amber-400'
+                        : 'text-[#E5E7EB]'
+                    }
+                  />
+                ))}
+              </div>
+              <span className='text-[10px] text-[#9CA3AF] font-lato'>
+                ({product.reviewCount})
+              </span>
+              {product.stock <= 5 && product.inStock && (
+                <span className='ml-auto text-[10px] text-[#E8553A] font-bold font-lato'>
+                  Only {product.stock} left!
+                </span>
+              )}
+            </div>
+
+            {/* Price */}
+            <div className='flex items-center gap-2 flex-wrap'>
+              <span className='font-montserrat font-black text-base text-[#0A1F44]'>
+                {formatCurrency(product.price)}
+              </span>
+              {product.originalPrice && (
+                <>
+                  <span className='text-xs text-[#9CA3AF] line-through font-lato'>
+                    {formatCurrency(product.originalPrice)}
+                  </span>
+                  <span className='text-[10px] font-black text-[#10B981] bg-[#D1FAE5] px-1.5 py-0.5 rounded-full font-montserrat'>
+                    Save £
+                    {(product.originalPrice - product.price).toLocaleString(
+                      'en-GB',
+                    )}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* ── Add to Cart Button ── */}
+          <div className='px-4 pb-4'>
             <button
               onClick={handleAddToCart}
               disabled={!product.inStock}
-              aria-label='Add to cart'
-              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg translate-y-4 group-hover:translate-y-0 duration-300 ${
-                added
-                  ? 'bg-[#10B981] text-white'
-                  : 'bg-white text-[#0A1F44] hover:bg-[#E8553A] hover:text-white'
+              className={`w-full py-2.5 rounded-xl text-[13px] font-black font-montserrat transition-all duration-200 flex items-center justify-center gap-2 ${
+                !product.inStock
+                  ? 'bg-[#F2F4F7] text-[#9CA3AF] cursor-not-allowed'
+                  : added
+                    ? 'bg-[#10B981] text-white'
+                    : adding
+                      ? 'bg-[#0A1F44]/80 text-white'
+                      : 'bg-[#0A1F44] hover:bg-[#E8553A] text-white hover:shadow-[0_4px_12px_rgba(232,85,58,0.25)] hover:-translate-y-0.5'
               }`}
             >
-              {added ? <CheckIcon size={15} /> : <CartIcon size={15} />}
+              {added ? (
+                <>
+                  <CheckIcon size={14} /> Added to Cart
+                </>
+              ) : adding ? (
+                'Adding...'
+              ) : !product.inStock ? (
+                'Out of Stock'
+              ) : (
+                <>
+                  <CartIcon size={14} /> Add to Cart
+                </>
+              )}
             </button>
-
-            {/* Wishlist */}
-            <button
-              onClick={handleWishlist}
-              aria-label='Wishlist'
-              className='w-10 h-10 bg-white rounded-full flex items-center justify-center transition-all shadow-lg translate-y-4 group-hover:translate-y-0 duration-[400ms] hover:bg-[#E8553A]/10'
-            >
-              <HeartIcon
-                size={15}
-                filled={wishlisted}
-                className={wishlisted ? 'text-[#E8553A]' : 'text-[#0A1F44]'}
-              />
-            </button>
-          </div>
-
-          {/* Badges — top left */}
-          {displayBadge && (
-            <span
-              className={`absolute top-3 left-3 text-[9px] font-black px-2.5 py-1 rounded-full font-montserrat tracking-wide ${BADGE_STYLES[displayBadge]}`}
-            >
-              {displayBadge}
-            </span>
-          )}
-
-          {/* Discount — top right */}
-          {discount > 0 && (
-            <span className='absolute top-3 right-3 text-[9px] font-black px-2 py-1 rounded-full bg-[#10B981] text-white font-montserrat'>
-              -{discount}%
-            </span>
-          )}
-
-          {/* Wishlist shortcut — top right (when no discount) */}
-          {discount === 0 && (
-            <button
-              onClick={handleWishlist}
-              aria-label='Wishlist'
-              className='absolute top-3 right-3 w-8 h-8 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-sm hover:bg-white transition-colors'
-            >
-              <HeartIcon
-                size={14}
-                filled={wishlisted}
-                className={wishlisted ? 'text-[#E8553A]' : 'text-[#9CA3AF]'}
-              />
-            </button>
-          )}
-
-          {/* Out of stock */}
-          {!product.inStock && (
-            <div className='absolute inset-0 bg-white/75 flex items-center justify-center'>
-              <span className='font-montserrat font-bold text-sm text-[#4B5563] bg-white px-4 py-2 rounded-full border border-[#E5E7EB] shadow-sm'>
-                Out of Stock
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* ── Info ── */}
-        <div className='p-4 pb-3'>
-          {/* Brand + Sport */}
-          <div className='flex items-center justify-between mb-1.5'>
-            <p className='text-[10px] text-[#E8553A] font-bold font-lato uppercase tracking-wider'>
-              {product.brand}
-            </p>
-            <p className='text-[10px] text-[#9CA3AF] font-lato capitalize'>
-              {product.sport}
-            </p>
-          </div>
-
-          {/* Name */}
-          <h3 className='font-montserrat font-bold text-[#0A1F44] text-[13px] leading-snug mb-2.5 line-clamp-2 group-hover:text-[#E8553A] transition-colors duration-200'>
-            {product.name}
-          </h3>
-
-          {/* Rating */}
-          <div className='flex items-center gap-1.5 mb-3'>
-            <div className='flex items-center gap-0.5'>
-              {[...Array(5)].map((_, i) => (
-                <StarIcon
-                  key={i}
-                  size={10}
-                  filled={i < Math.floor(product.rating)}
-                  className={
-                    i < Math.floor(product.rating)
-                      ? 'text-amber-400'
-                      : 'text-[#E5E7EB]'
-                  }
-                />
-              ))}
-            </div>
-            <span className='text-[10px] text-[#9CA3AF] font-lato'>
-              ({product.reviewCount})
-            </span>
-            {product.stock <= 5 && product.inStock && (
-              <span className='ml-auto text-[10px] text-[#E8553A] font-bold font-lato'>
-                Only {product.stock} left!
-              </span>
-            )}
-          </div>
-
-          {/* Price */}
-          <div className='flex items-center gap-2 flex-wrap'>
-            <span className='font-montserrat font-black text-base text-[#0A1F44]'>
-              {formatCurrency(product.price)}
-            </span>
-            {product.originalPrice && (
-              <>
-                <span className='text-xs text-[#9CA3AF] line-through font-lato'>
-                  {formatCurrency(product.originalPrice)}
-                </span>
-                <span className='text-[10px] font-black text-[#10B981] bg-[#D1FAE5] px-1.5 py-0.5 rounded-full font-montserrat'>
-                  Save £
-                  {(product.originalPrice - product.price).toLocaleString(
-                    'en-GB',
-                  )}
-                </span>
-              </>
-            )}
           </div>
         </div>
-
-        {/* ── Add to Cart Button ── */}
-        <div className='px-4 pb-4'>
-          <button
-            onClick={handleAddToCart}
-            disabled={!product.inStock}
-            className={`w-full py-2.5 rounded-xl text-[13px] font-black font-montserrat transition-all duration-200 flex items-center justify-center gap-2 ${
-              !product.inStock
-                ? 'bg-[#F2F4F7] text-[#9CA3AF] cursor-not-allowed'
-                : added
-                  ? 'bg-[#10B981] text-white'
-                  : adding
-                    ? 'bg-[#0A1F44]/80 text-white'
-                    : 'bg-[#0A1F44] hover:bg-[#E8553A] text-white hover:shadow-[0_4px_12px_rgba(232,85,58,0.25)] hover:-translate-y-0.5'
-            }`}
-          >
-            {added ? (
-              <>
-                <CheckIcon size={14} /> Added to Cart
-              </>
-            ) : adding ? (
-              'Adding...'
-            ) : !product.inStock ? (
-              'Out of Stock'
-            ) : (
-              <>
-                <CartIcon size={14} /> Add to Cart
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-    </Link>
-    {showQuickView && (
-      <QuickViewModal product={product} onClose={() => setShowQuickView(false)} />
-    )}
+      </Link>
+      {showQuickView && (
+        <QuickViewModal
+          product={product}
+          onClose={() => setShowQuickView(false)}
+        />
+      )}
     </>
   )
 }

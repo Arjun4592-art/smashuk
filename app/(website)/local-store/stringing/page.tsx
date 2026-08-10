@@ -2,11 +2,12 @@ import Link from 'next/link'
 import { SITE_NAME } from '@/lib/constants'
 import { getPublicStoreContact } from '@/lib/store-contact'
 import StringingBookingForm from '@/components/website/StringingBookingForm'
+import LuxuryHero from '@/components/website/local-store/LuxuryHero'
 
 export const metadata = {
   title: `Racket Stringing Services — Badminton, Tennis & Squash | ${SITE_NAME}`,
   description:
-    'Professional racket stringing for badminton, tennis and squash. UKRSA-qualified stringers, four fully-automatic machines, 24-hour turnaround or a 40-minute express service. Prices from £15.',
+    'Professional racket stringing for badminton, tennis and squash. UKRSA-qualified stringers, four fully-automatic machines, 24-hour turnaround or a 40-minute express service. Prices from £16.',
   keywords:
     'racket stringing manchester, badminton stringing service, tennis racket restring, squash racket restring, 40 minute stringing service, string a racket manchester, ukrsa stringers, racket restring prices',
 }
@@ -15,19 +16,19 @@ const PRICING = [
   {
     sport: 'Badminton',
     icon: '🏸',
-    price: 'From £15',
+    price: 'From £16',
     href: '/local-store/stringing/badminton',
   },
   {
     sport: 'Tennis',
     icon: '🎾',
-    price: 'From £18',
+    price: 'From £22',
     href: '/local-store/stringing/tennis',
   },
   {
     sport: 'Squash',
-    icon: '🥎',
-    price: 'From £15',
+    icon: '🏓',
+    price: 'From £22',
     href: '/local-store/stringing/squash',
   },
 ]
@@ -127,27 +128,19 @@ export default async function StringingServicesPage() {
 
   return (
     <div className='bg-white'>
-      <div className='relative bg-[#0A1F44] text-white overflow-hidden'>
-        {/* TODO: replace with a photo of your stringing machine / a racket being strung */}
-        <img
-          src='/local-store/stringing-hero.jpg'
-          alt='Racket stringing service'
-          className='absolute inset-0 w-full h-full object-cover opacity-30'
-        />
-        <div className='relative max-w-5xl mx-auto px-4 py-14 text-center'>
-          <h1 className='font-montserrat font-black text-3xl md:text-4xl mb-3'>
-            Racket Stringing Services
-          </h1>
-          <p className='text-white/70 font-lato max-w-xl mx-auto mb-5'>
-            UKRSA-qualified stringers, four fully-automatic machines, and over
-            10,000 rackets strung — including for players at major tournaments.
-          </p>
-          <p className='text-white/60 font-lato text-sm'>📍 {fullAddress}</p>
-          <p className='text-white/60 font-lato text-sm mt-1'>
-            🕐 Opening Hours: 11am–7pm (Mon–Sat)
-          </p>
-        </div>
-      </div>
+      {/* Hero */}
+      <LuxuryHero
+        title='Racket Stringing Services'
+        subtitle='UKRSA-qualified stringers, four fully-automatic machines, and over 10,000 rackets strung — including for players at major tournaments.'
+        image='/local-store/stringing-hero.jpg'
+        imageAlt='Racket stringing service'
+        metaLines={[`📍 ${fullAddress}`, '🕐 Opening Hours: 11am–7pm (Mon–Sat)']}
+        breadcrumbs={[
+          { label: 'Local Store', href: '/local-store' },
+          { label: 'Stringing' },
+        ]}
+        size='lg'
+      />
 
       <div className='max-w-5xl mx-auto px-4 py-14'>
         {/* 40-minute express banner */}
@@ -212,13 +205,13 @@ export default async function StringingServicesPage() {
             <p className='text-sm text-gray-500 font-lato leading-relaxed'>
               Need it before a match today? Book an on-the-spot slot in advance
               and wait in-store — a small same-day surcharge applies if it
-              wasn’t pre-booked.
+              wasn't pre-booked.
             </p>
           </div>
         </div>
 
         {/* Why choose us */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
             Why Choose Our Stringing Services?
           </h2>
@@ -226,7 +219,7 @@ export default async function StringingServicesPage() {
             {WHY_CHOOSE_US.map((w) => (
               <div
                 key={w.title}
-                className='bg-white rounded-2xl border border-gray-100 p-6'
+                className='ls-card reveal bg-white rounded-2xl border border-gray-100 p-6'
               >
                 <span className='text-3xl'>{w.icon}</span>
                 <h3 className='font-montserrat font-bold text-base text-[#0A1F44] mt-3 mb-1.5'>
@@ -240,25 +233,65 @@ export default async function StringingServicesPage() {
           </div>
         </div>
 
-        {/* Process */}
-        <div className='mb-14'>
-          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
+        {/* Process — horizontal timeline */}
+        <div className='mb-14 reveal'>
+          <h2 className='font-montserrat font-black text-2xl text-white text-center mb-10 bg-[#0A1F44] rounded-2xl py-5 px-4'>
             What Happens To Your Racket
           </h2>
-          <div className='grid grid-cols-1 md:grid-cols-5 gap-4'>
-            {PROCESS.map((p) => (
-              <div key={p.step} className='text-center'>
-                <div className='w-10 h-10 rounded-full bg-[#E8553A] text-white font-montserrat font-black flex items-center justify-center mx-auto mb-3'>
-                  {p.step}
+
+          {/* Desktop timeline */}
+          <div className='hidden md:block relative'>
+            {/* Connector line */}
+            <div className='absolute top-5 left-[10%] right-[10%] h-0.5 bg-gradient-to-r from-[#E8553A] via-[#E8553A] to-[#E8553A] opacity-20' />
+
+            <div className='grid grid-cols-5 gap-4 relative'>
+              {PROCESS.map((p, i) => (
+                <div
+                  key={p.step}
+                  className='flex flex-col items-center text-center'
+                >
+                  {/* Circle with connecting line overlap */}
+                  <div className='relative z-10 w-10 h-10 rounded-full bg-[#E8553A] text-white font-montserrat font-black text-base flex items-center justify-center mb-4 shadow-[0_4px_12px_rgba(232,85,58,0.35)]'>
+                    {p.step}
+                  </div>
+                  {/* Card */}
+                  <div className='bg-white rounded-xl border border-gray-100 p-4 w-full hover:border-[#E8553A]/30 hover:shadow-[0_4px_16px_rgba(232,85,58,0.08)] transition-all'>
+                    <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-2'>
+                      {p.title}
+                    </h3>
+                    <p className='text-xs text-gray-500 font-lato leading-relaxed'>
+                      {p.desc}
+                    </p>
+                  </div>
                 </div>
-                <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-1'>
-                  {p.title}
-                </h3>
-                <p className='text-xs text-gray-500 font-lato leading-relaxed'>
-                  {p.desc}
-                </p>
-              </div>
-            ))}
+              ))}
+            </div>
+          </div>
+
+          {/* Mobile timeline — vertical */}
+          <div className='md:hidden relative pl-8'>
+            {/* Vertical line */}
+            <div className='absolute left-4 top-2 bottom-2 w-0.5 bg-gradient-to-b from-[#E8553A] to-[#E8553A]/20' />
+
+            <div className='flex flex-col gap-6'>
+              {PROCESS.map((p) => (
+                <div key={p.step} className='relative flex gap-4 items-start'>
+                  {/* Circle */}
+                  <div className='absolute -left-8 z-10 w-8 h-8 rounded-full bg-[#E8553A] text-white font-montserrat font-black text-sm flex items-center justify-center shadow-[0_4px_12px_rgba(232,85,58,0.35)]'>
+                    {p.step}
+                  </div>
+                  {/* Card */}
+                  <div className='bg-white rounded-xl border border-gray-100 p-4 w-full'>
+                    <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-1.5'>
+                      {p.title}
+                    </h3>
+                    <p className='text-xs text-gray-500 font-lato leading-relaxed'>
+                      {p.desc}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -268,16 +301,16 @@ export default async function StringingServicesPage() {
             🧵 Bring Your Own String
           </h3>
           <p className='text-sm text-gray-500 font-lato leading-relaxed'>
-            Already have string you like? Bring it in and we’ll only charge the
+            Already have string you like? Bring it in and we'll only charge the
             labour fee. We also stock a wide range of strings from leading
             brands and can usually source a specific one on request.
           </p>
         </div>
 
         {/* Ready to get started / booking */}
-        <div id='book' className='mb-14'>
+        <div id='book' className='mb-14 reveal'>
           <div className='bg-[#0A1F44] rounded-2xl p-8 text-white text-center mb-8'>
-            <h2 className='font-montserrat font-black text-xl mb-2'>
+            <h2 className='font-montserrat font-black text-xl mb-2 text-white'>
               Ready to Get Started?
             </h2>
             <p className='text-white/70 font-lato mb-1'>
@@ -294,8 +327,8 @@ export default async function StringingServicesPage() {
         </div>
 
         {/* Helpful stringing guides */}
-        <div className='mb-14'>
-          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-2'>
+        <div className='mb-14 reveal'>
+          <h2 className='font-montserrat font-black text-2xl text-white text-center mb-8 bg-[#0A1F44] rounded-2xl py-5 px-4'>
             Helpful Stringing Guides
           </h2>
           <p className='text-gray-500 font-lato text-center mb-8 max-w-xl mx-auto'>
@@ -324,16 +357,16 @@ export default async function StringingServicesPage() {
           </div>
         </div>
 
-        <div className='bg-[#0A1F44] rounded-2xl p-8 text-white text-center'>
-          <h2 className='font-montserrat font-black text-xl mb-2'>
+        <div className='reveal-scale bg-[#0A1F44] rounded-2xl p-8 text-white text-center'>
+          <h2 className='font-montserrat font-black text-xl mb-2 text-white'>
             Prefer To Book By Phone Or Message?
           </h2>
           <p className='text-white/70 font-lato mb-5'>
-            That works too — get in touch and we’ll sort a slot for you.
+            That works too — get in touch and we'll sort a slot for you.
           </p>
           <Link
             href='/contact'
-            className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
+            className='ls-btn-shine inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
           >
             Contact Us
           </Link>

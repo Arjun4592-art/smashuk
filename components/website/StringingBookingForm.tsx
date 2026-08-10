@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useCartStore } from '@/store/cartStore'
-import type { Product } from '@/types'
+import { normalizeProduct } from '@/lib/api/store'
 import {
   getStringGroupsForSport,
   getTensionsForSport,
@@ -13,15 +13,21 @@ import {
 const NO_PREFERENCE = 'No preference — advise me in-store'
 const OWN_STRING = 'Bringing my own string'
 
-// Store hours — Mon-Fri 11am-7pm, Sat 11am-5pm, Sun closed. Used to build
-// valid time-slot options for the day the customer picks.
+// Store hours — matches the real booking form at smashuk.co
+// ("Booking Stringing Service - Manchester": Date field says
+// "Tuesday - Sunday", Time field says "11AM - 4PM"). The store is closed
+// MONDAYS, not Sundays — this previously had that backwards (closed
+// Sunday, open till 5-7pm every other day), so every Monday showed
+// bookable slots that don't exist in real life, and Tuesday-Sunday cut
+// off 3-5 hours too early/late versus the real 11am-4pm drop-off window.
 function slotsForDate(dateStr: string): string[] {
   if (!dateStr) return []
-  const day = new Date(`${dateStr}T00:00:00`).getDay() // 0 = Sun, 6 = Sat
-  if (day === 0) return [] // closed Sundays
-  const closeHour = day === 6 ? 17 : 19 // Sat closes 5pm, else 7pm
+  const day = new Date(`${dateStr}T00:00:00`).getDay() // 0 = Sun, 1 = Mon, 6 = Sat
+  if (day === 1) return [] // closed Mondays
+  const openHour = 11 // 11 AM
+  const closeHour = 16 // 4 PM — last slot is 3:30 PM
   const slots: string[] = []
-  for (let h = 11; h < closeHour; h++) {
+  for (let h = openHour; h < closeHour; h++) {
     slots.push(`${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? 'AM' : 'PM'}`)
     slots.push(`${h % 12 === 0 ? 12 : h % 12}:30 ${h < 12 ? 'AM' : 'PM'}`)
   }
@@ -35,7 +41,12 @@ function todayISO() {
 export default function StringingBookingForm() {
   const router = useRouter()
   const { cartId, addItem } = useCartStore()
-  const [services, setServices] = useState<Product[]>([])
+  // Raw Medusa products (not the app's normalized `Product` shape) — kept
+  // raw here because this form needs metadata.service_sport and the full
+  // variants/calculated_price data for the picker/price display below.
+  // Only normalizeProduct()'d right before it goes into the cart (see
+  // handleBook) since that's the shape cartStore/cart/checkout expect.
+  const [services, setServices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [sport, setSport] = useState('')
   const [stringChoice, setStringChoice] = useState('')
@@ -108,7 +119,7 @@ export default function StringingBookingForm() {
       ].filter(Boolean)
 
       addItem(
-        selectedProduct,
+        normalizeProduct(selectedProduct),
         1,
         { id: variant.id },
         {

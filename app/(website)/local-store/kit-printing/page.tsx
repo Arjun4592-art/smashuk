@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { SITE_NAME } from '@/lib/constants'
+import LuxuryHero from '@/components/website/local-store/LuxuryHero'
 
 export const metadata = {
   title: `Club Kit Printing Service — Custom Sports Apparel | ${SITE_NAME}`,
@@ -96,21 +97,18 @@ const HOW_IT_WORKS = [
 export default function KitPrintingPage() {
   return (
     <div className='bg-white'>
-      <div className='bg-[#0A1F44] text-white'>
-        <div className='max-w-5xl mx-auto px-4 py-14 text-center'>
-          <h1 className='font-montserrat font-black text-3xl md:text-4xl mb-3'>
-            Club Kit Printing Service
-          </h1>
-          <p className='text-white/70 font-lato max-w-xl mx-auto'>
-            Professional design and printing services for clubs and universities
-            across the UK
-          </p>
-        </div>
-      </div>
+      <LuxuryHero
+        title='Club Kit Printing Service'
+        subtitle='Professional design and printing services for clubs and universities across the UK'
+        breadcrumbs={[
+          { label: 'Local Store', href: '/local-store' },
+          { label: 'Kit Printing' },
+        ]}
+      />
 
       <div className='max-w-5xl mx-auto px-4 py-14'>
         {/* What We Offer */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
             What We Offer
           </h2>
@@ -118,7 +116,7 @@ export default function KitPrintingPage() {
             {WHAT_WE_OFFER.map((f) => (
               <div
                 key={f.title}
-                className='bg-white rounded-2xl border border-gray-100 p-6'
+                className='ls-card reveal bg-white rounded-2xl border border-gray-100 p-6'
               >
                 <span className='text-3xl'>{f.icon}</span>
                 <h3 className='font-montserrat font-bold text-lg text-[#0A1F44] mt-3 mb-1.5'>
@@ -133,7 +131,7 @@ export default function KitPrintingPage() {
           <div className='text-center'>
             <Link
               href='/contact'
-              className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
+              className='ls-btn-shine inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
             >
               Request a Quote
             </Link>
@@ -141,7 +139,7 @@ export default function KitPrintingPage() {
         </div>
 
         {/* Our Services */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
             Our Services
           </h2>
@@ -149,7 +147,7 @@ export default function KitPrintingPage() {
             {SERVICES.map((s) => (
               <div
                 key={s.title}
-                className='bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100'
+                className='ls-card reveal bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100'
               >
                 <h3 className='font-montserrat font-bold text-base text-[#0A1F44] mb-1.5'>
                   {s.icon} {s.title}
@@ -172,7 +170,7 @@ export default function KitPrintingPage() {
         </div>
 
         {/* Flexible Pricing */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-2'>
             Flexible Pricing for Every Budget
           </h2>
@@ -180,7 +178,7 @@ export default function KitPrintingPage() {
             {PRICING.map((p) => (
               <div
                 key={p.title}
-                className='bg-white rounded-2xl border border-gray-100 p-6 text-center'
+                className='ls-card reveal bg-white rounded-2xl border border-gray-100 p-6 text-center'
               >
                 <h3 className='font-montserrat font-bold text-lg text-[#0A1F44] mb-1.5'>
                   {p.title}
@@ -197,7 +195,7 @@ export default function KitPrintingPage() {
         </div>
 
         {/* How It Works */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
             How It Works
           </h2>
@@ -205,7 +203,7 @@ export default function KitPrintingPage() {
             {HOW_IT_WORKS.map((h) => (
               <div
                 key={h.step}
-                className='bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100'
+                className='ls-card reveal bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100'
               >
                 <span className='font-montserrat font-black text-2xl text-[#E8553A]/30'>
                   {h.step}
@@ -222,7 +220,7 @@ export default function KitPrintingPage() {
         </div>
 
         {/* Ready to Get Started */}
-        <div className='bg-[#0A1F44] rounded-2xl p-8 text-white text-center'>
+        <div className='reveal-scale bg-[#0A1F44] rounded-2xl p-8 text-white text-center'>
           <h2 className='font-montserrat font-black text-xl mb-2'>
             Ready to Get Started?
           </h2>
@@ -241,7 +239,7 @@ export default function KitPrintingPage() {
           </p>
           <Link
             href='/contact'
-            className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
+            className='ls-btn-shine inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
           >
             Request a Quote
           </Link>

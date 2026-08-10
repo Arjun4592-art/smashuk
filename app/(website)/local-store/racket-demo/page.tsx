@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { SITE_NAME } from '@/lib/constants'
 import DemoBrandAccordion from '@/components/website/DemoBrandAccordion'
+import LuxuryHero from '@/components/website/local-store/LuxuryHero'
+import Accordion from '@/components/website/local-store/Accordion'
 
 export const metadata = {
   title: `Racket Demo Service — Try Before You Buy | ${SITE_NAME}`,
@@ -159,28 +161,20 @@ const FAQS = [
 export default function RacketDemoServicePage() {
   return (
     <div className='bg-white'>
-      <div className='relative bg-[#0A1F44] text-white overflow-hidden'>
-        {/* TODO: replace with a photo of your demo racket wall / trial rackets */}
-        <img
-          src='/local-store/racket-demo-hero.jpg'
-          alt='Racket demo service'
-          className='absolute inset-0 w-full h-full object-cover opacity-30'
-        />
-        <div className='relative max-w-5xl mx-auto px-4 py-14 text-center'>
-          <h1 className='font-montserrat font-black text-3xl md:text-4xl mb-3'>
-            Try Before You Buy: Racket Demo Service
-          </h1>
-          <p className='text-white/70 font-lato max-w-xl mx-auto'>
-            Not sure which racket is right for you? Test the latest rackets from
-            top brands across badminton, tennis, and padel before making your
-            investment.
-          </p>
-        </div>
-      </div>
+      <LuxuryHero
+        title='Try Before You Buy: Racket Demo Service'
+        subtitle='Not sure which racket is right for you? Test the latest rackets from top brands across badminton, tennis, and padel before making your investment.'
+        image='/local-store/racket-demo-hero.jpg'
+        imageAlt='Racket demo service'
+        breadcrumbs={[
+          { label: 'Local Store', href: '/local-store' },
+          { label: 'Racket Demo' },
+        ]}
+      />
 
       <div className='max-w-5xl mx-auto px-4 py-14'>
         {/* How the demo service works */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
             How Our Demo Service Works
           </h2>
@@ -188,7 +182,7 @@ export default function RacketDemoServicePage() {
             {HOW_IT_WORKS.map((h) => (
               <div
                 key={h.step}
-                className='bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100'
+                className='ls-card reveal bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100'
               >
                 <span className='font-montserrat font-black text-2xl text-[#E8553A]/30'>
                   {h.step}
@@ -208,7 +202,7 @@ export default function RacketDemoServicePage() {
         </div>
 
         {/* Choose your sport + available rackets */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-2'>
             Choose Your Sport
           </h2>
@@ -220,7 +214,7 @@ export default function RacketDemoServicePage() {
             {SPORTS.map((s) => (
               <div
                 key={s.title}
-                className='bg-white rounded-2xl border border-gray-100 p-6'
+                className='ls-card reveal bg-white rounded-2xl border border-gray-100 p-6'
               >
                 <div className='text-center mb-4'>
                   <span className='text-3xl'>{s.icon}</span>
@@ -265,7 +259,7 @@ export default function RacketDemoServicePage() {
         </div>
 
         {/* Why demo a racket */}
-        <div className='mb-14'>
+        <div className='mb-14 reveal'>
           <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
             Why Demo a Racket?
           </h2>
@@ -273,7 +267,7 @@ export default function RacketDemoServicePage() {
             {WHY_DEMO.map((w) => (
               <div
                 key={w.title}
-                className='bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100 text-center'
+                className='ls-card reveal bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100 text-center'
               >
                 <span className='text-2xl'>{w.icon}</span>
                 <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mt-2 mb-1.5'>
@@ -287,25 +281,25 @@ export default function RacketDemoServicePage() {
           </div>
         </div>
 
-        {/* FAQ */}
-        <div className='mb-14'>
-          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
-            Frequently Asked Questions
-          </h2>
-          <div className='max-w-3xl mx-auto divide-y divide-gray-100 border-t border-b border-gray-100'>
-            {FAQS.map((f) => (
-              <details key={f.q} className='group py-4'>
-                <summary className='font-montserrat font-semibold text-sm text-[#0A1F44] cursor-pointer list-none flex items-center justify-between gap-4'>
-                  {f.q}
-                  <span className='text-[#E8553A] group-open:rotate-45 transition-transform text-lg leading-none'>
-                    +
-                  </span>
-                </summary>
-                <p className='text-sm text-gray-500 font-lato leading-relaxed mt-2'>
-                  {f.a}
-                </p>
-              </details>
-            ))}
+        {/* FAQ — split into a left intro column + right accordion column */}
+        <div className='mb-14 reveal'>
+          <div className='grid grid-cols-1 md:grid-cols-[minmax(0,260px)_1fr] gap-10 md:gap-14'>
+            <div className='md:sticky md:top-24 md:self-start'>
+              <span className='ls-eyebrow text-[#E8553A] text-xs font-montserrat font-bold uppercase mb-2 inline-flex'>
+                FAQs
+              </span>
+              <h2 className='font-montserrat font-black text-2xl text-[#0A1F44]'>
+                Frequently Asked Questions
+              </h2>
+            </div>
+            <Accordion
+              defaultOpenId={FAQS[0]?.q}
+              containerClassName='divide-y divide-gray-100 border-t border-b border-gray-100'
+              rowClassName='py-4'
+              triggerClassName='font-montserrat font-semibold text-sm text-[#0A1F44]'
+              contentClassName='text-sm text-gray-500 font-lato leading-relaxed pt-2'
+              items={FAQS.map((f) => ({ id: f.q, title: f.q, content: f.a }))}
+            />
           </div>
         </div>
 
@@ -319,7 +313,7 @@ export default function RacketDemoServicePage() {
           </p>
           <Link
             href='/contact'
-            className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
+            className='ls-btn-shine inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
           >
             Book Your Demo Session Now
           </Link>

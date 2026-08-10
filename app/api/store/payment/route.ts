@@ -54,6 +54,37 @@ export async function POST(req: NextRequest) {
     const token = await getCustomerToken()
     const h = storeHeaders(token)
 
+    if (action === 'get-method') {
+      // Looks up the *actual* payment method type Stripe used for a given
+      // PaymentIntent — needed on /checkout/complete, which only ever runs
+      // after an off-site redirect (Amazon Pay, Revolut Pay). That page
+      // has no component state left after the full-page round trip, so
+      // without this it can't tell the two apart and previously just
+      // hardcoded 'card' into the order's metadata regardless of which
+      // off-site method the customer actually used.
+      const { paymentIntentId } = body
+      if (!paymentIntentId) {
+        return NextResponse.json(
+          { error: 'paymentIntentId required' },
+          { status: 400 },
+        )
+      }
+      try {
+        const { requireStripe } = await import('@/lib/stripe-server')
+        const pi = await requireStripe().paymentIntents.retrieve(
+          paymentIntentId,
+          { expand: ['payment_method'] },
+        )
+        const pm = pi.payment_method
+        const type = typeof pm === 'object' && pm ? pm.type : undefined
+        return NextResponse.json({ payment_method: type ?? 'card' })
+      } catch (err: any) {
+        console.error('[/api/store/payment] get-method failed:', err)
+        // Non-fatal from the caller's perspective — it falls back to 'card'
+        return NextResponse.json({ payment_method: 'card' })
+      }
+    }
+
     if (action === 'create-collection') {
       // Step 1: Create payment collection for cart
       const res = await fetch(`${MEDUSA_URL}/store/payment-collections`, {
