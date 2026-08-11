@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useCartStore } from '@/store/cartStore'
-import { normalizeProduct } from '@/lib/api/store'
+import type { Product } from '@/types'
+import type { Sport } from '@/lib/stringing-options'
 import {
   getStringGroupsForSport,
   getTensionsForSport,
@@ -13,21 +14,22 @@ import {
 const NO_PREFERENCE = 'No preference — advise me in-store'
 const OWN_STRING = 'Bringing my own string'
 
-// Store hours — matches the real booking form at smashuk.co
-// ("Booking Stringing Service - Manchester": Date field says
-// "Tuesday - Sunday", Time field says "11AM - 4PM"). The store is closed
-// MONDAYS, not Sundays — this previously had that backwards (closed
-// Sunday, open till 5-7pm every other day), so every Monday showed
-// bookable slots that don't exist in real life, and Tuesday-Sunday cut
-// off 3-5 hours too early/late versus the real 11am-4pm drop-off window.
+// Static racket types — always shown so the form itself never disappears.
+// Live Medusa products (fetched below) are matched against these to enable
+// real online pay-and-book; if the backend is unreachable or a sport has no
+// matching product yet, the form still renders and falls back to sending a
+// booking request by email instead of hiding entirely.
+const SPORTS: Sport[] = ['badminton', 'tennis', 'squash']
+
+// Store hours — Mon-Fri 11am-7pm, Sat 11am-5pm, Sun closed. Used to build
+// valid time-slot options for the day the customer picks.
 function slotsForDate(dateStr: string): string[] {
   if (!dateStr) return []
-  const day = new Date(`${dateStr}T00:00:00`).getDay() // 0 = Sun, 1 = Mon, 6 = Sat
-  if (day === 1) return [] // closed Mondays
-  const openHour = 11 // 11 AM
-  const closeHour = 16 // 4 PM — last slot is 3:30 PM
+  const day = new Date(`${dateStr}T00:00:00`).getDay() // 0 = Sun, 6 = Sat
+  if (day === 0) return [] // closed Sundays
+  const closeHour = day === 6 ? 17 : 19 // Sat closes 5pm, else 7pm
   const slots: string[] = []
-  for (let h = openHour; h < closeHour; h++) {
+  for (let h = 11; h < closeHour; h++) {
     slots.push(`${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? 'AM' : 'PM'}`)
     slots.push(`${h % 12 === 0 ? 12 : h % 12}:30 ${h < 12 ? 'AM' : 'PM'}`)
   }
@@ -41,13 +43,7 @@ function todayISO() {
 export default function StringingBookingForm() {
   const router = useRouter()
   const { cartId, addItem } = useCartStore()
-  // Raw Medusa products (not the app's normalized `Product` shape) — kept
-  // raw here because this form needs metadata.service_sport and the full
-  // variants/calculated_price data for the picker/price display below.
-  // Only normalizeProduct()'d right before it goes into the cart (see
-  // handleBook) since that's the shape cartStore/cart/checkout expect.
-  const [services, setServices] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+  const [services, setServices] = useState<Product[]>([])
   const [sport, setSport] = useState('')
   const [stringChoice, setStringChoice] = useState('')
   const [tension, setTension] = useState('')
@@ -66,7 +62,6 @@ export default function StringingBookingForm() {
         if (found.length) setSport(found[0].metadata.service_sport)
       })
       .catch(() => {})
-      .finally(() => setLoading(false))
   }, [])
 
   const timeSlots = useMemo(() => slotsForDate(date), [date])
@@ -89,7 +84,7 @@ export default function StringingBookingForm() {
   }
 
   const handleBook = async () => {
-    if (!selectedProduct) {
+    if (!sport) {
       toast.error('Please choose a racket type.')
       return
     }
@@ -101,33 +96,66 @@ export default function StringingBookingForm() {
       toast.error('Please choose today or a future date.')
       return
     }
-    const variant = (selectedProduct as any).variants?.[0]
-    if (!variant?.id) {
-      toast.error(
-        'This service is not available to book right now — please contact us instead.',
-      )
+
+    const notesParts = [
+      stringChoice && stringChoice !== NO_PREFERENCE
+        ? `String: ${stringChoice}`
+        : '',
+      tension && tension !== NO_PREFERENCE ? `Tension: ${tension}` : '',
+    ].filter(Boolean)
+    const notes = notesParts.length
+      ? notesParts.join(' · ')
+      : 'No preference given'
+
+    const variant = (selectedProduct as any)?.variants?.[0]
+
+    // No live Medusa product for this sport (backend down, or not seeded
+    // yet) — send the booking as an email enquiry instead of blocking it.
+    // /api/store/contact only needs SMTP, so it works independently of
+    // Medusa being reachable.
+    if (!selectedProduct || !variant?.id) {
+      setSubmitting(true)
+      try {
+        const res = await fetch('/api/store/contact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'Website booking',
+            email: 'no-reply@smashuk.co',
+            subject: `Stringing booking request — ${sport}`,
+            message: `Racket type: ${sport}\nDrop-off date: ${date}\nTime slot: ${time}\n${notes}\n\n(Sent automatically — online payment wasn't available when this was submitted, please contact the customer to confirm and take payment.)`,
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok)
+          throw new Error(data.error ?? 'Failed to send booking request')
+        toast.success(
+          "Booking request sent — we'll confirm by message shortly.",
+        )
+        setDate('')
+        setTime('')
+        setStringChoice('')
+        setTension('')
+      } catch {
+        toast.error(
+          'Could not send your booking request — please try again or WhatsApp us.',
+        )
+      } finally {
+        setSubmitting(false)
+      }
       return
     }
 
     setSubmitting(true)
     try {
-      const notesParts = [
-        stringChoice && stringChoice !== NO_PREFERENCE
-          ? `String: ${stringChoice}`
-          : '',
-        tension && tension !== NO_PREFERENCE ? `Tension: ${tension}` : '',
-      ].filter(Boolean)
-
       addItem(
-        normalizeProduct(selectedProduct),
+        selectedProduct,
         1,
         { id: variant.id },
         {
           booking_date: date,
           booking_time: time,
-          tension_notes: notesParts.length
-            ? notesParts.join(' · ')
-            : 'No preference given',
+          tension_notes: notes,
           service_type: 'stringing',
         },
       )
@@ -143,25 +171,6 @@ export default function StringingBookingForm() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className='bg-white rounded-2xl border border-gray-100 p-6 text-center text-sm text-gray-400 font-lato'>
-        Loading booking form…
-      </div>
-    )
-  }
-
-  if (!services.length) {
-    return (
-      <div className='bg-[#FFF8E7] border border-[#FFC453]/40 rounded-2xl p-6 text-center'>
-        <p className='text-sm text-gray-600 font-lato'>
-          Online booking isn’t set up yet — please use the contact button below
-          and we’ll book you in manually.
-        </p>
-      </div>
-    )
-  }
-
   return (
     <div className='bg-white rounded-2xl border border-gray-100 p-6'>
       <h3 className='font-montserrat font-bold text-lg text-[#0A1F44] mb-4'>
@@ -173,17 +182,17 @@ export default function StringingBookingForm() {
             Racket Type
           </label>
           <div className='grid grid-cols-3 gap-2'>
-            {services.map((p: any) => (
+            {SPORTS.map((s) => (
               <button
-                key={p.id}
-                onClick={() => handleSportChange(p.metadata.service_sport)}
+                key={s}
+                onClick={() => handleSportChange(s)}
                 className={`px-3 py-2.5 rounded-xl border-2 text-sm font-lato font-semibold capitalize transition-colors ${
-                  sport === p.metadata.service_sport
+                  sport === s
                     ? 'border-[#E8553A] bg-[#E8553A]/5 text-[#E8553A]'
                     : 'border-gray-200 text-gray-600 hover:border-gray-300'
                 }`}
               >
-                {p.metadata.service_sport}
+                {s}
               </button>
             ))}
           </div>
@@ -284,7 +293,7 @@ export default function StringingBookingForm() {
           className='w-full bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold py-3 rounded-full text-sm transition-colors disabled:opacity-50'
         >
           {submitting
-            ? 'Adding…'
+            ? 'Sending…'
             : selectedProduct
               ? `Book & Pay — ${(
                   (selectedProduct as any).variants?.[0]?.calculated_price
@@ -292,11 +301,14 @@ export default function StringingBookingForm() {
                   (selectedProduct as any).variants?.[0]?.prices?.[0]?.amount ??
                   0
                 ).toFixed(2)}`
-              : 'Book Now'}
+              : 'Request Booking'}
         </button>
         <p className='text-[11.5px] text-gray-400 font-lato text-center'>
-          Payment is taken online — bring your racket to us at your booked time.{' '}
-          {cartId ? '' : "You'll set up your cart on the next step."}
+          {selectedProduct
+            ? `Payment is taken online — bring your racket to us at your booked time.${
+                cartId ? '' : " You'll set up your cart on the next step."
+              }`
+            : "We'll message or email you to confirm your slot and take payment — no online payment needed right now."}
         </p>
       </div>
     </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { CONTACT_EMAIL, CONTACT_PHONE, SITE_NAME } from '@/lib/constants'
 import {
   MailIcon,
@@ -10,6 +11,42 @@ import {
   MessageIcon,
   CheckCircleIcon,
 } from '@/components/ui/Icons'
+
+// Same subtle diagonal grid-line texture used across the local-store and
+// shop headers — keeps this page's header consistent with the rest of the
+// site instead of being plain navy.
+function GridTexture() {
+  return (
+    <svg
+      className='absolute inset-0 w-full h-full opacity-[0.06] pointer-events-none'
+      preserveAspectRatio='none'
+      xmlns='http://www.w3.org/2000/svg'
+    >
+      {Array.from({ length: 20 }).map((_, i) => (
+        <line
+          key={'v' + i}
+          x1={`${i * 5.5}%`}
+          y1='0'
+          x2={`${i * 5.5 + 3}%`}
+          y2='100%'
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
+      {Array.from({ length: 12 }).map((_, i) => (
+        <line
+          key={'h' + i}
+          x1='0'
+          y1={`${i * 9}%`}
+          x2='100%'
+          y2={`${i * 9 + 2}%`}
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
+    </svg>
+  )
+}
 
 export default function ContactPage() {
   const [form, setForm] = useState({
@@ -74,14 +111,21 @@ export default function ContactPage() {
 
   return (
     <div className='bg-[#F8F9FB]'>
-      {/* Header */}
-      <div className='bg-[#0A1F44]'>
-        <div className='max-w-5xl mx-auto px-4 py-14'>
+      {/* Header — same navy + grid-texture strip as the local-store / shop headers */}
+      <div className='relative bg-[#0A1F44] overflow-hidden'>
+        <GridTexture />
+        <div className='relative max-w-5xl mx-auto px-4 py-14'>
+          <p className='text-white/40 text-xs font-mono tracking-widest uppercase mb-4'>
+            <Link href='/' className='hover:text-white/70 transition-colors'>
+              Home
+            </Link>
+            &nbsp;/&nbsp; Contact
+          </p>
           <div className='inline-flex items-center gap-2 bg-white/10 text-white/80 text-xs font-lato font-semibold px-3 py-1.5 rounded-full mb-4'>
             <MessageIcon size={14} />
             We usually reply within 24 hours
           </div>
-          <h1 className='font-montserrat font-black text-3xl md:text-4xl text-white mb-2'>
+          <h1 className='reveal font-montserrat font-black text-3xl md:text-4xl text-white mb-2'>
             Get in touch
           </h1>
           <p className='text-white/60 font-lato max-w-lg'>
@@ -91,10 +135,10 @@ export default function ContactPage() {
         </div>
       </div>
 
-      <div className='max-w-5xl mx-auto px-4 -mt-8 pb-16'>
+      <div className='relative z-10 max-w-5xl mx-auto px-4 -mt-8 pb-16'>
         <div className='grid grid-cols-1 md:grid-cols-3 gap-6'>
-          {/* Form */}
-          <div className='md:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-[0_8px_30px_rgba(10,31,68,0.06)] p-6 md:p-8'>
+          {/* Form — mobile order 2 (shown after contact info), desktop order unchanged (left, wide column) */}
+          <div className='order-2 md:order-none md:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-[0_8px_30px_rgba(10,31,68,0.06)] p-6 md:p-8'>
             {status === 'success' ? (
               <div className='flex flex-col items-center text-center py-10'>
                 <div className='w-14 h-14 rounded-full bg-green-50 text-green-600 flex items-center justify-center mb-4'>
@@ -198,8 +242,8 @@ export default function ContactPage() {
             )}
           </div>
 
-          {/* Contact info sidebar */}
-          <div className='space-y-4'>
+          {/* Contact info sidebar — mobile order 1 (shown first, right below hero), desktop order unchanged (right column) */}
+          <div className='order-1 md:order-none space-y-4'>
             <div className='bg-white rounded-2xl border border-gray-100 shadow-[0_8px_30px_rgba(10,31,68,0.06)] p-2 divide-y divide-gray-50'>
               {CONTACT_CARDS.map((c) => {
                 const inner = (

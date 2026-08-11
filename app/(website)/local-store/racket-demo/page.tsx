@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { SITE_NAME } from '@/lib/constants'
 import DemoBrandAccordion from '@/components/website/DemoBrandAccordion'
-import LuxuryHero from '@/components/website/local-store/LuxuryHero'
 import Accordion from '@/components/website/local-store/Accordion'
 
 export const metadata = {
@@ -70,14 +69,8 @@ const SPORTS = [
           'Evo Aero',
         ],
       },
-      {
-        brand: 'Yonex',
-        items: ['V-Core 98', 'V-Core 100', 'E-Zone 100'],
-      },
-      {
-        brand: 'Head',
-        items: ['Radical MP'],
-      },
+      { brand: 'Yonex', items: ['V-Core 98', 'V-Core 100', 'E-Zone 100'] },
+      { brand: 'Head', items: ['Radical MP'] },
     ],
   },
   {
@@ -86,6 +79,29 @@ const SPORTS = [
     desc: 'Discover your ideal padel racket from beginner to advanced performance frames.',
     brands: [],
     comingSoon: true,
+  },
+]
+
+const HOW_IT_WORKS = [
+  {
+    n: '01',
+    title: '£10 Demo Fee',
+    body: 'Per racket, maximum 2 rackets at a time.',
+  },
+  {
+    n: '02',
+    title: 'Refundable Deposit',
+    body: "Equal to the racket's full retail price, held securely on card.",
+  },
+  {
+    n: '03',
+    title: 'Full Demo Period',
+    body: 'Test the racket on court in real playing conditions.',
+  },
+  {
+    n: '04',
+    title: 'Expert Guidance',
+    body: 'Personalised recommendations based on your game and skill level.',
   },
 ]
 
@@ -112,29 +128,6 @@ const WHY_DEMO = [
   },
 ]
 
-const HOW_IT_WORKS = [
-  {
-    step: '01',
-    title: '£10 Demo Fee',
-    desc: 'Per racket, maximum 2 rackets at a time.',
-  },
-  {
-    step: '02',
-    title: 'Refundable Deposit',
-    desc: "Equal to the racket's full retail price, held securely on card.",
-  },
-  {
-    step: '03',
-    title: 'Full Demo Period',
-    desc: 'Test the racket on court in real playing conditions.',
-  },
-  {
-    step: '04',
-    title: 'Expert Guidance',
-    desc: 'Personalised recommendations based on your game and skill level.',
-  },
-]
-
 const FAQS = [
   {
     q: 'How long can I demo a racket?',
@@ -158,76 +151,152 @@ const FAQS = [
   },
 ]
 
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span className='inline-block font-montserrat text-[10px] font-bold tracking-[0.2em] uppercase text-[#E8553A] bg-[#E8553A]/8 px-3 py-1 rounded-full mb-4'>
+      {children}
+    </span>
+  )
+}
+
+function GridTexture() {
+  return (
+    <svg
+      className='absolute inset-0 w-full h-full opacity-[0.06]'
+      preserveAspectRatio='none'
+      xmlns='http://www.w3.org/2000/svg'
+    >
+      {Array.from({ length: 20 }).map((_, i) => (
+        <line
+          key={'v' + i}
+          x1={`${i * 5.5}%`}
+          y1='0'
+          x2={`${i * 5.5 + 3}%`}
+          y2='100%'
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
+      {Array.from({ length: 12 }).map((_, i) => (
+        <line
+          key={'h' + i}
+          x1='0'
+          y1={`${i * 9}%`}
+          x2='100%'
+          y2={`${i * 9 + 2}%`}
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
+    </svg>
+  )
+}
+
 export default function RacketDemoServicePage() {
   return (
-    <div className='bg-white'>
-      <LuxuryHero
-        title='Try Before You Buy: Racket Demo Service'
-        subtitle='Not sure which racket is right for you? Test the latest rackets from top brands across badminton, tennis, and padel before making your investment.'
-        image='/local-store/racket-demo-hero.jpg'
-        imageAlt='Racket demo service'
-        breadcrumbs={[
-          { label: 'Local Store', href: '/local-store' },
-          { label: 'Racket Demo' },
-        ]}
-      />
-
-      <div className='max-w-5xl mx-auto px-4 py-14'>
-        {/* How the demo service works */}
-        <div className='mb-14 reveal'>
-          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
-            How Our Demo Service Works
-          </h2>
-          <div className='grid grid-cols-1 md:grid-cols-4 gap-6'>
-            {HOW_IT_WORKS.map((h) => (
-              <div
-                key={h.step}
-                className='ls-card reveal bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100'
-              >
-                <span className='font-montserrat font-black text-2xl text-[#E8553A]/30'>
-                  {h.step}
-                </span>
-                <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mt-2 mb-1.5'>
-                  {h.title}
-                </h3>
-                <p className='text-xs text-gray-500 font-lato leading-relaxed'>
-                  {h.desc}
-                </p>
-              </div>
-            ))}
-          </div>
-          <p className='text-center text-sm text-gray-500 font-lato mt-6'>
-            📍 Demos are only available for in-store collection in Manchester
+    <div className='bg-[#F5F3EF] min-h-screen'>
+      {/* ── HERO ─────────────────────────────────────────────────────── */}
+      <section className='reveal relative bg-[#0A1F44] overflow-hidden'>
+        <GridTexture />
+        <div className='relative max-w-5xl mx-auto px-4 md:px-6 pt-14 pb-16'>
+          <p className='text-white/40 text-xs font-mono tracking-widest uppercase mb-8'>
+            <Link href='/local-store' className='hover:text-white/70'>
+              Local Store
+            </Link>{' '}
+            &nbsp;/&nbsp; Racket Demo
+          </p>
+          <Eyebrow>Try Before You Buy</Eyebrow>
+          <h1 className='font-montserrat font-black text-white text-4xl md:text-5xl mb-5 leading-tight max-w-2xl'>
+            Racket Demo <span className='text-[#E8553A]'>Service</span>
+          </h1>
+          <p className='text-white/60 text-sm leading-relaxed max-w-xl mb-2'>
+            Not sure which racket is right for you? Test the latest rackets from
+            top brands across badminton, tennis, and padel before making your
+            investment.
           </p>
         </div>
+      </section>
 
-        {/* Choose your sport + available rackets */}
-        <div className='mb-14 reveal'>
-          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-2'>
-            Choose Your Sport
+      {/* ── HOW IT WORKS ─────────────────────────────────────────────── */}
+      <section className='reveal max-w-5xl mx-auto px-4 md:px-6 py-16'>
+        <Eyebrow>How It Works</Eyebrow>
+        <h2 className='font-montserrat font-black text-[#0A1F44] text-3xl mb-10'>
+          Our Demo Service, Step By Step
+        </h2>
+
+        <div className='hidden md:flex gap-0 relative mb-4'>
+          <div className='absolute top-9 left-9 right-9 h-[2px] bg-gradient-to-r from-[#E8553A]/20 via-[#E8553A]/60 to-[#E8553A]/20' />
+          {HOW_IT_WORKS.map((p) => (
+            <div key={p.n} className='flex-1 flex flex-col items-center px-3'>
+              <div className='relative z-10 w-[72px] h-[72px] rounded-full border-2 border-[#E8553A] bg-[#F5F3EF] flex items-center justify-center mb-5'>
+                <span className='font-montserrat font-black text-[#E8553A] text-lg'>
+                  {p.n}
+                </span>
+              </div>
+              <h3 className='font-montserrat font-bold text-[#0A1F44] text-sm text-center mb-2'>
+                {p.title}
+              </h3>
+              <p className='text-gray-400 text-xs text-center leading-relaxed'>
+                {p.body}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className='md:hidden space-y-0 relative mb-6'>
+          <div className='absolute left-[23px] top-8 bottom-8 w-[2px] bg-gradient-to-b from-[#E8553A]/60 to-[#E8553A]/10' />
+          {HOW_IT_WORKS.map((p) => (
+            <div key={p.n} className='flex gap-6 py-5'>
+              <div className='relative z-10 flex-shrink-0 w-[46px] h-[46px] rounded-full border-2 border-[#E8553A] bg-[#F5F3EF] flex items-center justify-center'>
+                <span className='font-montserrat font-black text-[#E8553A] text-sm'>
+                  {p.n}
+                </span>
+              </div>
+              <div className='pt-2'>
+                <h3 className='font-montserrat font-bold text-[#0A1F44] text-sm mb-1'>
+                  {p.title}
+                </h3>
+                <p className='text-gray-400 text-xs leading-relaxed'>
+                  {p.body}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <p className='text-center text-sm text-gray-400'>
+          📍 Demos are only available for in-store collection in Manchester
+        </p>
+      </section>
+
+      {/* ── CHOOSE YOUR SPORT ────────────────────────────────────────── */}
+      <section className='reveal bg-white border-y border-[#0A1F44]/8'>
+        <div className='max-w-5xl mx-auto px-4 md:px-6 py-16'>
+          <Eyebrow>Choose Your Sport</Eyebrow>
+          <h2 className='font-montserrat font-black text-[#0A1F44] text-3xl mb-2'>
+            Available Demo Rackets
           </h2>
-          <p className='text-center text-sm text-gray-500 font-lato mb-8'>
+          <p className='text-gray-400 text-sm mb-10 max-w-md'>
             Select your sport below to view available demo rackets and book your
-            session
+            session.
           </p>
-          <div className='grid grid-cols-1 md:grid-cols-3 gap-6'>
+          <div className='grid md:grid-cols-3 gap-6'>
             {SPORTS.map((s) => (
               <div
                 key={s.title}
-                className='ls-card reveal bg-white rounded-2xl border border-gray-100 p-6'
+                className='bg-[#F5F3EF] rounded-2xl border border-[#0A1F44]/8 p-6'
               >
                 <div className='text-center mb-4'>
                   <span className='text-3xl'>{s.icon}</span>
-                  <h3 className='font-montserrat font-bold text-lg text-[#0A1F44] mt-3 mb-1.5'>
+                  <h3 className='font-montserrat font-black text-[#0A1F44] text-lg mt-3 mb-1.5'>
                     {s.title}
                   </h3>
-                  <p className='text-sm text-gray-500 font-lato leading-relaxed'>
+                  <p className='text-gray-400 text-sm leading-relaxed'>
                     {s.desc}
                   </p>
                 </div>
-
                 {s.comingSoon ? (
-                  <p className='text-xs text-gray-400 font-lato text-center italic'>
+                  <p className='text-xs text-gray-400 text-center italic'>
                     Coming soon — contact us for availability
                   </p>
                 ) : (
@@ -236,7 +305,7 @@ export default function RacketDemoServicePage() {
               </div>
             ))}
           </div>
-          <p className='text-center text-sm text-gray-500 font-lato mt-8'>
+          <p className='text-center text-sm text-gray-400 mt-8'>
             📞 Need help? Give us a call or drop us an email at{' '}
             <a
               href='mailto:sales@smashuk.co'
@@ -246,91 +315,97 @@ export default function RacketDemoServicePage() {
             </a>
           </p>
         </div>
+      </section>
 
-        <div className='bg-[#FFF8E7] border border-[#FFC453]/40 rounded-2xl p-6 text-center mb-14'>
-          <p className='font-montserrat font-black text-2xl text-[#0A1F44]'>
+      {/* ── PRICE CALLOUT ────────────────────────────────────────────── */}
+      <section className='reveal max-w-5xl mx-auto px-4 md:px-6 py-16'>
+        <div className='bg-[#0A1F44] rounded-2xl p-8 text-center'>
+          <p className='font-montserrat font-black text-3xl text-white'>
             £10 per racket
           </p>
-          <p className='text-sm text-gray-500 font-lato mt-1'>
+          <p className='text-white/60 text-sm mt-2 max-w-lg mx-auto leading-relaxed'>
             Plus a fully refundable deposit — equal to the racket&rsquo;s retail
             price — held on your card and returned when you bring the racket
             back in good condition.
           </p>
         </div>
+      </section>
 
-        {/* Why demo a racket */}
-        <div className='mb-14 reveal'>
-          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
-            Why Demo a Racket?
-          </h2>
-          <div className='grid grid-cols-1 md:grid-cols-4 gap-6'>
-            {WHY_DEMO.map((w) => (
-              <div
-                key={w.title}
-                className='ls-card reveal bg-[#F8F9FB] rounded-2xl p-6 border border-gray-100 text-center'
-              >
-                <span className='text-2xl'>{w.icon}</span>
-                <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mt-2 mb-1.5'>
-                  {w.title}
-                </h3>
-                <p className='text-xs text-gray-500 font-lato leading-relaxed'>
-                  {w.desc}
-                </p>
-              </div>
-            ))}
-          </div>
+      {/* ── WHY DEMO ─────────────────────────────────────────────────── */}
+      <section className='reveal max-w-5xl mx-auto px-4 md:px-6 pb-16'>
+        <Eyebrow>Why Demo</Eyebrow>
+        <h2 className='font-montserrat font-black text-[#0A1F44] text-3xl mb-10'>
+          Why Demo a Racket?
+        </h2>
+        <div className='grid sm:grid-cols-2 md:grid-cols-4 gap-px bg-[#0A1F44]/6 border border-[#0A1F44]/6 rounded-2xl overflow-hidden'>
+          {WHY_DEMO.map((w) => (
+            <div
+              key={w.title}
+              className='bg-white p-6 hover:bg-[#F5F3EF] transition-colors text-center'
+            >
+              <span className='text-2xl block mb-3'>{w.icon}</span>
+              <h3 className='font-montserrat font-bold text-[#0A1F44] text-sm mb-2'>
+                {w.title}
+              </h3>
+              <p className='text-gray-400 text-xs leading-relaxed'>{w.desc}</p>
+            </div>
+          ))}
         </div>
+      </section>
 
-        {/* FAQ — split into a left intro column + right accordion column */}
-        <div className='mb-14 reveal'>
+      {/* ── FAQ ──────────────────────────────────────────────────────── */}
+      <section className='reveal bg-white border-y border-[#0A1F44]/8'>
+        <div className='max-w-5xl mx-auto px-4 md:px-6 py-16'>
           <div className='grid grid-cols-1 md:grid-cols-[minmax(0,260px)_1fr] gap-10 md:gap-14'>
             <div className='md:sticky md:top-24 md:self-start'>
-              <span className='ls-eyebrow text-[#E8553A] text-xs font-montserrat font-bold uppercase mb-2 inline-flex'>
-                FAQs
-              </span>
-              <h2 className='font-montserrat font-black text-2xl text-[#0A1F44]'>
+              <Eyebrow>FAQs</Eyebrow>
+              <h2 className='font-montserrat font-black text-[#0A1F44] text-3xl'>
                 Frequently Asked Questions
               </h2>
             </div>
             <Accordion
               defaultOpenId={FAQS[0]?.q}
-              containerClassName='divide-y divide-gray-100 border-t border-b border-gray-100'
+              containerClassName='divide-y divide-[#0A1F44]/8 border-t border-b border-[#0A1F44]/8'
               rowClassName='py-4'
               triggerClassName='font-montserrat font-semibold text-sm text-[#0A1F44]'
-              contentClassName='text-sm text-gray-500 font-lato leading-relaxed pt-2'
+              contentClassName='text-sm text-gray-400 leading-relaxed pt-2'
               items={FAQS.map((f) => ({ id: f.q, title: f.q, content: f.a }))}
             />
           </div>
         </div>
+      </section>
 
-        <div className='bg-[#0A1F44] rounded-2xl p-8 text-white text-center mb-14'>
-          <h2 className='font-montserrat font-black text-xl mb-2'>
+      {/* ── CTA ──────────────────────────────────────────────────────── */}
+      <section className='reveal max-w-5xl mx-auto px-4 md:px-6 py-16'>
+        <div className='bg-[#0A1F44] rounded-2xl p-10 text-white text-center'>
+          <h2 className='font-montserrat font-black text-2xl mb-2'>
             Ready to Find Your Perfect Racket?
           </h2>
-          <p className='text-white/70 font-lato mb-5'>
+          <p className='text-white/70 text-sm mb-6 max-w-lg mx-auto leading-relaxed'>
             Book your demo session today and experience the difference before
             you buy. Our experts are here to help you make the right choice.
           </p>
           <Link
             href='/contact'
-            className='ls-btn-shine inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
+            className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'
           >
             Book Your Demo Session Now
           </Link>
         </div>
+      </section>
 
-        <div className='max-w-2xl mx-auto text-center'>
-          <h2 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-2'>
-            Who we are
-          </h2>
-          <p className='text-xs text-gray-500 font-lato leading-relaxed'>
-            With a team coming from a diverse background, we are run by players
-            who are actively playing at club to county level in badminton,
-            tennis and squash. We love to share our knowledge so feel free to
-            give us a ring with any questions!
-          </p>
-        </div>
-      </div>
+      {/* ── FOOTER NOTE ──────────────────────────────────────────────── */}
+      <section className='reveal max-w-2xl mx-auto px-4 md:px-6 pb-16 text-center'>
+        <h2 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-2'>
+          Who we are
+        </h2>
+        <p className='text-xs text-gray-400 leading-relaxed'>
+          With a team coming from a diverse background, we are run by players
+          who are actively playing at club to county level in badminton, tennis
+          and squash. We love to share our knowledge so feel free to give us a
+          ring with any questions!
+        </p>
+      </section>
     </div>
   )
 }

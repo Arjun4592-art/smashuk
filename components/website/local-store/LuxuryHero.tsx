@@ -1,90 +1,122 @@
-import Image from 'next/image'
 import Link from 'next/link'
 
-type Breadcrumb = {
-  label: string
-  href?: string
-}
-
-type LuxuryHeroProps = {
-  title: string
-  subtitle?: string
-  eyebrow?: string
-  image?: string
-  imageAlt?: string
-  metaLines?: string[]
-  breadcrumbs?: Breadcrumb[]
-  size?: 'md' | 'lg'
-}
+type Crumb = { label: string; href?: string }
 
 export default function LuxuryHero({
+  eyebrow,
   title,
   subtitle,
-  eyebrow,
   image,
   imageAlt,
-  metaLines,
   breadcrumbs,
   size = 'md',
-}: LuxuryHeroProps) {
-  const minHeight = size === 'lg' ? 'min-h-[420px] md:min-h-[520px]' : 'min-h-[320px] md:min-h-[400px]'
+  cta,
+  metaLines,
+}: {
+  eyebrow?: string
+  title: string
+  subtitle?: string
+  image?: string
+  imageAlt?: string
+  breadcrumbs?: Crumb[]
+  size?: 'md' | 'lg'
+  cta?: { label: string; href: string }
+  metaLines?: string[]
+}) {
+  const py = size === 'lg' ? 'py-20 md:py-28' : 'py-16 md:py-20'
+  const titleSize =
+    size === 'lg'
+      ? 'text-4xl md:text-6xl leading-tight'
+      : 'text-3xl md:text-4xl'
 
   return (
-    <section className={`relative w-full ${minHeight} bg-[#0A1F44] overflow-hidden`}>
-      {image && (
-        <Image
-          src={image}
-          alt={imageAlt || title}
-          fill
-          priority
-          className='object-cover opacity-40'
-          sizes='100vw'
-        />
-      )}
-      <div className='absolute inset-0 bg-linear-to-t from-[#0A1F44] via-[#0A1F44]/70 to-[#0A1F44]/30' />
+    <div className='ls-hero ls-hero-noise relative text-white overflow-hidden'>
+      {/* Ambient floating glows */}
+      <span
+        className='ls-hero-glow hidden md:block'
+        style={{ width: 260, height: 260, top: '-6%', left: '4%' }}
+      />
+      <span
+        className='ls-hero-glow hidden md:block'
+        style={{
+          width: 220,
+          height: 220,
+          bottom: '-10%',
+          right: '8%',
+          animationDelay: '2.4s',
+        }}
+      />
 
-      <div className='relative z-10 max-w-5xl mx-auto px-4 h-full flex flex-col justify-end pb-12 pt-24'>
+      {image && (
+        <div className='absolute inset-0 overflow-hidden'>
+          <img
+            src={image}
+            alt={imageAlt || title}
+            className='ls-hero-img absolute inset-0 w-full h-full object-cover opacity-25'
+          />
+          <div className='absolute inset-0 bg-gradient-to-t from-[#050f22]/80 via-transparent to-transparent' />
+        </div>
+      )}
+
+      <div className={`relative max-w-5xl mx-auto px-4 ${py} text-center`}>
         {breadcrumbs && breadcrumbs.length > 0 && (
-          <nav className='flex items-center flex-wrap gap-2 text-xs font-lato text-white/60 mb-6'>
-            {breadcrumbs.map((crumb, idx) => (
-              <span key={`${crumb.label}-${idx}`} className='flex items-center gap-2'>
-                {crumb.href ? (
-                  <Link href={crumb.href} className='hover:text-white transition-colors'>
-                    {crumb.label}
+          <nav className='ls-hero-eyebrow mb-5 flex items-center justify-center gap-1.5 text-[11px] font-lato text-white/50'>
+            {breadcrumbs.map((c, i) => (
+              <span key={c.label} className='flex items-center gap-1.5'>
+                {i > 0 && <span className='text-white/30'>/</span>}
+                {c.href ? (
+                  <Link href={c.href} className='hover:text-white/80 transition-colors'>
+                    {c.label}
                   </Link>
                 ) : (
-                  <span className='text-white'>{crumb.label}</span>
+                  <span className='text-white/70'>{c.label}</span>
                 )}
-                {idx < breadcrumbs.length - 1 && <span>/</span>}
               </span>
             ))}
           </nav>
         )}
 
         {eyebrow && (
-          <p className='text-xs font-montserrat font-bold text-[#E8553A] tracking-widest uppercase mb-3'>
+          <div className='ls-hero-eyebrow ls-eyebrow inline-flex items-center bg-white/10 text-white/80 text-xs font-lato font-semibold px-3 py-1.5 rounded-full mb-5 backdrop-blur-sm'>
             {eyebrow}
-          </p>
+          </div>
         )}
 
-        <h1 className='font-montserrat font-black text-3xl md:text-5xl text-white max-w-2xl'>
+        <h1
+          className={`ls-hero-title font-montserrat font-black ${titleSize} mb-4`}
+        >
           {title}
         </h1>
 
+        <span className='ls-hero-underline mx-auto mb-4' />
+
         {subtitle && (
-          <p className='text-sm md:text-base text-white/70 font-lato leading-relaxed max-w-2xl mt-4'>
+          <p className='ls-hero-subtitle text-white/90 font-lato max-w-xl mx-auto leading-relaxed'>
             {subtitle}
           </p>
         )}
 
         {metaLines && metaLines.length > 0 && (
-          <div className='flex flex-wrap gap-x-6 gap-y-2 mt-6 text-xs md:text-sm text-white/80 font-lato'>
-            {metaLines.map((line, idx) => (
-              <span key={idx}>{line}</span>
+          <div className='ls-hero-subtitle mt-4'>
+            {metaLines.map((line) => (
+              <p key={line} className='text-white/60 font-lato text-sm'>
+                {line}
+              </p>
             ))}
           </div>
         )}
+
+        {cta && (
+          <div className='ls-hero-cta mt-7'>
+            <Link
+              href={cta.href}
+              className='ls-btn-shine inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-7 py-3 rounded-full text-sm'
+            >
+              {cta.label}
+            </Link>
+          </div>
+        )}
       </div>
-    </section>
+    </div>
   )
 }

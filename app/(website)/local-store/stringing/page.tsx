@@ -1,377 +1,548 @@
-import Link from 'next/link'
-import { SITE_NAME } from '@/lib/constants'
-import { getPublicStoreContact } from '@/lib/store-contact'
-import StringingBookingForm from '@/components/website/StringingBookingForm'
-import LuxuryHero from '@/components/website/local-store/LuxuryHero'
+// StringingServicesPage — redesigned layout
+// Drop-in replacement: same data arrays, new visual structure.
+// Uses Tailwind utility classes + inline style where Tailwind can't reach.
 
-export const metadata = {
-  title: `Racket Stringing Services — Badminton, Tennis & Squash | ${SITE_NAME}`,
-  description:
-    'Professional racket stringing for badminton, tennis and squash. UKRSA-qualified stringers, four fully-automatic machines, 24-hour turnaround or a 40-minute express service. Prices from £16.',
-  keywords:
-    'racket stringing manchester, badminton stringing service, tennis racket restring, squash racket restring, 40 minute stringing service, string a racket manchester, ukrsa stringers, racket restring prices',
-}
+import StringingBookingForm from '@/components/website/StringingBookingForm'
 
 const PRICING = [
   {
     sport: 'Badminton',
     icon: '🏸',
-    price: 'From £16',
+    from: '£16',
+    note: 'Syn. gut to premium multifilament',
     href: '/local-store/stringing/badminton',
   },
   {
     sport: 'Tennis',
     icon: '🎾',
-    price: 'From £22',
+    from: '£22',
+    note: 'Poly, multifilament & natural gut',
     href: '/local-store/stringing/tennis',
   },
   {
     sport: 'Squash',
     icon: '🏓',
-    price: 'From £22',
+    from: '£22',
+    note: 'Durable thin-gauge squash strings',
     href: '/local-store/stringing/squash',
   },
 ]
 
-const WHY_CHOOSE_US = [
+const WHY = [
   {
     icon: '👨‍🔧',
-    title: 'Expert Stringing',
-    desc: 'Our certified stringers have years of experience and technical expertise to deliver perfect results every time.',
+    title: 'UKRSA-Certified',
+    body: "Every stringer on our team holds UKRSA certification — the UK's professional standard for racket stringing.",
   },
   {
     icon: '🏆',
-    title: '10,000+ Rackets Strung',
-    desc: 'With thousands of rackets strung, we have the experience and knowledge to handle any stringing requirement.',
+    title: '10,000+ Rackets',
+    body: "We've strung rackets for club players, county athletes, and competitors at major national tournaments.",
   },
   {
     icon: '⚡',
-    title: 'Fast Turnaround',
-    desc: 'Choose from our standard 24-hour service or book our express 40-minute stringing for same-day play.',
-  },
-  {
-    icon: '💡',
-    title: 'Expert Guidance',
-    desc: 'Not sure which string or tension is right for you? Our experts will guide you to the perfect setup for your playing style.',
+    title: '40-Minute Express',
+    body: 'Book a slot, wait in-store, walk out ready to play. No next-day wait before a big match.',
   },
   {
     icon: '🎯',
-    title: 'Wide String Variety',
-    desc: 'We stock a comprehensive range of strings from leading brands to suit every player and budget.',
+    title: 'String Library',
+    body: 'We stock 30+ strings across tension ranges and materials — and can usually source a specific one on request.',
+  },
+  {
+    icon: '💡',
+    title: 'Free Consultation',
+    body: 'Not sure what tension or gauge suits your style? Our team will walk you through the options before we string a thing.',
   },
   {
     icon: '🎁',
-    title: 'Loyalty Programme',
-    desc: 'Collect stamps with every stringing service and earn free stringing. The more you play, the more you save!',
-  },
-]
-
-const GUIDES = [
-  {
-    icon: '📖',
-    sport: 'Badminton',
-    desc: 'Learn about tension, string types, and how to choose the right setup for badminton.',
-    href: '/local-store/stringing/badminton',
-  },
-  {
-    icon: '📖',
-    sport: 'Tennis',
-    desc: 'Discover the best strings and tensions for your tennis playing style.',
-    href: '/local-store/stringing/tennis',
-  },
-  {
-    icon: '📖',
-    sport: 'Squash',
-    desc: 'Everything you need to know about squash racket stringing.',
-    href: '/local-store/stringing/squash',
+    title: 'Loyalty Stamps',
+    body: 'Collect a stamp with every restring. After enough visits, your next stringing is on us.',
   },
 ]
 
 const PROCESS = [
   {
-    step: '1',
-    title: 'Inspection',
-    desc: 'On drop-off, we check the overall condition of your racket frame and grommets before anything else.',
+    n: '01',
+    title: 'Frame Inspection',
+    body: 'We check your frame and grommets for cracks, wear, or anything that could affect the string job or shorten string life.',
   },
   {
-    step: '2',
-    title: 'Consultation',
-    desc: 'A quick chat about your playing style, how often you play, and what string/tension has worked (or not) for you before.',
+    n: '02',
+    title: 'Player Consultation',
+    body: "We talk through your playing frequency, style, and any tension or string you've used before — or want to try.",
   },
   {
-    step: '3',
-    title: 'Stringing',
-    desc: 'Strung on one of our four fully-automatic machines, to your exact tension spec.',
+    n: '03',
+    title: 'Machine Stringing',
+    body: 'Strung on one of four fully-automatic machines. Constant-pull technology means the tension you ask for is the tension you get.',
   },
   {
-    step: '4',
+    n: '04',
     title: 'Quality Check',
-    desc: 'We verify tension, check the string pattern, and inspect the frame for anything that might have shifted during stringing.',
+    body: 'We verify tension across the pattern and inspect the frame before anything leaves the bench.',
   },
   {
-    step: '5',
-    title: 'Collection',
-    desc: "We'll message or email you the moment it's ready, plus a few tips on looking after your new string job.",
+    n: '05',
+    title: 'Collection & Tips',
+    body: "We'll message you when it's ready. You'll also get a few notes on how to look after the new string job.",
   },
 ]
 
-export default async function StringingServicesPage() {
-  const contact = await getPublicStoreContact()
-  const fullAddress = [
-    contact.address.line1,
-    contact.address.line2,
-    contact.address.city,
-    contact.address.pincode,
-  ]
-    .filter(Boolean)
-    .join(', ')
+const GUIDES = [
+  {
+    sport: 'Badminton',
+    desc: 'String gauge, tension ranges, and which strings suit your level of play.',
+    href: '/local-store/stringing/badminton',
+  },
+  {
+    sport: 'Tennis',
+    desc: 'Poly vs multifilament vs natural gut — and how tension affects feel and spin.',
+    href: '/local-store/stringing/tennis',
+  },
+  {
+    sport: 'Squash',
+    desc: 'Durability, gauge selection, and why squash stringing differs from tennis.',
+    href: '/local-store/stringing/squash',
+  },
+]
 
+// ── String Tension SVG divider ─────────────────────────────────────────────
+function StringDivider({ inverted = false }: { inverted?: boolean }) {
+  const line = inverted ? '#FFFFFF18' : '#0A1F4412'
+  const accent = inverted ? '#E8553A55' : '#E8553A33'
   return (
-    <div className='bg-white'>
-      {/* Hero */}
-      <LuxuryHero
-        title='Racket Stringing Services'
-        subtitle='UKRSA-qualified stringers, four fully-automatic machines, and over 10,000 rackets strung — including for players at major tournaments.'
-        image='/local-store/stringing-hero.jpg'
-        imageAlt='Racket stringing service'
-        metaLines={[`📍 ${fullAddress}`, '🕐 Opening Hours: 11am–7pm (Mon–Sat)']}
-        breadcrumbs={[
-          { label: 'Local Store', href: '/local-store' },
-          { label: 'Stringing' },
-        ]}
-        size='lg'
-      />
+    <svg
+      viewBox='0 0 1200 40'
+      xmlns='http://www.w3.org/2000/svg'
+      className='w-full'
+      style={{ height: 40, display: 'block' }}
+    >
+      {/* Simulate taut strings — thin diagonal lines across the full width */}
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => (
+        <line
+          key={i}
+          x1={i * 110}
+          y1='0'
+          x2={i * 110 + 60}
+          y2='40'
+          stroke={i === 5 ? accent : line}
+          strokeWidth={i === 5 ? '1.5' : '1'}
+        />
+      ))}
+      {/* Cross strings */}
+      {[0, 1, 2, 3, 4].map((i) => (
+        <line
+          key={'c' + i}
+          x1='0'
+          y1={i * 10}
+          x2='1200'
+          y2={i * 10 + 5}
+          stroke={line}
+          strokeWidth='0.8'
+        />
+      ))}
+    </svg>
+  )
+}
 
-      <div className='max-w-5xl mx-auto px-4 py-14'>
-        {/* 40-minute express banner */}
-        <div className='bg-linear-to-r from-[#E8553A] to-[#D4441F] rounded-2xl p-8 text-center text-white mb-14'>
-          <h2 className='font-montserrat font-black text-xl md:text-2xl mb-2'>
-            ⚡ Get Your Racket Ready in 40 Minutes
-          </h2>
-          <p className='font-lato text-white/90 mb-5 max-w-lg mx-auto'>
-            Book your express stringing service and have your racket ready to
-            play in just 40 minutes.
+// ── Pill label ─────────────────────────────────────────────────────────────
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span className='inline-block font-mono text-[10px] tracking-[0.2em] uppercase text-[#E8553A] bg-[#E8553A]/8 px-3 py-1 rounded-full mb-4'>
+      {children}
+    </span>
+  )
+}
+
+export default function StringingServicesPageRedesign() {
+  return (
+    <div className='bg-[#F5F3EF] min-h-screen font-lato'>
+      {/* ── HERO ─────────────────────────────────────────────────────────── */}
+      <section className='reveal relative bg-[#0A1F44] overflow-hidden'>
+        {/* String grid background */}
+        <svg
+          className='absolute inset-0 w-full h-full opacity-[0.06]'
+          preserveAspectRatio='none'
+          xmlns='http://www.w3.org/2000/svg'
+        >
+          {Array.from({ length: 20 }).map((_, i) => (
+            <line
+              key={'v' + i}
+              x1={`${i * 5.5}%`}
+              y1='0'
+              x2={`${i * 5.5 + 3}%`}
+              y2='100%'
+              stroke='white'
+              strokeWidth='1'
+            />
+          ))}
+          {Array.from({ length: 12 }).map((_, i) => (
+            <line
+              key={'h' + i}
+              x1='0'
+              y1={`${i * 9}%`}
+              x2='100%'
+              y2={`${i * 9 + 2}%`}
+              stroke='white'
+              strokeWidth='1'
+            />
+          ))}
+        </svg>
+
+        <div className='relative max-w-5xl mx-auto px-6 pt-16 pb-20'>
+          {/* Breadcrumb */}
+          <p className='text-white/40 text-xs font-mono tracking-widest uppercase mb-8'>
+            Local Store &nbsp;/&nbsp; Stringing
           </p>
-          <div className='flex flex-wrap gap-3 justify-center'>
-            <a
-              href='#book'
-              className='inline-block bg-white text-[#E8553A] font-montserrat font-bold px-6 py-3 rounded-full text-sm hover:bg-white/90 transition-colors'
-            >
-              Book Now — 40 Minute Service
-            </a>
-            <span className='inline-flex items-center text-white/80 font-lato text-sm px-2'>
-              or drop off for 24h turnaround
-            </span>
+
+          <div className='grid md:grid-cols-2 gap-12 items-end'>
+            <div>
+              <Eyebrow>Manchester · UKRSA Certified</Eyebrow>
+              <h1
+                className='font-black text-white text-5xl md:text-6xl mb-6 font-montserrat'
+                style={{ lineHeight: 1.08 }}
+              >
+                Racket
+                <br />
+                Stringing
+                <br />
+                <span className='text-[#E8553A]'>Done Right.</span>
+              </h1>
+              <p className='text-white/60 text-sm leading-relaxed max-w-sm mb-8'>
+                Four fully-automatic machines, UKRSA-qualified stringers, and
+                over 10,000 rackets strung — including players preparing for
+                major tournaments.
+              </p>
+              <div className='flex flex-wrap gap-3'>
+                <a
+                  href='#book'
+                  className='bg-[#E8553A] hover:bg-[#D4441F] text-white px-7 py-3.5 rounded-full text-sm font-bold transition-colors font-montserrat'
+                >
+                  ⚡ Book 40-Min Express
+                </a>
+                <a
+                  href='#pricing'
+                  className='border border-white/20 hover:border-white/40 text-white/70 hover:text-white px-7 py-3.5 rounded-full text-sm transition-colors font-montserrat'
+                >
+                  View Pricing
+                </a>
+              </div>
+            </div>
+
+            {/* Stats column */}
+            <div className='grid grid-cols-2 gap-4'>
+              {[
+                { n: '10k+', label: 'Rackets strung' },
+                { n: '40', label: 'Minute express turnaround' },
+                { n: '30+', label: 'Strings in stock' },
+                { n: '4', label: 'Auto-tensioning machines' },
+              ].map((s) => (
+                <div
+                  key={s.n}
+                  className='bg-white/5 border border-white/10 rounded-2xl p-5'
+                >
+                  <p className='text-[#E8553A] font-black text-3xl font-montserrat'>
+                    {s.n}
+                  </p>
+                  <p className='text-white/50 text-xs mt-1 leading-snug'>
+                    {s.label}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Address bar */}
+          <div className='mt-12 flex flex-wrap gap-6 text-white/40 text-xs font-mono tracking-wide'>
+            <span>📍 Manchester City Centre</span>
+            <span>🕐 Mon–Sat · 11am–7pm</span>
+            <span>🧵 Bring your own string — labour fee only</span>
           </div>
         </div>
+      </section>
 
-        {/* Pricing */}
-        <div className='grid grid-cols-1 md:grid-cols-3 gap-6 mb-14'>
+      <StringDivider inverted />
+
+      {/* ── PRICING ─────────────────────────────────────────────────────── */}
+      <section id='pricing' className='max-w-5xl mx-auto px-6 py-16'>
+        <div className='flex items-baseline gap-4 mb-10'>
+          <Eyebrow>Pricing</Eyebrow>
+        </div>
+        <h2 className='font-black text-[#0A1F44] text-3xl mb-10 font-montserrat'>
+          Choose Your Sport
+        </h2>
+
+        {/* Menu-style pricing rows */}
+        <div className='divide-y divide-[#0A1F44]/8 border-y border-[#0A1F44]/8'>
           {PRICING.map((p) => (
-            <Link
+            <a
               key={p.sport}
               href={p.href}
-              className='block bg-white rounded-2xl border border-gray-100 p-6 text-center hover:border-[#E8553A]/30 hover:shadow-[0_8px_24px_rgba(232,85,58,0.08)] transition-all'
+              className='flex items-center gap-6 py-6 group hover:bg-[#E8553A]/4 -mx-4 px-4 rounded-xl transition-colors cursor-pointer'
             >
-              <span className='text-3xl'>{p.icon}</span>
-              <h2 className='font-montserrat font-bold text-lg text-[#0A1F44] mt-3'>
-                {p.sport}
-              </h2>
-              <p className='text-[#E8553A] font-montserrat font-black text-xl mt-1'>
-                {p.price}
-              </p>
-              <p className='text-xs font-montserrat font-semibold text-[#E8553A]/70 mt-2'>
-                View Details →
-              </p>
-            </Link>
+              <span className='text-3xl w-10 text-center'>{p.icon}</span>
+              <div className='flex-1'>
+                <h3 className='font-black text-[#0A1F44] text-xl font-montserrat'>
+                  {p.sport}
+                </h3>
+                <p className='text-gray-400 text-sm mt-0.5'>{p.note}</p>
+              </div>
+              <div className='text-right'>
+                <p className='font-black text-[#E8553A] text-2xl font-montserrat'>
+                  {p.from}
+                </p>
+                <p className='text-[#0A1F44]/40 text-xs font-mono'>
+                  starting from
+                </p>
+              </div>
+              <span className='text-[#E8553A] opacity-0 group-hover:opacity-100 transition-opacity text-lg ml-2'>
+                →
+              </span>
+            </a>
           ))}
         </div>
 
-        {/* Turnaround options */}
-        <div className='grid grid-cols-1 md:grid-cols-2 gap-6 mb-14'>
-          <div className='bg-[#F8F9FB] rounded-2xl border border-gray-100 p-6'>
-            <h3 className='font-montserrat font-bold text-lg text-[#0A1F44] mb-1.5'>
-              ⏱️ 24-Hour Standard
-            </h3>
-            <p className='text-sm text-gray-500 font-lato leading-relaxed'>
-              Our default turnaround, no extra charge. Drop off today, collect
-              tomorrow.
+        {/* BYOS note */}
+        <div className='mt-8 bg-white border border-[#0A1F44]/8 rounded-2xl px-6 py-5 flex gap-4 items-start'>
+          <span className='text-2xl mt-0.5'>🧵</span>
+          <div>
+            <p className='font-bold text-[#0A1F44] text-sm mb-1 font-montserrat'>
+              Bring Your Own String
             </p>
-          </div>
-          <div className='bg-[#FFF8E7] border border-[#FFC453]/40 rounded-2xl p-6'>
-            <h3 className='font-montserrat font-bold text-lg text-[#0A1F44] mb-1.5'>
-              ⚡ 40-Minute Express
-            </h3>
-            <p className='text-sm text-gray-500 font-lato leading-relaxed'>
-              Need it before a match today? Book an on-the-spot slot in advance
-              and wait in-store — a small same-day surcharge applies if it
-              wasn't pre-booked.
+            <p className='text-gray-500 text-sm leading-relaxed'>
+              If you already have a string you love, bring it in — we only
+              charge the labour fee. We also stock 30+ strings from major
+              brands, and can source most others on request.
             </p>
           </div>
         </div>
+      </section>
 
-        {/* Why choose us */}
-        <div className='mb-14 reveal'>
-          <h2 className='font-montserrat font-black text-2xl text-[#0A1F44] text-center mb-8'>
-            Why Choose Our Stringing Services?
+      {/* ── TURNAROUND OPTIONS ──────────────────────────────────────────── */}
+      <section className='reveal bg-[#0A1F44]'>
+        <StringDivider inverted />
+        <div className='max-w-5xl mx-auto px-6 py-16'>
+          <Eyebrow>Turnaround</Eyebrow>
+          <h2 className='font-black text-white text-3xl mb-10 font-montserrat'>
+            Two Ways to Get Strung
           </h2>
-          <div className='grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6'>
-            {WHY_CHOOSE_US.map((w) => (
+          <div className='grid md:grid-cols-2 gap-6'>
+            {/* Standard */}
+            <div className='bg-white/5 border border-white/10 rounded-2xl p-8'>
+              <p className='text-4xl mb-4'>⏱️</p>
+              <h3 className='font-black text-white text-xl mb-2 font-montserrat'>
+                24-Hour Standard
+              </h3>
+              <p className='text-white/50 text-sm leading-relaxed mb-4'>
+                Drop your racket off, come back the next day. No extra charge —
+                this is our default service. Perfect when you're not in a rush.
+              </p>
+              <ul className='space-y-1.5'>
+                {[
+                  'No booking required',
+                  'Full string selection available',
+                  'Included in all base prices',
+                ].map((l) => (
+                  <li key={l} className='text-white/60 text-xs flex gap-2'>
+                    <span className='text-[#E8553A]'>✓</span>
+                    {l}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {/* Express */}
+            <div className='bg-[#E8553A] rounded-2xl p-8 relative overflow-hidden'>
+              <div className='absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full translate-x-12 -translate-y-12' />
+              <p className='text-4xl mb-4'>⚡</p>
+              <h3 className='font-black text-white text-xl mb-2 font-montserrat'>
+                40-Minute Express
+              </h3>
+              <p className='text-white/80 text-sm leading-relaxed mb-4'>
+                Book a slot in advance, come in at your time, wait in-store, and
+                walk out ready. Ideal if you've got a match later today. A small
+                same-day surcharge applies if not pre-booked.
+              </p>
+              <ul className='space-y-1.5'>
+                {[
+                  'Pre-book for no surcharge',
+                  'Wait in-store',
+                  'Play within the hour',
+                ].map((l) => (
+                  <li key={l} className='text-white/80 text-xs flex gap-2'>
+                    <span className='text-white'>✓</span>
+                    {l}
+                  </li>
+                ))}
+              </ul>
+              <a
+                href='#book'
+                className='mt-6 inline-block bg-white text-[#E8553A] font-bold text-sm px-6 py-3 rounded-full hover:bg-white/90 transition-colors font-montserrat'
+              >
+                Book Express Slot →
+              </a>
+            </div>
+          </div>
+        </div>
+        <StringDivider inverted />
+      </section>
+
+      {/* ── PROCESS ─────────────────────────────────────────────────────── */}
+      <section className='reveal max-w-5xl mx-auto px-6 py-16'>
+        <Eyebrow>The Process</Eyebrow>
+        <h2 className='font-black text-[#0A1F44] text-3xl mb-12 font-montserrat'>
+          What Happens to Your Racket
+        </h2>
+
+        {/* Horizontal tape — desktop */}
+        <div className='hidden md:flex gap-0 relative mb-12'>
+          {/* Connector line */}
+          <div className='reveal-line-x absolute top-9 left-9 right-9 h-[2px] bg-gradient-to-r from-[#E8553A]/20 via-[#E8553A]/60 to-[#E8553A]/20' />
+          {PROCESS.map((p, i) => (
+            <div
+              key={p.n}
+              className='reveal flex-1 flex flex-col items-center px-3'
+            >
+              <div className='ls-tap relative z-10 w-[72px] h-[72px] rounded-full border-2 border-[#E8553A] bg-[#F5F3EF] flex items-center justify-center mb-5 transition-transform duration-300 hover:scale-110'>
+                <span className='font-black text-[#E8553A] text-lg tracking-tight font-montserrat'>
+                  {p.n}
+                </span>
+              </div>
+              <h3 className='font-bold text-[#0A1F44] text-sm text-center mb-2 font-montserrat'>
+                {p.title}
+              </h3>
+              <p className='text-gray-400 text-xs text-center leading-relaxed'>
+                {p.body}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* Vertical — mobile */}
+        <div className='md:hidden space-y-0 relative'>
+          <div className='reveal-line absolute left-[35px] top-10 bottom-10 w-[2px] bg-gradient-to-b from-[#E8553A]/60 to-[#E8553A]/10' />
+          {PROCESS.map((p) => (
+            <div key={p.n} className='reveal flex gap-6 py-5'>
+              <div className='relative z-10 flex-shrink-0 w-[46px] h-[46px] rounded-full border-2 border-[#E8553A] bg-[#F5F3EF] flex items-center justify-center'>
+                <span className='font-black text-[#E8553A] text-sm font-montserrat'>
+                  {p.n}
+                </span>
+              </div>
+              <div className='pt-2'>
+                <h3 className='font-bold text-[#0A1F44] text-sm mb-1 font-montserrat'>
+                  {p.title}
+                </h3>
+                <p className='text-gray-400 text-xs leading-relaxed'>
+                  {p.body}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── WHY CHOOSE US ───────────────────────────────────────────────── */}
+      <section className='reveal bg-white border-y border-[#0A1F44]/8'>
+        <div className='max-w-5xl mx-auto px-6 py-16'>
+          <Eyebrow>Why Us</Eyebrow>
+          <h2 className='font-black text-[#0A1F44] text-3xl mb-10 font-montserrat'>
+            What Sets Our Stringing Apart
+          </h2>
+          <div className='grid sm:grid-cols-2 md:grid-cols-3 gap-px bg-[#0A1F44]/6 border border-[#0A1F44]/6 rounded-2xl overflow-hidden'>
+            {WHY.map((w, i) => (
               <div
                 key={w.title}
-                className='ls-card reveal bg-white rounded-2xl border border-gray-100 p-6'
+                className='bg-white p-6 hover:bg-[#F5F3EF] transition-colors'
               >
-                <span className='text-3xl'>{w.icon}</span>
-                <h3 className='font-montserrat font-bold text-base text-[#0A1F44] mt-3 mb-1.5'>
+                <span className='text-2xl block mb-3'>{w.icon}</span>
+                <h3 className='font-bold text-[#0A1F44] text-sm mb-2 font-montserrat'>
                   {w.title}
                 </h3>
-                <p className='text-sm text-gray-500 font-lato leading-relaxed'>
-                  {w.desc}
+                <p className='text-gray-400 text-xs leading-relaxed'>
+                  {w.body}
                 </p>
               </div>
             ))}
           </div>
         </div>
+      </section>
 
-        {/* Process — horizontal timeline */}
-        <div className='mb-14 reveal'>
-          <h2 className='font-montserrat font-black text-2xl text-white text-center mb-10 bg-[#0A1F44] rounded-2xl py-5 px-4'>
-            What Happens To Your Racket
-          </h2>
-
-          {/* Desktop timeline */}
-          <div className='hidden md:block relative'>
-            {/* Connector line */}
-            <div className='absolute top-5 left-[10%] right-[10%] h-0.5 bg-gradient-to-r from-[#E8553A] via-[#E8553A] to-[#E8553A] opacity-20' />
-
-            <div className='grid grid-cols-5 gap-4 relative'>
-              {PROCESS.map((p, i) => (
-                <div
-                  key={p.step}
-                  className='flex flex-col items-center text-center'
-                >
-                  {/* Circle with connecting line overlap */}
-                  <div className='relative z-10 w-10 h-10 rounded-full bg-[#E8553A] text-white font-montserrat font-black text-base flex items-center justify-center mb-4 shadow-[0_4px_12px_rgba(232,85,58,0.35)]'>
-                    {p.step}
-                  </div>
-                  {/* Card */}
-                  <div className='bg-white rounded-xl border border-gray-100 p-4 w-full hover:border-[#E8553A]/30 hover:shadow-[0_4px_16px_rgba(232,85,58,0.08)] transition-all'>
-                    <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-2'>
-                      {p.title}
-                    </h3>
-                    <p className='text-xs text-gray-500 font-lato leading-relaxed'>
-                      {p.desc}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Mobile timeline — vertical */}
-          <div className='md:hidden relative pl-8'>
-            {/* Vertical line */}
-            <div className='absolute left-4 top-2 bottom-2 w-0.5 bg-gradient-to-b from-[#E8553A] to-[#E8553A]/20' />
-
-            <div className='flex flex-col gap-6'>
-              {PROCESS.map((p) => (
-                <div key={p.step} className='relative flex gap-4 items-start'>
-                  {/* Circle */}
-                  <div className='absolute -left-8 z-10 w-8 h-8 rounded-full bg-[#E8553A] text-white font-montserrat font-black text-sm flex items-center justify-center shadow-[0_4px_12px_rgba(232,85,58,0.35)]'>
-                    {p.step}
-                  </div>
-                  {/* Card */}
-                  <div className='bg-white rounded-xl border border-gray-100 p-4 w-full'>
-                    <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-1.5'>
-                      {p.title}
-                    </h3>
-                    <p className='text-xs text-gray-500 font-lato leading-relaxed'>
-                      {p.desc}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Bring your own string */}
-        <div className='bg-white rounded-2xl border border-gray-100 p-6 mb-14 max-w-2xl mx-auto text-center'>
-          <h3 className='font-montserrat font-bold text-lg text-[#0A1F44] mb-1.5'>
-            🧵 Bring Your Own String
-          </h3>
-          <p className='text-sm text-gray-500 font-lato leading-relaxed'>
-            Already have string you like? Bring it in and we'll only charge the
-            labour fee. We also stock a wide range of strings from leading
-            brands and can usually source a specific one on request.
-          </p>
-        </div>
-
-        {/* Ready to get started / booking */}
-        <div id='book' className='mb-14 reveal'>
-          <div className='bg-[#0A1F44] rounded-2xl p-8 text-white text-center mb-8'>
-            <h2 className='font-montserrat font-black text-xl mb-2 text-white'>
-              Ready to Get Started?
+      {/* ── BOOKING ─────────────────────────────────────────────────────── */}
+      <section id='book' className='max-w-5xl mx-auto px-6 py-16'>
+        <div className='grid md:grid-cols-2 gap-12 items-start'>
+          <div>
+            <Eyebrow>Book Now</Eyebrow>
+            <h2 className='font-black text-[#0A1F44] text-3xl mb-4 font-montserrat'>
+              Reserve Your Stringing Slot
             </h2>
-            <p className='text-white/70 font-lato mb-1'>
-              Book your express 40-minute stringing service today and get back
-              on court faster.
+            <p className='text-gray-400 text-sm leading-relaxed mb-6'>
+              Use the form to book our 40-minute express service, or request a
+              standard 24-hour drop-off. We'll confirm your slot by message or
+              email.
             </p>
-            <p className='text-white/50 font-lato text-sm mt-3'>
-              📍 {fullAddress} · 🕐 11am–7pm (Mon–Sat)
-            </p>
+            <div className='space-y-3 text-sm text-gray-500'>
+              <p>📍 Manchester City Centre</p>
+              <p>🕐 Open Mon–Sat · 11am–7pm</p>
+              <p>📞 Can also book by phone or WhatsApp</p>
+            </div>
           </div>
-          <div className='max-w-md mx-auto'>
-            <StringingBookingForm />
-          </div>
+          {/* StringingBookingForm already ships its own card styling
+              (bg/border/rounded/padding), so it's rendered directly here
+              without an extra wrapping card. */}
+          <StringingBookingForm />
         </div>
+      </section>
 
-        {/* Helpful stringing guides */}
-        <div className='mb-14 reveal'>
-          <h2 className='font-montserrat font-black text-2xl text-white text-center mb-8 bg-[#0A1F44] rounded-2xl py-5 px-4'>
-            Helpful Stringing Guides
+      {/* ── GUIDES ──────────────────────────────────────────────────────── */}
+      <section className='reveal bg-[#0A1F44]'>
+        <StringDivider inverted />
+        <div className='max-w-5xl mx-auto px-6 py-16'>
+          <Eyebrow>Learn</Eyebrow>
+          <h2 className='font-black text-white text-3xl mb-2 font-montserrat'>
+            Stringing Guides
           </h2>
-          <p className='text-gray-500 font-lato text-center mb-8 max-w-xl mx-auto'>
-            Browse our guides to learn more about racket stringing and find the
-            perfect setup for your game.
+          <p className='text-white/40 text-sm mb-10 max-w-md'>
+            Not sure where to start? Our sport-specific guides cover string
+            types, tension, gauge selection, and more.
           </p>
-          <div className='grid grid-cols-1 md:grid-cols-3 gap-6'>
+          <div className='grid md:grid-cols-3 gap-4'>
             {GUIDES.map((g) => (
-              <Link
+              <a
                 key={g.sport}
                 href={g.href}
-                className='block bg-white rounded-2xl border border-gray-100 p-6 hover:border-[#E8553A]/30 hover:shadow-[0_8px_24px_rgba(232,85,58,0.08)] transition-all'
+                className='block bg-white/5 border border-white/10 hover:border-[#E8553A]/50 hover:bg-white/8 rounded-2xl p-6 transition-all group'
               >
-                <span className='text-2xl'>{g.icon}</span>
-                <h3 className='font-montserrat font-bold text-base text-[#0A1F44] mt-2 mb-1.5'>
+                <h3 className='font-bold text-white text-base mb-2 group-hover:text-[#E8553A] transition-colors font-montserrat'>
                   {g.sport} Stringing Guide
                 </h3>
-                <p className='text-sm text-gray-500 font-lato leading-relaxed mb-2'>
+                <p className='text-white/40 text-xs leading-relaxed mb-4'>
                   {g.desc}
                 </p>
-                <span className='text-xs font-montserrat font-semibold text-[#E8553A]'>
-                  Read Guide →
+                <span className='text-[#E8553A] text-xs font-mono tracking-wide'>
+                  READ GUIDE →
                 </span>
-              </Link>
+              </a>
             ))}
           </div>
         </div>
+        <StringDivider inverted />
+      </section>
 
-        <div className='reveal-scale bg-[#0A1F44] rounded-2xl p-8 text-white text-center'>
-          <h2 className='font-montserrat font-black text-xl mb-2 text-white'>
-            Prefer To Book By Phone Or Message?
-          </h2>
-          <p className='text-white/70 font-lato mb-5'>
-            That works too — get in touch and we'll sort a slot for you.
-          </p>
-          <Link
-            href='/contact'
-            className='ls-btn-shine inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors'
-          >
-            Contact Us
-          </Link>
-        </div>
-      </div>
+      {/* ── CONTACT FALLBACK ────────────────────────────────────────────── */}
+      <section className='reveal max-w-5xl mx-auto px-6 py-16 text-center'>
+        <p className='text-gray-400 text-sm mb-2'>
+          Prefer a call or message instead?
+        </p>
+        <h2 className='font-black text-[#0A1F44] text-2xl mb-5 font-montserrat'>
+          We'll sort a slot for you.
+        </h2>
+        <a
+          href='/contact'
+          className='inline-block bg-[#0A1F44] hover:bg-[#142d5e] text-white font-bold px-8 py-3.5 rounded-full text-sm transition-colors font-montserrat'
+        >
+          Contact Us
+        </a>
+      </section>
     </div>
   )
 }

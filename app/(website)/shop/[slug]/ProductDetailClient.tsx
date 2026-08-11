@@ -1428,9 +1428,9 @@ export default function ProductDetailClient({ product, related }: Props) {
       </div>
 
       <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10'>
-        <div className='grid grid-cols-1 lg:grid-cols-2 gap-12'>
-          {/* Images */}
-          <div className='space-y-4'>
+        <div className='grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-0'>
+          {/* Images — mobile order 3 (after title/description), desktop col 1 */}
+          <div className='order-3 mb-8 lg:mb-0 lg:order-none lg:col-start-1 lg:row-start-1 space-y-4'>
             <ProductImageZoom
               src={product.images[activeImage]}
               alt={product.name}
@@ -1465,10 +1465,12 @@ export default function ProductDetailClient({ product, related }: Props) {
                 ))}
               </div>
             )}
+          </div>
 
-            {/* Buying guide now lives in the LEFT/image column, right below
-                the thumbnails — moved out of the right (Product Info)
-                column per request. */}
+          {/* Buying guide — mobile order 12 (last, after Add to Cart).
+              On desktop it stays in the LEFT/image column, right below
+              the thumbnails, same as before. */}
+          <div className='order-12 lg:order-none lg:col-start-1 lg:row-start-2 mt-8 lg:mt-4'>
             {isRacket && racketGuideSport === 'padel' && <PadelRacketGuide />}
             {isRacket && racketGuideSport !== 'padel' && (
               <RacketBuyingGuide sport={racketGuideSport} />
@@ -1476,8 +1478,8 @@ export default function ProductDetailClient({ product, related }: Props) {
             {isShoe && <ShoeBuyingGuide sport={product.sport} />}
           </div>
 
-          {/* Product Info */}
-          <div>
+          {/* Title / brand / rating — mobile order 1 (shown first), desktop col 2 row 1 */}
+          <div className='order-1 lg:order-none lg:col-start-2 lg:row-start-1'>
             <div className='flex items-center gap-3 mb-3'>
               <span className='text-sm font-bold text-[#E8553A] font-lato uppercase tracking-wider'>
                 {product.brand}
@@ -1519,9 +1521,10 @@ export default function ProductDetailClient({ product, related }: Props) {
                 ({product.reviewCount} reviews)
               </span>
             </div>
+          </div>
 
-            {/* Price — GBP */}
-            <div className='flex items-center gap-4 mb-6 pb-6 border-b border-gray-100'>
+          {/* Price — GBP — mobile order 4 (after images), desktop col 2 row 2 */}
+          <div className='order-8 lg:order-none lg:col-start-2 lg:row-start-2 flex items-center gap-4 mb-6 pb-6 border-b border-gray-100'>
               <span className='font-montserrat font-black text-4xl text-[#0A1F44]'>
                 {formatPrice(product.price)}
               </span>
@@ -1547,7 +1550,7 @@ export default function ProductDetailClient({ product, related }: Props) {
                 product-edit page supports creating these, so this must exist
                 for the customer to ever get the one they actually want). */}
             {hasMultipleVariants && (
-              <div className='mb-6 pb-6 border-b border-gray-100'>
+              <div className='order-4 lg:order-none lg:col-start-2 lg:row-start-3 mb-6 pb-6 border-b border-gray-100'>
                 <p className='font-montserrat font-bold text-sm text-[#0A1F44] mb-2.5'>
                   Choose an option
                 </p>
@@ -1581,8 +1584,8 @@ export default function ProductDetailClient({ product, related }: Props) {
               </div>
             )}
 
-            {/* Tabs */}
-            <div className='mb-6'>
+            {/* Tabs — mobile order 2 (right after title, includes description), desktop col 2 row 4 */}
+            <div className='order-2 lg:order-none lg:col-start-2 lg:row-start-4 mb-6'>
               <div className='flex border-b border-gray-200 mb-4'>
                 {(['description', 'specs', 'shipping'] as const).map((tab) => (
                   <button
@@ -1712,7 +1715,7 @@ export default function ProductDetailClient({ product, related }: Props) {
             </div>
 
             {/* Stock */}
-            <div className='flex items-center justify-between gap-2 mb-6'>
+            <div className='order-5 lg:order-none lg:col-start-2 lg:row-start-5 flex items-center justify-between gap-2 mb-6'>
               <div className='flex items-center gap-2'>
                 {product.inStock ? (
                   <>
@@ -1759,19 +1762,22 @@ export default function ProductDetailClient({ product, related }: Props) {
             )}
 
             {/* Only racket products offer this (matches smashuk.co — not
-                every product has it, e.g. shoes/bags/clothing don't) */}
+                every product has it, e.g. shoes/bags/clothing don't).
+                Mobile order 5 (after price, before add-to-cart), desktop col 2 row 6 */}
             {product.stringUpgradeAvailable && (
-              <StringUpgrade
-                sport={product.sport}
-                onStringChange={(sel) => setStringSelection(sel)}
-                onGripChange={(grip) => setSelectedGrip(grip)}
-              />
+              <div className='order-9 lg:order-none lg:col-start-2 lg:row-start-6'>
+                <StringUpgrade
+                  sport={product.sport}
+                  onStringChange={(sel) => setStringSelection(sel)}
+                  onGripChange={(grip) => setSelectedGrip(grip)}
+                />
+              </div>
             )}
 
             {/* Notify me — shown instead of the qty/cart controls when the
                 product is out of stock, matches standard ecommerce UX */}
             {!product.inStock && (
-              <div className='mb-6'>
+              <div className='order-10 lg:order-none lg:col-start-2 lg:row-start-7 mb-6'>
                 <p className='text-xs text-gray-500 font-lato mb-2'>
                   Leave your email and we&apos;ll let you know the moment this
                   is back.
@@ -1783,8 +1789,8 @@ export default function ProductDetailClient({ product, related }: Props) {
               </div>
             )}
 
-            {/* Quantity + Actions */}
-            <div className='flex items-center gap-4 mb-6'>
+            {/* Quantity + Actions — mobile order 7 (add to cart), desktop col 2 row 8 */}
+            <div className='order-11 lg:order-none lg:col-start-2 lg:row-start-8 flex items-center gap-4 mb-6'>
               <div className='flex items-center border border-gray-200 rounded-xl overflow-hidden'>
                 <button
                   onClick={() => setQuantity(Math.max(1, quantity - 1))}
@@ -1834,11 +1840,11 @@ export default function ProductDetailClient({ product, related }: Props) {
               </button>
             </div>
 
-            <p className='text-xs text-gray-400 font-lato mb-6'>
+            <p className='order-6 lg:order-none lg:col-start-2 lg:row-start-9 text-xs text-gray-400 font-lato mb-6'>
               SKU: <span className='font-semibold'>{product.sku}</span>
             </p>
 
-            <div className='grid grid-cols-3 gap-3 pt-6 border-t border-gray-100'>
+            <div className='order-7 lg:order-none lg:col-start-2 lg:row-start-10 grid grid-cols-3 gap-3 pt-6 border-t border-gray-100'>
               {[
                 { icon: <TruckIcon size={18} />, text: 'Free Delivery' },
                 { icon: <ShieldIcon size={18} />, text: '100% Authentic' },
@@ -1855,7 +1861,6 @@ export default function ProductDetailClient({ product, related }: Props) {
                 </div>
               ))}
             </div>
-          </div>
         </div>
 
         {/* Who we are — matches smashuk.co's team blurb shown on product pages */}

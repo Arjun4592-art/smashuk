@@ -1,35 +1,39 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+// A real accordion: only one row is ever open at a time (React state
+// controlled — not native <details>, which lets every item stay open
+// independently). Smooth height animation via the CSS grid-rows trick,
+// no JS height measuring needed.
+import { useState } from 'react'
 
-type AccordionItem = {
+export type AccordionItem = {
   id: string
-  title: string
-  content: ReactNode
-}
-
-type AccordionProps = {
-  items: AccordionItem[]
-  defaultOpenId?: string
-  containerClassName?: string
-  rowClassName?: string
-  triggerClassName?: string
-  contentClassName?: string
-  icon?: 'chevron' | 'plus'
-  iconWrapClassName?: string
+  title: React.ReactNode
+  content: React.ReactNode
 }
 
 export default function Accordion({
   items,
-  defaultOpenId,
+  defaultOpenId = null,
+  icon = 'plus',
   containerClassName = '',
   rowClassName = '',
   triggerClassName = '',
+  contentWrapClassName = '',
   contentClassName = '',
-  icon = 'plus',
   iconWrapClassName = '',
-}: AccordionProps) {
-  const [openId, setOpenId] = useState<string | null>(defaultOpenId ?? null)
+}: {
+  items: AccordionItem[]
+  defaultOpenId?: string | null
+  icon?: 'plus' | 'chevron'
+  containerClassName?: string
+  rowClassName?: string
+  triggerClassName?: string
+  contentWrapClassName?: string
+  contentClassName?: string
+  iconWrapClassName?: string
+}) {
+  const [openId, setOpenId] = useState<string | null>(defaultOpenId)
 
   return (
     <div className={containerClassName}>
@@ -41,28 +45,32 @@ export default function Accordion({
               type='button'
               onClick={() => setOpenId(isOpen ? null : item.id)}
               aria-expanded={isOpen}
-              className={`w-full cursor-pointer flex items-center justify-between gap-4 text-left ${triggerClassName}`}
+              className={`w-full flex items-center justify-between gap-4 text-left cursor-pointer ${triggerClassName}`}
             >
-              <span>{item.title}</span>
-              {icon === 'chevron' ? (
-                <span
-                  className={`shrink-0 inline-flex items-center justify-center rounded-full border border-gray-200 text-[#E8553A] transition-transform ${
-                    isOpen ? 'rotate-180' : ''
-                  } ${iconWrapClassName}`}
-                >
-                  ▾
-                </span>
-              ) : (
-                <span
-                  className={`shrink-0 text-[#E8553A] transition-transform text-lg leading-none ${
-                    isOpen ? 'rotate-45' : ''
-                  } ${iconWrapClassName}`}
-                >
-                  +
-                </span>
-              )}
+              {item.title}
+              <span
+                className={`shrink-0 w-6 h-6 rounded-full bg-white border border-gray-200 flex items-center justify-center text-[#E8553A] text-base font-bold leading-none transition-transform duration-300 ${
+                  icon === 'plus'
+                    ? isOpen
+                      ? 'rotate-45'
+                      : ''
+                    : isOpen
+                      ? 'rotate-180'
+                      : ''
+                } ${iconWrapClassName}`}
+              >
+                {icon === 'plus' ? '+' : '▾'}
+              </span>
             </button>
-            {isOpen && <div className={contentClassName}>{item.content}</div>}
+            <div
+              className={`grid transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+              } ${contentWrapClassName}`}
+            >
+              <div className='overflow-hidden'>
+                <div className={contentClassName}>{item.content}</div>
+              </div>
+            </div>
           </div>
         )
       })}

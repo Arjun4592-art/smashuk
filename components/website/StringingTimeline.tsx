@@ -1,39 +1,156 @@
-import type { ReactNode } from 'react'
+'use client'
 
-type TimelineStep = {
+import { useEffect, useRef, useState } from 'react'
+
+interface Step {
   step: string
   title: string
   desc: string
-  icon?: ReactNode
+  icon: React.ReactNode
 }
 
-type StringingTimelineProps = {
-  steps: TimelineStep[]
+interface Props {
+  steps: Step[]
 }
 
-export default function StringingTimeline({ steps }: StringingTimelineProps) {
+export default function StringingTimeline({ steps }: Props) {
+  const [activeStep, setActiveStep] = useState(-1)
+  const [lineWidth, setLineWidth] = useState(0)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          // Animate line
+          let w = 0
+          const lineInterval = setInterval(() => {
+            w += 2
+            setLineWidth(w)
+            if (w >= 100) clearInterval(lineInterval)
+          }, 12)
+
+          // Animate steps one by one
+          steps.forEach((_, i) => {
+            setTimeout(() => setActiveStep(i), 200 + i * 220)
+          })
+
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.3 },
+    )
+    if (containerRef.current) observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [steps])
+
   return (
-    <div className='relative'>
-      {/* Connecting line (desktop only) */}
-      <div className='hidden md:block absolute top-8 left-0 right-0 h-px bg-gray-200' />
+    <div ref={containerRef}>
+      {/* ── Desktop ── */}
+      <div className='hidden md:block'>
+        <div className='relative'>
+          {/* Track */}
+          <div className='absolute top-8 left-[9%] right-[9%] h-px bg-gray-100' />
+          {/* Animated fill */}
+          <div
+            className='absolute top-8 left-[9%] h-px bg-gradient-to-r from-[#E8553A] to-[#FFC453] transition-none'
+            style={{ width: `${(lineWidth / 100) * 82}%` }}
+          />
 
-      <div className='grid grid-cols-1 md:grid-cols-5 gap-8 md:gap-4'>
-        {steps.map((s) => (
-          <div key={s.step} className='relative flex flex-col items-center text-center'>
-            <div className='relative z-10 w-16 h-16 rounded-full bg-white border-2 border-[#E8553A] flex items-center justify-center text-[#E8553A] mb-4'>
-              {s.icon ?? (
-                <span className='font-montserrat font-black text-lg'>{s.step}</span>
-              )}
+          <div className='grid grid-cols-5 gap-3 relative'>
+            {steps.map((p, i) => (
+              <div
+                key={p.step}
+                className='flex flex-col items-center text-center'
+                style={{
+                  opacity: activeStep >= i ? 1 : 0,
+                  transform:
+                    activeStep >= i ? 'translateY(0)' : 'translateY(16px)',
+                  transition: 'opacity 0.4s ease, transform 0.4s ease',
+                }}
+              >
+                {/* Circle */}
+                <div
+                  className={`relative z-10 mb-5 w-16 h-16 rounded-full flex flex-col items-center justify-center transition-all duration-500 ${
+                    activeStep >= i
+                      ? 'bg-white border-2 border-[#E8553A] shadow-[0_0_0_6px_rgba(232,85,58,0.08),0_8px_24px_rgba(232,85,58,0.2)]'
+                      : 'bg-white border-2 border-gray-100'
+                  }`}
+                >
+                  <span className='text-xl'>{p.icon}</span>
+                  <span className='font-montserrat font-black text-[9px] text-[#E8553A] tracking-widest leading-none mt-0.5'>
+                    {p.step}
+                  </span>
+                </div>
+
+                {/* Card */}
+                <div
+                  className={`rounded-xl border p-4 w-full transition-all duration-500 ${
+                    activeStep >= i
+                      ? 'bg-white border-[#E8553A]/20 shadow-[0_8px_24px_rgba(232,85,58,0.08)]'
+                      : 'bg-[#F8F9FB] border-gray-100'
+                  }`}
+                >
+                  <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-2'>
+                    {p.title}
+                  </h3>
+                  <p className='text-xs text-gray-500 font-lato leading-relaxed'>
+                    {p.desc}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Mobile ── */}
+      <div className='md:hidden space-y-4 relative'>
+        {/* Vertical track */}
+        <div className='absolute left-7 top-0 bottom-0 w-px bg-gray-100' />
+        {/* Animated fill */}
+        <div
+          className='absolute left-7 top-0 w-px bg-gradient-to-b from-[#E8553A] to-[#FFC453] transition-none'
+          style={{ height: `${lineWidth}%` }}
+        />
+
+        {steps.map((p, i) => (
+          <div
+            key={p.step}
+            className='flex gap-5 items-start pl-2'
+            style={{
+              opacity: activeStep >= i ? 1 : 0,
+              transform:
+                activeStep >= i ? 'translateX(0)' : 'translateX(-12px)',
+              transition: 'opacity 0.4s ease, transform 0.4s ease',
+            }}
+          >
+            <div
+              className={`shrink-0 z-10 w-11 h-11 rounded-full flex flex-col items-center justify-center transition-all duration-500 ${
+                activeStep >= i
+                  ? 'bg-white border-2 border-[#E8553A] shadow-[0_0_0_4px_rgba(232,85,58,0.08)]'
+                  : 'bg-white border-2 border-gray-200'
+              }`}
+            >
+              <span className='text-base'>{p.icon}</span>
+              <span className='font-montserrat font-black text-[8px] text-[#E8553A] tracking-widest leading-none'>
+                {p.step}
+              </span>
             </div>
-            <span className='text-xs font-montserrat font-bold text-[#E8553A] tracking-widest uppercase mb-1'>
-              Step {s.step}
-            </span>
-            <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-2'>
-              {s.title}
-            </h3>
-            <p className='text-xs text-gray-500 font-lato leading-relaxed max-w-[200px]'>
-              {s.desc}
-            </p>
+            <div
+              className={`rounded-xl border p-4 flex-1 mt-1 transition-all duration-500 ${
+                activeStep >= i
+                  ? 'bg-white border-[#E8553A]/20 shadow-[0_4px_12px_rgba(232,85,58,0.06)]'
+                  : 'bg-[#F8F9FB] border-gray-100'
+              }`}
+            >
+              <h3 className='font-montserrat font-bold text-sm text-[#0A1F44] mb-1'>
+                {p.title}
+              </h3>
+              <p className='text-xs text-gray-500 font-lato leading-relaxed'>
+                {p.desc}
+              </p>
+            </div>
           </div>
         ))}
       </div>
