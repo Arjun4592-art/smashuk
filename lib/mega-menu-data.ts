@@ -238,21 +238,27 @@ export const MEGA_MENUS = {
   clothing: {
     label: 'Clothing',
     icon: '👕',
-    href: '/shop?category=clothing',
+    // BUG FIX: "Clothing" is a top-level SPORT (see SPORTS in lib/constants.ts),
+    // not a product category — the sub-buckets below (tops/bottoms/socks) are
+    // the categories. This used to send `?category=clothing`, which no
+    // product's category ever equals, so ShopClient's category filter fell
+    // through and showed everything. Also switched `type=` to `style=`,
+    // matching the query param ShopClient.tsx actually reads.
+    href: '/shop?sport=clothing',
     columns: [
       {
         heading: 'Men',
         links: [
-          { label: "All Men's", href: '/shop?category=clothing&gender=men' },
+          { label: "All Men's", href: '/shop?sport=clothing&gender=men' },
           {
             label: 'Tops',
-            href: '/shop?category=clothing&gender=men&type=tops',
+            href: '/shop?sport=clothing&gender=men&style=tops',
           },
           {
             label: 'Bottoms',
-            href: '/shop?category=clothing&gender=men&type=bottoms',
+            href: '/shop?sport=clothing&gender=men&style=bottoms',
           },
-          { label: 'Socks', href: '/shop?category=clothing&type=socks' },
+          { label: 'Socks', href: '/shop?sport=clothing&style=socks' },
         ],
       },
       {
@@ -260,24 +266,24 @@ export const MEGA_MENUS = {
         links: [
           {
             label: "All Women's",
-            href: '/shop?category=clothing&gender=women',
+            href: '/shop?sport=clothing&gender=women',
           },
           {
             label: 'Tops',
-            href: '/shop?category=clothing&gender=women&type=tops',
+            href: '/shop?sport=clothing&gender=women&style=tops',
           },
           {
             label: 'Bottoms',
-            href: '/shop?category=clothing&gender=women&type=bottoms',
+            href: '/shop?sport=clothing&gender=women&style=bottoms',
           },
-          { label: 'Socks', href: '/shop?category=clothing&type=socks' },
+          { label: 'Socks', href: '/shop?sport=clothing&style=socks' },
         ],
       },
     ],
     featured: {
       label: 'New Season Kits',
       description: 'Fresh 2025 collection — performance meets style.',
-      href: '/shop?category=clothing&badge=NEW',
+      href: '/shop?sport=clothing&badge=NEW',
       cta: 'Explore',
     },
   },

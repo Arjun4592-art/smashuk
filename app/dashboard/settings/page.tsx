@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { TrashIcon, PlusIcon } from '@/components/ui/Icons'
+import type { StringCatalogItem } from '@/lib/stringing-catalog-types'
 
 // ─── SVG Icons ───────────────────────────────────────────────────
 const Icons = {
@@ -345,6 +347,97 @@ export default function SettingsPage() {
   })
   const [savingAccount, setSavingAccount] = useState(false)
   const [seedingStringing, setSeedingStringing] = useState(false)
+
+  // ── Stringing string catalog (which companies/strings are available) ──
+  const [stringCatalog, setStringCatalog] = useState<StringCatalogItem[]>([])
+  const [stringCatalogLoading, setStringCatalogLoading] = useState(true)
+  const [savingStringCatalog, setSavingStringCatalog] = useState(false)
+  const [stringCatalogSport, setStringCatalogSport] = useState<
+    'badminton' | 'tennis' | 'squash'
+  >('badminton')
+  const [newString, setNewString] = useState({ brand: '', name: '' })
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/admin/stringing-catalog', {
+          credentials: 'include',
+        })
+        const data = await res.json()
+        if (!cancelled && res.ok) setStringCatalog(data.items ?? [])
+      } catch {
+        // Leave list empty — the "Add String" form still works and the
+        // next successful save will populate everything from scratch.
+      } finally {
+        if (!cancelled) setStringCatalogLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const saveStringCatalog = async (next: StringCatalogItem[]) => {
+    setStringCatalog(next)
+    setSavingStringCatalog(true)
+    try {
+      const res = await fetch('/api/admin/stringing-catalog', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: next }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Failed to save')
+      setStringCatalog(data.items ?? next)
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to save string catalog')
+    } finally {
+      setSavingStringCatalog(false)
+    }
+  }
+
+  const handleAddString = () => {
+    const brand = newString.brand.trim()
+    const name = newString.name.trim()
+    if (!brand || !name) {
+      toast.error('Enter both a company/brand and a string name.')
+      return
+    }
+    const duplicate = stringCatalog.some(
+      (s) =>
+        s.sport === stringCatalogSport &&
+        s.brand.toLowerCase() === brand.toLowerCase() &&
+        s.name.toLowerCase() === name.toLowerCase(),
+    )
+    if (duplicate) {
+      toast.error('That string is already in the catalog for this sport.')
+      return
+    }
+    const item: StringCatalogItem = {
+      id: `${stringCatalogSport}-${Date.now()}`,
+      sport: stringCatalogSport,
+      brand,
+      name,
+      available: true,
+    }
+    saveStringCatalog([...stringCatalog, item])
+    setNewString({ brand: '', name: '' })
+    toast.success(`Added "${brand} — ${name}" to the catalog.`)
+  }
+
+  const handleToggleString = (id: string) => {
+    saveStringCatalog(
+      stringCatalog.map((s) =>
+        s.id === id ? { ...s, available: !s.available } : s,
+      ),
+    )
+  }
+
+  const handleDeleteString = (id: string) => {
+    saveStringCatalog(stringCatalog.filter((s) => s.id !== id))
+  }
 
   const handleSeedStringing = async () => {
     setSeedingStringing(true)
@@ -718,8 +811,7 @@ export default function SettingsPage() {
           <div className='bg-white border border-[#E1E3E5] rounded-xl px-6 py-2'>
             <div className='py-4 border-b border-[#E1E3E5]'>
               <h2 className='font-sora text-[16px] font-semibold text-[#202223] flex items-center gap-2'>
-                <span className='text-[#6D7175]'>🛠️</span>{' '}
-                Store Services
+                <span className='text-[#6D7175]'>🛠️</span> Store Services
               </h2>
             </div>
 
@@ -733,8 +825,143 @@ export default function SettingsPage() {
                 className='flex items-center gap-2 px-4 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 border-none cursor-pointer'
               >
                 {seedingStringing ? Icons.spinner : Icons.check}
-                {seedingStringing ? 'Setting Up...' : 'Set Up Stringing Services'}
+                {seedingStringing
+                  ? 'Setting Up...'
+                  : 'Set Up Stringing Services'}
               </button>
+            </SettingSection>
+
+            <SettingSection
+              title='Stringing String Catalog'
+              description='Which strings (by company) show as available on the /local-store/stringing booking form. Toggle a string off to hide it from customers without deleting it — e.g. temporarily out of stock.'
+            >
+              <div className='flex gap-2 mb-1'>
+                {(['badminton', 'tennis', 'squash'] as const).map((sp) => (
+                  <button
+                    key={sp}
+                    onClick={() => setStringCatalogSport(sp)}
+                    className={`px-3 py-1.5 rounded-lg text-[12.5px] font-semibold capitalize border transition-colors cursor-pointer ${
+                      stringCatalogSport === sp
+                        ? 'bg-[#008060] border-[#008060] text-white'
+                        : 'bg-white border-[#E1E3E5] text-[#6D7175] hover:bg-[#F6F6F7]'
+                    }`}
+                  >
+                    {sp}
+                  </button>
+                ))}
+              </div>
+
+              {stringCatalogLoading ? (
+                <p className='text-[12.5px] text-[#6D7175]'>Loading catalog…</p>
+              ) : (
+                <>
+                  <div className='border border-[#E1E3E5] rounded-lg overflow-hidden'>
+                    {stringCatalog.filter((s) => s.sport === stringCatalogSport)
+                      .length === 0 ? (
+                      <p className='px-4 py-3 text-[12.5px] text-[#8C9196]'>
+                        No strings added for {stringCatalogSport} yet.
+                      </p>
+                    ) : (
+                      stringCatalog
+                        .filter((s) => s.sport === stringCatalogSport)
+                        .sort((a, b) => a.brand.localeCompare(b.brand))
+                        .map((s, idx) => (
+                          <div
+                            key={s.id}
+                            className={`flex items-center gap-3 px-4 py-2.5 ${
+                              idx !== 0 ? 'border-t border-[#F1F2F3]' : ''
+                            }`}
+                          >
+                            <button
+                              onClick={() => handleToggleString(s.id)}
+                              disabled={savingStringCatalog}
+                              title={
+                                s.available
+                                  ? 'Available — click to mark unavailable'
+                                  : 'Unavailable — click to mark available'
+                              }
+                              className={`shrink-0 w-9 h-5 rounded-full relative transition-colors cursor-pointer disabled:opacity-50 ${
+                                s.available ? 'bg-[#008060]' : 'bg-[#C9CCCF]'
+                              }`}
+                            >
+                              <span
+                                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                                  s.available ? 'translate-x' : '-translate-x-4'
+                                }`}
+                              />
+                            </button>
+                            <div className='flex-1 min-w-0'>
+                              <p className='text-[13px] font-medium text-[#202223] truncate'>
+                                {s.brand} — {s.name}
+                              </p>
+                              <p
+                                className={`text-[11px] font-medium ${
+                                  s.available
+                                    ? 'text-[#008060]'
+                                    : 'text-[#D82C0D]'
+                                }`}
+                              >
+                                {s.available
+                                  ? 'Available'
+                                  : 'Currently unavailable'}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteString(s.id)}
+                              disabled={savingStringCatalog}
+                              title='Remove from catalog'
+                              className='shrink-0 p-1.5 text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FBEAE5] rounded-md transition-colors cursor-pointer disabled:opacity-50'
+                            >
+                              <TrashIcon size={15} />
+                            </button>
+                          </div>
+                        ))
+                    )}
+                  </div>
+
+                  <div className='flex items-end gap-2 pt-1'>
+                    <div className='flex-1'>
+                      <label className='block text-[11px] font-semibold text-[#6D7175] uppercase tracking-wide mb-1'>
+                        Company / Brand
+                      </label>
+                      <input
+                        type='text'
+                        value={newString.brand}
+                        onChange={(e) =>
+                          setNewString((n) => ({ ...n, brand: e.target.value }))
+                        }
+                        placeholder='e.g. Yonex'
+                        className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                      />
+                    </div>
+                    <div className='flex-1'>
+                      <label className='block text-[11px] font-semibold text-[#6D7175] uppercase tracking-wide mb-1'>
+                        String Name
+                      </label>
+                      <input
+                        type='text'
+                        value={newString.name}
+                        onChange={(e) =>
+                          setNewString((n) => ({ ...n, name: e.target.value }))
+                        }
+                        placeholder='e.g. BG 65'
+                        onKeyDown={(e) =>
+                          e.key === 'Enter' && handleAddString()
+                        }
+                        className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                      />
+                    </div>
+                    <button
+                      onClick={handleAddString}
+                      disabled={savingStringCatalog}
+                      className='flex items-center gap-1.5 px-4 py-2 bg-[#202223] hover:bg-black text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 border-none cursor-pointer shrink-0'
+                    >
+                      <PlusIcon size={14} />
+                      Add
+                    </button>
+                  </div>
+                </>
+              )}
             </SettingSection>
           </div>
 

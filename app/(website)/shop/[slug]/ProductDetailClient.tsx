@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
+import DOMPurify from 'isomorphic-dompurify'
 import { useCart } from '@/hooks/useCart'
 import { formatPrice } from '@/lib/api/store'
 import { SITE_URL } from '@/lib/constants'
 import ProductGrid from '@/components/website/ProductGrid'
 import ProductImageZoom from '@/components/website/ProductImageZoom'
+import CrossSellSuggestions from '@/components/website/CrossSellSuggestions'
 import {
   StarIcon,
   HeartIcon,
@@ -27,6 +29,7 @@ import ProductReviews from '@/components/website/ProductReviews'
 import SizeGuideModal from '@/components/website/SizeGuideModal'
 import NotifyStockForm from '@/components/website/NotifyStockForm'
 import { recordRecentlyViewed } from '@/lib/recently-viewed'
+import type { CrossSellProduct } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +61,7 @@ interface RacketGripOption {
   price: number // pounds, from the matched variant's real price — 0 for "No Thanks"
   productId: string
   variantId: string
+  image?: string // real Medusa product thumbnail — undefined for "No Thanks"
 }
 
 // String Selection/Tension ARE gated by the free-string-upgrade toggle
@@ -285,38 +289,67 @@ function getStringOptionsForSport(sport?: string): StringOption[] {
 // matching product is actually found in Medusa (see resolveGripOptions
 // below) — "not set up in the backend yet" now means "doesn't show up",
 // not "shows up and fails at checkout".
-const GRIP_SEARCH_CANDIDATES: { id: string; brand: string; query: string }[] = [
-  { id: 'babolat-my-overgrip', brand: 'Babolat', query: 'Babolat MY Overgrip' },
-  { id: 'yonex-pu-overgrip', brand: 'Yonex', query: 'Yonex PU Overgrip' },
+//
+// Each candidate is also tagged with the sport(s) it's actually for, so a
+// badminton racket only ever offers Yonex/Victor badminton overgrips, a
+// tennis racket only offers the Babolat tennis ones, etc. — matching
+// smashuk.co's own per-sport grip collections, instead of one mixed list
+// shown on every racket regardless of sport.
+type GripSport = 'badminton' | 'tennis' | 'squash' | 'padel'
+
+const GRIP_SEARCH_CANDIDATES: {
+  id: string
+  brand: string
+  query: string
+  sports: GripSport[]
+}[] = [
+  {
+    id: 'yonex-pu-overgrip',
+    brand: 'Yonex',
+    query: 'Yonex PU Overgrip',
+    sports: ['badminton'],
+  },
   {
     id: 'victor-fishbone-replacement-grip',
     brand: 'Victor',
     query: 'Victor Fishbone Replacement Grip',
+    sports: ['badminton'],
   },
   {
     id: 'yonex-super-grap-pure',
     brand: 'Yonex',
     query: 'Yonex Super Grap Pure AC108',
+    sports: ['badminton'],
+  },
+  {
+    id: 'babolat-my-overgrip',
+    brand: 'Babolat',
+    query: 'Babolat MY Overgrip',
+    sports: ['tennis', 'squash', 'padel'],
   },
   {
     id: 'babolat-syntec-x1-white',
     brand: 'Babolat',
     query: 'Babolat Syntec X1 Replacement Grip White',
+    sports: ['tennis', 'squash', 'padel'],
   },
   {
     id: 'babolat-syntec-x1-black-yellow',
     brand: 'Babolat',
     query: 'Babolat Syntec X1 Replacement Grip Black Yellow',
+    sports: ['tennis', 'squash', 'padel'],
   },
   {
     id: 'babolat-vs-original-overgrip-3pack',
     brand: 'Babolat',
     query: 'Babolat VS Original Feel Overgrip 3 Pack',
+    sports: ['tennis', 'squash', 'padel'],
   },
   {
     id: 'babolat-pro-response-overgrip-3pack',
     brand: 'Babolat',
     query: 'Babolat Pro Response Overgrip 3 Pack',
+    sports: ['tennis', 'squash', 'padel'],
   },
 ]
 
@@ -334,9 +367,19 @@ const NO_GRIP_OPTION: RacketGripOption = {
 // actually resolve to a real product + purchasable variant with a GBP
 // price. Runs all lookups in parallel — one product page load does one
 // batch of requests, not one request per candidate at add-to-cart time.
-async function resolveGripOptions(): Promise<RacketGripOption[]> {
+//
+// `sport` narrows the candidate list FIRST (see GRIP_SEARCH_CANDIDATES'
+// `sports` tags above) — a badminton racket page never even looks up the
+// tennis grips and vice versa, so the dropdown only ever shows grips that
+// actually make sense for the product being viewed.
+async function resolveGripOptions(sport?: string): Promise<RacketGripOption[]> {
+  const sportKey = sport?.toLowerCase().trim() as GripSport | undefined
+  const candidates = sportKey
+    ? GRIP_SEARCH_CANDIDATES.filter((c) => c.sports.includes(sportKey))
+    : GRIP_SEARCH_CANDIDATES // unknown/missing sport — fall back to showing all
+
   const results = await Promise.all(
-    GRIP_SEARCH_CANDIDATES.map(async (candidate) => {
+    candidates.map(async (candidate) => {
       try {
         const res = await fetch(
           `/api/store/products?q=${encodeURIComponent(candidate.query)}&limit=3`,
@@ -365,6 +408,13 @@ async function resolveGripOptions(): Promise<RacketGripOption[]> {
           variant.calculated_price?.calculated_amount ?? gbp?.amount
         if (priceAmount === undefined) return null // no real price — skip it
 
+        // Same fallback order as normalizeProduct() in lib/api/store.ts —
+        // prefer the product's thumbnail, fall back to its first gallery
+        // image. Left undefined (not a placeholder) if neither exists, so
+        // the dropdown can just skip rendering an <img> for that option.
+        const image: string | undefined =
+          match.thumbnail ?? match.images?.[0]?.url ?? undefined
+
         const resolved: RacketGripOption = {
           id: candidate.id,
           name: match.title ?? candidate.query,
@@ -372,6 +422,7 @@ async function resolveGripOptions(): Promise<RacketGripOption[]> {
           price: priceAmount,
           productId: match.id,
           variantId: variant.id,
+          image,
         }
         return resolved
       } catch {
@@ -930,6 +981,26 @@ function StringUpgrade({
     Math.round((tensionMin + tensionMax) / 2),
   )
   const [gripId, setGripId] = useState<string>('none')
+  // Native <select><option> elements can't render an <img> inside an
+  // option — that's a hard HTML limitation, not a styling gap — so the
+  // grip picker is a custom button+panel listbox instead, which is the
+  // only way to show a real product photo next to each grip choice.
+  const [gripDropdownOpen, setGripDropdownOpen] = useState(false)
+  const gripDropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!gripDropdownOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        gripDropdownRef.current &&
+        !gripDropdownRef.current.contains(e.target as Node)
+      ) {
+        setGripDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [gripDropdownOpen])
 
   // Racket Grips options are fetched from Medusa on mount, not hardcoded —
   // a candidate only appears here if it's actually a real, purchasable
@@ -941,7 +1012,7 @@ function StringUpgrade({
 
   useEffect(() => {
     let cancelled = false
-    resolveGripOptions()
+    resolveGripOptions(sport)
       .then((options) => {
         if (!cancelled) setGripOptions(options)
       })
@@ -951,7 +1022,7 @@ function StringUpgrade({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [sport])
 
   const allGripOptions = [NO_GRIP_OPTION, ...gripOptions]
   const selectedGrip =
@@ -982,6 +1053,7 @@ function StringUpgrade({
     setGripId(id)
     const grip = allGripOptions.find((g) => g.id === id) ?? null
     onGripChange?.(grip && grip.id !== 'none' ? grip : null)
+    setGripDropdownOpen(false)
   }
 
   return (
@@ -1060,38 +1132,108 @@ function StringUpgrade({
               </span>
             )}
           </p>
-          <div className='relative'>
-            <select
-              value={gripId}
-              onChange={(e) => updateGrip(e.target.value)}
+          {/* Custom listbox instead of a native <select> — a native
+              <option> can never render an <img>, so this is a
+              button+panel dropdown built entirely with divs/buttons.
+              "No Thanks" (id === 'none') intentionally renders without an
+              image slot; every real grip option shows its actual Medusa
+              product photo. */}
+          <div className='relative' ref={gripDropdownRef}>
+            <button
+              type='button'
               disabled={gripsLoading}
-              className='w-full appearance-none px-3.5 py-3 pr-9 rounded-xl border-2 border-gray-100 bg-gray-50 text-sm font-montserrat font-bold text-[#0A1F44] focus:outline-none focus:border-[#E8553A] transition-colors cursor-pointer disabled:cursor-wait disabled:opacity-60'
+              onClick={() => setGripDropdownOpen((o) => !o)}
+              aria-haspopup='listbox'
+              aria-expanded={gripDropdownOpen}
+              className='w-full flex items-center gap-2.5 px-3.5 py-2.5 pr-9 rounded-xl border-2 border-gray-100 bg-gray-50 text-xs font-montserrat font-bold text-[#0A1F44] focus:outline-none focus:border-[#E8553A] transition-colors cursor-pointer disabled:cursor-wait disabled:opacity-60 relative'
             >
               {gripsLoading ? (
-                <option value='none'>Checking available grips…</option>
+                <span>Checking available grips…</span>
               ) : (
-                allGripOptions.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                    {g.price > 0 ? ` (+£${g.price.toFixed(2)} GBP)` : ''}
-                  </option>
-                ))
+                <>
+                  {selectedGrip.id !== 'none' && selectedGrip.image && (
+                    <img
+                      src={selectedGrip.image}
+                      alt=''
+                      className='w-8 h-8 rounded-lg object-cover shrink-0 border border-gray-200'
+                    />
+                  )}
+                  <span className='flex-1 min-w-0 flex items-baseline gap-1.5 text-left'>
+                    <span className='truncate'>{selectedGrip.name}</span>
+                    {selectedGrip.price > 0 && (
+                      <span className='shrink-0 text-[#E8553A]'>
+                        +£{selectedGrip.price.toFixed(2)} GBP
+                      </span>
+                    )}
+                  </span>
+                </>
               )}
-            </select>
-            <span className='pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400'>
-              <svg
-                width='14'
-                height='14'
-                viewBox='0 0 24 24'
-                fill='none'
-                stroke='currentColor'
-                strokeWidth='2.5'
-                strokeLinecap='round'
-                strokeLinejoin='round'
+              <span className='pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400'>
+                <svg
+                  width='14'
+                  height='14'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  className={`transition-transform duration-200 ${gripDropdownOpen ? 'rotate-180' : ''}`}
+                >
+                  <polyline points='6 9 12 15 18 9' />
+                </svg>
+              </span>
+            </button>
+
+            {gripDropdownOpen && !gripsLoading && (
+              <div
+                role='listbox'
+                className='absolute z-20 mt-1.5 w-full max-h-72 overflow-y-auto rounded-xl border-2 border-gray-100 bg-white shadow-lg py-1.5'
               >
-                <polyline points='6 9 12 15 18 9' />
-              </svg>
-            </span>
+                {allGripOptions.map((g) => {
+                  const isSelected = g.id === gripId
+                  const isNoThanks = g.id === 'none'
+                  return (
+                    <button
+                      key={g.id}
+                      type='button'
+                      role='option'
+                      aria-selected={isSelected}
+                      onClick={() => updateGrip(g.id)}
+                      className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-xs font-montserrat transition-colors ${
+                        isSelected
+                          ? 'bg-[#E8553A]/10 text-[#E8553A] font-bold'
+                          : 'text-[#0A1F44] hover:bg-gray-50 font-semibold'
+                      }`}
+                    >
+                      {/* Image slot — only real grip options get one;
+                          "No Thanks" deliberately has no image at all,
+                          not even a placeholder, per request. */}
+                      {!isNoThanks &&
+                        (g.image ? (
+                          <img
+                            src={g.image}
+                            alt=''
+                            className='w-9 h-9 rounded-lg object-cover shrink-0 border border-gray-200'
+                          />
+                        ) : (
+                          <span className='w-9 h-9 rounded-lg shrink-0 bg-gray-100 border border-gray-200' />
+                        ))}
+                      <span className='flex-1 min-w-0 flex items-baseline gap-1.5'>
+                        <span className='truncate'>{g.name}</span>
+                        {g.price > 0 && (
+                          <span
+                            className={`shrink-0 ${isSelected ? 'text-[#E8553A]' : 'text-gray-500'}`}
+                          >
+                            +£{g.price.toFixed(2)} GBP
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
           {!gripsLoading && gripOptions.length === 0 && (
             <p className='text-[11px] text-gray-400 font-lato mt-1.5'>
@@ -1229,6 +1371,7 @@ function StringUpgrade({
 interface Props {
   product: any
   related: any[]
+  crossSellProducts?: CrossSellProduct[]
 }
 
 const BADGE_STYLES: Record<string, string> = {
@@ -1238,7 +1381,11 @@ const BADGE_STYLES: Record<string, string> = {
   LIMITED: 'bg-purple-600 text-white',
 }
 
-export default function ProductDetailClient({ product, related }: Props) {
+export default function ProductDetailClient({
+  product,
+  related,
+  crossSellProducts = [],
+}: Props) {
   const [activeImage, setActiveImage] = useState(0)
   const [quantity, setQuantity] = useState(1)
   const [wishlisted, setWishlisted] = useState(false)
@@ -1257,6 +1404,136 @@ export default function ProductDetailClient({ product, related }: Props) {
   const selectedVariant =
     product.variants?.find((v: any) => v.id === selectedVariantId) ??
     product.variants?.[0]
+
+  // BUG FIX: "In Stock (Only X units left!)" used to read `product.stock`,
+  // which is the SUM of inventory_quantity across every variant of the
+  // product (see normalizeProduct() in lib/api/store.ts). On a multi-variant
+  // product that made the number wrong and misleading the moment more than
+  // one variant existed — e.g. picking "White / 8" (2 units) on a product
+  // that also has a "Black / 10" variant with 0 stock showed the combined
+  // total, not what was actually available for the variant the shopper had
+  // selected. Read available quantity from the SELECTED variant instead,
+  // falling back to the product-level aggregate only when there's no
+  // variant data at all (defensive, shouldn't normally happen).
+  const selectedVariantStock: number =
+    typeof selectedVariant?.inventory_quantity === 'number'
+      ? selectedVariant.inventory_quantity
+      : product.stock
+  const selectedVariantInStock: boolean =
+    typeof selectedVariant?.inventory_quantity === 'number'
+      ? selectedVariant.inventory_quantity > 0
+      : product.inStock
+
+  // NEW: per-variant media (Medusa v2.11+ scoped variant images, set from
+  // the dashboard's new Variant Media picker). If the selected variant has
+  // its own photos, show those in the gallery instead of the product's
+  // default images — e.g. only the black-shoe shots when "Black" is
+  // picked. Falls back to the product's own images when the variant has
+  // none selected, and resets the active thumbnail so it doesn't point
+  // past the end of a shorter gallery after switching variants.
+  const galleryImages: string[] =
+    selectedVariant?.images?.length > 0
+      ? selectedVariant.images.map((img: any) => img.url)
+      : product.images
+  useEffect(() => {
+    setActiveImage(0)
+  }, [selectedVariantId])
+
+  // BUG FIX: the picker used to render one flat "Choose an option" list of
+  // raw variant.title strings ("8.5 / White"), with no idea which part was
+  // the Size and which was the Color — smashuk.co (and most stores) show
+  // these as separate rows: "Size: 8.5" with a size grid, "Color: White"
+  // with swatches. product.options now carries that structure (see
+  // STORE_PRODUCT_FIELDS / normalizeProduct in lib/api/store.ts), so build
+  // one group per option instead.
+  const optionGroups = useMemo(
+    () =>
+      (product.options ?? []).map((opt: any) => ({
+        id: opt.id,
+        title: opt.title,
+        values: opt.values?.map((v: any) => v.value) ?? [],
+      })),
+    [product.options],
+  )
+
+  const [selectedOptions, setSelectedOptions] = useState<
+    Record<string, string>
+  >(() => {
+    const map: Record<string, string> = {}
+    product.variants?.[0]?.options?.forEach((o: any) => {
+      const group = (product.options ?? []).find(
+        (g: any) => g.id === o.option_id,
+      )
+      if (group) map[group.title] = o.value
+    })
+    return map
+  })
+
+  // Whenever the selected Size/Color/etc combination changes, resolve it to
+  // the one real variant that matches every currently-selected value so
+  // Add to Cart, price and stock all stay in sync with what's on screen.
+  useEffect(() => {
+    if (optionGroups.length === 0) return
+    const match = product.variants?.find((v: any) =>
+      optionGroups.every((g: any) => {
+        const wanted = selectedOptions[g.title]
+        if (!wanted) return true
+        const entry = v.options?.find((o: any) => o.option_id === g.id)
+        return entry?.value === wanted
+      }),
+    )
+    if (match) setSelectedVariantId(match.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOptions])
+
+  // Is `value` (for option `groupId`) still purchasable given whatever's
+  // already picked in the OTHER option groups? Mirrors real store UX —
+  // e.g. a Color only shows as available if some in-stock variant exists
+  // for the Size already selected.
+  const isOptionValueAvailable = (groupId: string, value: string) =>
+    (product.variants ?? []).some((v: any) => {
+      const hasThisValue = v.options?.some(
+        (o: any) => o.option_id === groupId && o.value === value,
+      )
+      if (!hasThisValue) return false
+      const matchesOtherGroups = optionGroups.every((g: any) => {
+        if (g.id === groupId) return true
+        const wanted = selectedOptions[g.title]
+        if (!wanted) return true
+        const entry = v.options?.find((o: any) => o.option_id === g.id)
+        return entry?.value === wanted
+      })
+      if (!matchesOtherGroups) return false
+      return (
+        typeof v.inventory_quantity !== 'number' || v.inventory_quantity > 0
+      )
+    })
+
+  // Build a lookup: color name (lowercase) → hex code stored in variant metadata.
+  // Dashboard stores `colorCode` (e.g. "#0A1F44") in variant.metadata.color_code
+  // when admin picks the swatch picker. We prefer that over CSS colour-name guessing.
+  const colorCodeMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    ;(product.variants ?? []).forEach((v: any) => {
+      const colorOpt = v.options?.find(
+        (o: any) =>
+          o.option?.title === 'Color' || o.option_id?.startsWith('opt_'),
+      )
+      const colorName = colorOpt?.value?.toLowerCase()
+      const hex = v.metadata?.color_code
+      if (colorName && hex) map[colorName] = hex
+    })
+    return map
+  }, [product.variants])
+
+  // Returns the best background-color value for a swatch:
+  // 1. Hex from dashboard metadata (most accurate)
+  // 2. CSS colour name as fallback (works for common names like "red", "navy")
+  const swatchColor = (value: string) => {
+    const key = value.toLowerCase()
+    return colorCodeMap[key] ?? key.replace(/\s+/g, '')
+  }
+
   // Split in two, matching the fixed StringUpgrade component: string
   // selection/tension (free, only when upgrade = Yes) and the grip add-on
   // (paid, always available) are independent selections now.
@@ -1272,6 +1549,24 @@ export default function ProductDetailClient({ product, related }: Props) {
   const [activeTab, setActiveTab] = useState<
     'description' | 'specs' | 'shipping'
   >('description')
+
+  // Only show a tab if it actually has content — matches the request that
+  // an empty Description/Specifications section should never render.
+  const hasDescription = Boolean(product.description?.trim())
+  const hasSpecs = Boolean(product.specs && product.specs.length > 0)
+  const availableTabs = (['description', 'specs', 'shipping'] as const).filter(
+    (tab) => {
+      if (tab === 'description') return hasDescription
+      if (tab === 'specs') return hasSpecs
+      return true // Shipping & Returns is always static content
+    },
+  )
+
+  useEffect(() => {
+    if (availableTabs.length > 0 && !availableTabs.includes(activeTab)) {
+      setActiveTab(availableTabs[0])
+    }
+  }, [availableTabs, activeTab])
 
   // Track this product as viewed for the "Recently viewed" rail on the cart
   // page (localStorage-only, no backend call).
@@ -1324,6 +1619,22 @@ export default function ProductDetailClient({ product, related }: Props) {
   // automatically when the product is genuinely discounted, not only when
   // an explicit metadata.badge is set.
   const displayBadge = product.badge ?? (discount > 0 ? 'SALE' : null)
+
+  // Tier pricing — matches the highest minQty tier the current `quantity`
+  // qualifies for (see the "Buy More, Save More" block below the price).
+  const tierDiscountPct = useMemo(() => {
+    if (!product.tierPricing || product.tierPricing.length === 0) return 0
+    const applicable = product.tierPricing.filter(
+      (t: { minQty: number; maxQty?: number; discountPct: number }) =>
+        quantity >= t.minQty &&
+        (t.maxQty === undefined || quantity <= t.maxQty),
+    )
+    if (applicable.length === 0) return 0
+    return applicable.sort(
+      (a: { minQty: number }, b: { minQty: number }) => b.minQty - a.minQty,
+    )[0].discountPct
+  }, [product.tierPricing, quantity])
+  const tierUnitPrice = product.price * (1 - tierDiscountPct / 100)
 
   const handleAddToCart = async () => {
     if (adding || added) return
@@ -1430,11 +1741,10 @@ export default function ProductDetailClient({ product, related }: Props) {
       <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10'>
         {/* Desktop: 2-col flex. Mobile: single col with order classes */}
         <div className='flex flex-col lg:flex-row lg:gap-12 lg:items-start'>
-
           {/* ── LEFT COLUMN (desktop only: sticky image + buying guide) ── */}
           <div className='hidden lg:block lg:w-1/2 lg:sticky lg:top-24 space-y-4'>
             <ProductImageZoom
-              src={product.images[activeImage]}
+              src={galleryImages[activeImage]}
               alt={product.name}
             >
               {displayBadge && (
@@ -1450,9 +1760,9 @@ export default function ProductDetailClient({ product, related }: Props) {
                 </span>
               )}
             </ProductImageZoom>
-            {product.images.length > 1 && (
+            {galleryImages.length > 1 && (
               <div className='flex gap-3'>
-                {product.images.map((img: string, i: number) => (
+                {galleryImages.map((img: string, i: number) => (
                   <button
                     key={i}
                     onClick={() => setActiveImage(i)}
@@ -1482,101 +1792,100 @@ export default function ProductDetailClient({ product, related }: Props) {
               6=sku, 7=trust badges, 8=price, 9=string upgrade,
               10=notify, 11=qty+cart, 12=buying guide */}
           <div className='flex flex-col lg:w-1/2'>
-
-          {/* Mobile image (hidden on desktop — desktop uses left col above) */}
-          <div className='order-3 mb-8 lg:hidden space-y-4'>
-            <ProductImageZoom
-              src={product.images[activeImage]}
-              alt={product.name}
-            >
-              {displayBadge && (
-                <span
-                  className={`absolute top-4 left-4 text-xs font-black px-3 py-1.5 rounded-full font-montserrat ${BADGE_STYLES[displayBadge]}`}
-                >
-                  {displayBadge}
-                </span>
-              )}
-              {discount > 0 && (
-                <span className='absolute top-4 right-4 text-xs font-black px-3 py-1.5 rounded-full bg-[#E8553A] text-white font-montserrat'>
-                  -{discount}%
-                </span>
-              )}
-            </ProductImageZoom>
-            {product.images.length > 1 && (
-              <div className='flex gap-3'>
-                {product.images.map((img: string, i: number) => (
-                  <button
-                    key={i}
-                    onClick={() => setActiveImage(i)}
-                    className={`w-20 h-20 rounded-xl overflow-hidden border-2 transition-all ${activeImage === i ? 'border-[#E8553A]' : 'border-gray-200 hover:border-gray-300'}`}
+            {/* Mobile image (hidden on desktop — desktop uses left col above) */}
+            <div className='order-2 mb-8 lg:hidden space-y-4'>
+              <ProductImageZoom
+                src={galleryImages[activeImage]}
+                alt={product.name}
+              >
+                {displayBadge && (
+                  <span
+                    className={`absolute top-4 left-4 text-xs font-black px-3 py-1.5 rounded-full font-montserrat ${BADGE_STYLES[displayBadge]}`}
                   >
-                    <img
-                      src={img}
-                      alt={`${product.name} ${i + 1}`}
-                      className='w-full h-full object-cover'
+                    {displayBadge}
+                  </span>
+                )}
+                {discount > 0 && (
+                  <span className='absolute top-4 right-4 text-xs font-black px-3 py-1.5 rounded-full bg-[#E8553A] text-white font-montserrat'>
+                    -{discount}%
+                  </span>
+                )}
+              </ProductImageZoom>
+              {galleryImages.length > 1 && (
+                <div className='flex gap-3'>
+                  {galleryImages.map((img: string, i: number) => (
+                    <button
+                      key={i}
+                      onClick={() => setActiveImage(i)}
+                      className={`w-20 h-20 rounded-xl overflow-hidden border-2 transition-all ${activeImage === i ? 'border-[#E8553A]' : 'border-gray-200 hover:border-gray-300'}`}
+                    >
+                      <img
+                        src={img}
+                        alt={`${product.name} ${i + 1}`}
+                        className='w-full h-full object-cover'
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Mobile buying guide (order-12, hidden on desktop) */}
+            <div className='order-12 mt-8 lg:hidden'>
+              {isRacket && racketGuideSport === 'padel' && <PadelRacketGuide />}
+              {isRacket && racketGuideSport !== 'padel' && (
+                <RacketBuyingGuide sport={racketGuideSport} />
+              )}
+              {isShoe && <ShoeBuyingGuide sport={product.sport} />}
+            </div>
+
+            {/* Title / brand / rating — mobile order 1 */}
+            <div className='order-1'>
+              <div className='flex items-center gap-3 mb-3'>
+                <span className='text-sm font-bold text-[#E8553A] font-lato uppercase tracking-wider'>
+                  {product.brand}
+                </span>
+                <span className='w-1 h-1 rounded-full bg-gray-300' />
+                <span className='text-sm text-gray-400 font-lato capitalize'>
+                  {product.sport}
+                </span>
+              </div>
+
+              <h1 className='font-montserrat font-black text-3xl text-[#0A1F44] mb-4 leading-tight'>
+                {product.name}
+              </h1>
+
+              <SocialShare
+                url={`${SITE_URL}/shop/${product.slug}`}
+                title={product.name}
+              />
+
+              <div className='flex items-center gap-3 mb-5'>
+                <div className='flex items-center gap-1'>
+                  {[...Array(5)].map((_, i) => (
+                    <StarIcon
+                      key={i}
+                      size={16}
+                      filled={i < Math.floor(product.rating)}
+                      className={
+                        i < Math.floor(product.rating)
+                          ? 'text-amber-400'
+                          : 'text-gray-200'
+                      }
                     />
-                  </button>
-                ))}
+                  ))}
+                </div>
+                <span className='font-montserrat font-bold text-[#0A1F44]'>
+                  {product.rating}
+                </span>
+                <span className='text-gray-400 font-lato text-sm'>
+                  ({product.reviewCount} reviews)
+                </span>
               </div>
-            )}
-          </div>
-
-          {/* Mobile buying guide (order-12, hidden on desktop) */}
-          <div className='order-12 mt-8 lg:hidden'>
-            {isRacket && racketGuideSport === 'padel' && <PadelRacketGuide />}
-            {isRacket && racketGuideSport !== 'padel' && (
-              <RacketBuyingGuide sport={racketGuideSport} />
-            )}
-            {isShoe && <ShoeBuyingGuide sport={product.sport} />}
-          </div>
-
-          {/* Title / brand / rating — mobile order 1 */}
-          <div className='order-1'>
-            <div className='flex items-center gap-3 mb-3'>
-              <span className='text-sm font-bold text-[#E8553A] font-lato uppercase tracking-wider'>
-                {product.brand}
-              </span>
-              <span className='w-1 h-1 rounded-full bg-gray-300' />
-              <span className='text-sm text-gray-400 font-lato capitalize'>
-                {product.sport}
-              </span>
             </div>
 
-            <h1 className='font-montserrat font-black text-3xl text-[#0A1F44] mb-4 leading-tight'>
-              {product.name}
-            </h1>
-
-            <SocialShare
-              url={`${SITE_URL}/shop/${product.slug}`}
-              title={product.name}
-            />
-
-            <div className='flex items-center gap-3 mb-5'>
-              <div className='flex items-center gap-1'>
-                {[...Array(5)].map((_, i) => (
-                  <StarIcon
-                    key={i}
-                    size={16}
-                    filled={i < Math.floor(product.rating)}
-                    className={
-                      i < Math.floor(product.rating)
-                        ? 'text-amber-400'
-                        : 'text-gray-200'
-                    }
-                  />
-                ))}
-              </div>
-              <span className='font-montserrat font-bold text-[#0A1F44]'>
-                {product.rating}
-              </span>
-              <span className='text-gray-400 font-lato text-sm'>
-                ({product.reviewCount} reviews)
-              </span>
-            </div>
-          </div>
-
-          {/* Price — mobile order 8, desktop flows naturally after title */}
-          <div className='order-8 lg:order-2 flex items-center gap-4 mb-6 pb-6 border-b border-gray-100'>
+            {/* Price — mobile order 3 (right after images), desktop order 2 (right after title) */}
+            <div className='order-3 lg:order-2 flex items-center gap-4 mb-6 pb-6 border-b border-gray-100'>
               <span className='font-montserrat font-black text-4xl text-[#0A1F44]'>
                 {formatPrice(product.price)}
               </span>
@@ -1597,8 +1906,145 @@ export default function ProductDetailClient({ product, related }: Props) {
               )}
             </div>
 
+            {/* Tier pricing — "Buy More, Save More" set from the dashboard's
+                Pricing tab (metadata.tier_pricing). Purely a front-end
+                display: it shows which tier the selected quantity falls
+                into and the resulting estimated price, but the discount is
+                NOT yet applied to the real cart total at checkout — that
+                would need a matching backend/cart change. */}
+            {product.tierPricing && product.tierPricing.length > 0 && (
+              <div className='order-3 lg:order-2 mb-6 pb-6 border-b border-gray-100'>
+                <p className='font-montserrat font-bold text-xs text-[#0A1F44] uppercase tracking-wider mb-2.5'>
+                  Buy More, Save More
+                </p>
+                <div className='space-y-1.5'>
+                  {[...product.tierPricing]
+                    .sort((a, b) => a.minQty - b.minQty)
+                    .map((tier, i) => {
+                      const isActive =
+                        quantity >= tier.minQty &&
+                        (tier.maxQty === undefined || quantity <= tier.maxQty)
+                      const rangeLabel = tier.maxQty
+                        ? `${tier.minQty}–${tier.maxQty} units`
+                        : `${tier.minQty}+ units`
+                      return (
+                        <div
+                          key={i}
+                          className={`flex items-center justify-between px-3.5 py-2 rounded-lg border text-sm font-lato transition-colors ${
+                            isActive
+                              ? 'border-[#E8553A] bg-[#E8553A]/5'
+                              : 'border-gray-100'
+                          }`}
+                        >
+                          <span
+                            className={
+                              isActive
+                                ? 'font-bold text-[#0A1F44]'
+                                : 'text-gray-500'
+                            }
+                          >
+                            {rangeLabel}
+                          </span>
+                          <span
+                            className={`font-montserrat font-black ${isActive ? 'text-[#E8553A]' : 'text-gray-400'}`}
+                          >
+                            {tier.discountPct}% off
+                          </span>
+                        </div>
+                      )
+                    })}
+                </div>
+                {tierDiscountPct > 0 && (
+                  <div className='mt-3 flex items-center justify-between bg-gray-50 rounded-lg px-3.5 py-2.5'>
+                    <span className='text-xs text-gray-500 font-lato'>
+                      At {quantity} unit{quantity > 1 ? 's' : ''}, estimated
+                      price
+                    </span>
+                    <span className='font-montserrat font-black text-sm text-[#0A1F44]'>
+                      {formatPrice(tierUnitPrice)}
+                      <span className='text-gray-400 font-normal'>
+                        /unit
+                      </span> · {formatPrice(tierUnitPrice * quantity)} total
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Variant picker — mobile order 4 */}
-            {hasMultipleVariants && (
+            {hasMultipleVariants && optionGroups.length > 0 && (
+              <div className='order-4 lg:order-3 mb-6 pb-6 border-b border-gray-100 space-y-5'>
+                {optionGroups.map((group: any) => {
+                  const isColor = /colou?r/i.test(group.title)
+                  return (
+                    <div key={group.id}>
+                      <p className='font-montserrat font-bold text-sm text-[#0A1F44] mb-2.5'>
+                        {group.title}
+                        {selectedOptions[group.title] && (
+                          <span className='font-normal text-gray-500'>
+                            : {selectedOptions[group.title]}
+                          </span>
+                        )}
+                      </p>
+                      <div className='flex flex-wrap gap-2'>
+                        {group.values.map((value: any) => {
+                          const isSelected =
+                            selectedOptions[group.title] === value
+                          const available = isOptionValueAvailable(
+                            group.id,
+                            value,
+                          )
+                          return (
+                            <button
+                              key={value}
+                              type='button'
+                              disabled={!available}
+                              onClick={() =>
+                                setSelectedOptions((prev) => ({
+                                  ...prev,
+                                  [group.title]: value,
+                                }))
+                              }
+                              title={
+                                !available ? `${value} (Out of stock)` : value
+                              }
+                              className={`transition-all font-montserrat font-semibold text-sm ${
+                                isColor
+                                  ? `w-9 h-9 rounded-lg border-2 ${
+                                      isSelected
+                                        ? 'border-[#E8553A] ring-2 ring-[#E8553A]/30'
+                                        : 'border-gray-200 hover:border-[#0A1F44]/40'
+                                    } ${!available ? 'opacity-30 cursor-not-allowed' : ''}`
+                                  : `px-4 py-2 rounded-lg border ${
+                                      isSelected
+                                        ? 'border-[#E8553A] bg-[#E8553A]/10 text-[#E8553A]'
+                                        : available
+                                          ? 'border-gray-200 text-[#0A1F44] hover:border-[#E8553A]'
+                                          : 'border-gray-200 text-gray-300 cursor-not-allowed line-through'
+                                    }`
+                              }`}
+                              style={
+                                isColor
+                                  ? { backgroundColor: swatchColor(value) }
+                                  : undefined
+                              }
+                            >
+                              {isColor ? '' : value}
+                              {!isColor && !available ? ' (Out of stock)' : ''}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Fallback — products with multiple variants but no option
+                metadata (legacy data): flat list of variant titles, same
+                as before. */}
+            {hasMultipleVariants && optionGroups.length === 0 && (
               <div className='order-4 lg:order-3 mb-6 pb-6 border-b border-gray-100'>
                 <p className='font-montserrat font-bold text-sm text-[#0A1F44] mb-2.5'>
                   Choose an option
@@ -1634,9 +2080,9 @@ export default function ProductDetailClient({ product, related }: Props) {
             )}
 
             {/* Tabs — mobile order 2 */}
-            <div className='order-2 lg:order-4 mb-6'>
+            <div className='order-10 lg:order-9 mb-6'>
               <div className='flex border-b border-gray-200 mb-4'>
-                {(['description', 'specs', 'shipping'] as const).map((tab) => (
+                {availableTabs.map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -1653,9 +2099,20 @@ export default function ProductDetailClient({ product, related }: Props) {
 
               {activeTab === 'description' && (
                 <div>
-                  <p className='font-lato text-gray-600 leading-relaxed mb-4'>
-                    {product.description}
-                  </p>
+                  {/* BUG FIX: product.description comes from the Shopify CSV
+                      import as an HTML string (Body (HTML) column, e.g.
+                      "<p>...</p><h3>Key features</h3><ul><li>...</li></ul>").
+                      Rendering it as plain text inside {..} printed the raw
+                      tags on the page instead of formatted content. Sanitize
+                      with DOMPurify (strips scripts/event handlers) and
+                      render as real HTML, styled to match the rest of the
+                      description tab. */}
+                  <div
+                    className='font-lato text-gray-600 leading-relaxed mb-4 [&_p]:mb-4 [&_h3]:font-montserrat [&_h3]:font-semibold [&_h3]:text-[#0A1F44] [&_h3]:text-base [&_h3]:mt-5 [&_h3]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-4 [&_ul]:space-y-1 [&_li]:leading-relaxed [&_a]:text-[#E8553A] [&_a]:underline [&_strong]:font-semibold [&_strong]:text-[#0A1F44]'
+                    dangerouslySetInnerHTML={{
+                      __html: DOMPurify.sanitize(product.description || ''),
+                    }}
+                  />
                   <div className='flex flex-wrap gap-2'>
                     {product.tags.map((tag: string) => (
                       <span
@@ -1763,19 +2220,20 @@ export default function ProductDetailClient({ product, related }: Props) {
               )}
             </div>
 
-            {/* Stock */}
-            <div className='order-5 lg:order-5 flex items-center justify-between gap-2 mb-6'>
+            {/* Stock — grouped right after price on both mobile and desktop */}
+            <div className='order-3 lg:order-2 flex items-center justify-between gap-2 mb-6'>
               <div className='flex items-center gap-2'>
-                {product.inStock ? (
+                {selectedVariantInStock ? (
                   <>
                     <div className='w-2 h-2 rounded-full bg-green-500' />
                     <span className='text-sm text-green-600 font-semibold font-lato'>
-                      {product.stock < 5 ? (
+                      {selectedVariantStock < 5 ? (
                         <>
                           In Stock{' '}
                           <span className='text-red-500 font-bold'>
-                            (Only {product.stock}{' '}
-                            {product.stock === 1 ? 'unit' : 'units'} left!)
+                            (Only {selectedVariantStock}{' '}
+                            {selectedVariantStock === 1 ? 'unit' : 'units'}{' '}
+                            left!)
                           </span>
                         </>
                       ) : (
@@ -1814,7 +2272,7 @@ export default function ProductDetailClient({ product, related }: Props) {
                 every product has it, e.g. shoes/bags/clothing don't).
                 Mobile order 5 (after price, before add-to-cart), desktop col 2 row 6 */}
             {product.stringUpgradeAvailable && (
-              <div className='order-9 lg:order-6'>
+              <div className='order-5 lg:order-4'>
                 <StringUpgrade
                   sport={product.sport}
                   onStringChange={(sel) => setStringSelection(sel)}
@@ -1825,8 +2283,8 @@ export default function ProductDetailClient({ product, related }: Props) {
 
             {/* Notify me — shown instead of the qty/cart controls when the
                 product is out of stock, matches standard ecommerce UX */}
-            {!product.inStock && (
-              <div className='order-10 lg:order-7 mb-6'>
+            {!selectedVariantInStock && (
+              <div className='order-6 lg:order-5 mb-6'>
                 <p className='text-xs text-gray-500 font-lato mb-2'>
                   Leave your email and we&apos;ll let you know the moment this
                   is back.
@@ -1838,8 +2296,8 @@ export default function ProductDetailClient({ product, related }: Props) {
               </div>
             )}
 
-            {/* Quantity + Actions — mobile order 11 */}
-            <div className='order-11 lg:order-8 flex items-center gap-4 mb-6'>
+            {/* Quantity + Actions */}
+            <div className='order-7 lg:order-6 flex items-center gap-4 mb-6'>
               <div className='flex items-center border border-gray-200 rounded-xl overflow-hidden'>
                 <button
                   onClick={() => setQuantity(Math.max(1, quantity - 1))}
@@ -1852,7 +2310,7 @@ export default function ProductDetailClient({ product, related }: Props) {
                 </span>
                 <button
                   onClick={() =>
-                    setQuantity(Math.min(product.stock, quantity + 1))
+                    setQuantity(Math.min(selectedVariantStock, quantity + 1))
                   }
                   className='w-11 h-11 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
                 >
@@ -1862,9 +2320,9 @@ export default function ProductDetailClient({ product, related }: Props) {
 
               <button
                 onClick={handleAddToCart}
-                disabled={!product.inStock || adding}
+                disabled={!selectedVariantInStock || adding}
                 className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl font-montserrat font-black text-sm transition-all duration-200 ${
-                  !product.inStock
+                  !selectedVariantInStock
                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     : added
                       ? 'bg-green-500 text-white'
@@ -1872,7 +2330,7 @@ export default function ProductDetailClient({ product, related }: Props) {
                 }`}
               >
                 <CartIcon size={18} />
-                {!product.inStock
+                {!selectedVariantInStock
                   ? 'Out of Stock'
                   : adding
                     ? 'Adding...'
@@ -1889,11 +2347,11 @@ export default function ProductDetailClient({ product, related }: Props) {
               </button>
             </div>
 
-            <p className='order-6 lg:order-9 text-xs text-gray-400 font-lato mb-6'>
+            <p className='order-8 lg:order-7 text-xs text-gray-400 font-lato mb-6'>
               SKU: <span className='font-semibold'>{product.sku}</span>
             </p>
 
-            <div className='order-7 lg:order-10 grid grid-cols-3 gap-3 pt-6 border-t border-gray-100'>
+            <div className='order-9 lg:order-8 grid grid-cols-3 gap-3 pt-6 border-t border-gray-100'>
               {[
                 { icon: <TruckIcon size={18} />, text: 'Free Delivery' },
                 { icon: <ShieldIcon size={18} />, text: '100% Authentic' },
@@ -1910,8 +2368,10 @@ export default function ProductDetailClient({ product, related }: Props) {
                 </div>
               ))}
             </div>
-          </div>{/* end right column */}
-        </div>{/* end flex row */}
+          </div>
+          {/* end right column */}
+        </div>
+        {/* end flex row */}
 
         {/* Who we are — matches smashuk.co's team blurb shown on product pages */}
         <div className='mt-16 pt-8 border-t border-gray-100 max-w-2xl'>
@@ -1960,6 +2420,8 @@ export default function ProductDetailClient({ product, related }: Props) {
             initialCount={product.reviewCount}
           />
         </div>
+
+        <CrossSellSuggestions products={crossSellProducts} />
 
         {related.length > 0 && (
           <div className='mt-20'>

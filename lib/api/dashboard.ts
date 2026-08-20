@@ -101,7 +101,7 @@ export async function getOrders(params?: {
         : (o.email ?? 'Guest'),
       email: o.email ?? '',
       phone: o.shipping_address?.phone ?? '',
-      amount: (o.total ?? 0),
+      amount: o.total ?? 0,
       // BUG FIX: this used to pass Medusa's raw order.status straight
       // through ("pending" | "completed" | "archived" | "canceled" |
       // "requires_action"). The Orders page tabs expect a Shopify-style
@@ -233,7 +233,7 @@ export async function getProducts(params?: {
         (pr: any) => pr.currency_code === 'gbp',
       )?.amount
       const anyPrice = p.variants?.[0]?.prices?.[0]?.amount
-      const price = (gbpPrice ?? anyPrice ?? 0)
+      const price = gbpPrice ?? anyPrice ?? 0
 
       // Stock from location levels
       const stock =
@@ -277,8 +277,201 @@ export async function createProduct(data: any) {
   return mutate('/api/admin/products', 'POST', data)
 }
 
+// BUG FIX ("Option value X does not exist for option Y" even though the
+// value demonstrably exists — confirmed directly in Medusa's own admin
+// panel at /app/product-options/:id, values list included it): Medusa's
+// "Global Product Options" feature is an explicit PREVIEW release (per
+// Medusa's own release notes) — linking a value to a product via
+// options/batch and then immediately sending a product update whose
+// variants reference that value is a real race: the batch call's HTTP
+// response completes before the link is fully committed/visible to the
+// variant-options validation that runs on the very next request. A short
+// bounded retry absorbs that window without masking a genuine mismatch
+// (which would keep failing after the retries too).
+function isStaleOptionLinkError(message: string) {
+  return /Option value .+ does not exist for option/i.test(message)
+}
+
 export async function updateProduct(id: string, data: any) {
-  return mutate(`/api/admin/products/${id}`, 'PATCH', data)
+  const attempts = 3
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await mutate(`/api/admin/products/${id}`, 'PATCH', data)
+    } catch (err: any) {
+      const isLast = i === attempts - 1
+      if (isLast || !isStaleOptionLinkError(err?.message ?? '')) throw err
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)))
+    }
+  }
+}
+
+// Medusa v2.17 "Global Product Options" — CONFIRMED (2026-08-15, via
+// Medusa's own admin UI network traffic, since the old approach below
+// 404'd): options are no longer scoped to one product. They're now a
+// standalone resource at /admin/product-options, reusable across many
+// products, and have to be explicitly LINKED to a product before its
+// variants can reference their values. That's a genuinely different flow
+// from before — two separate steps:
+//
+//   1. Make sure the global option (e.g. "Size") has the values this
+//      product's variants need — creating the option if it doesn't exist
+//      yet, or adding any missing values to it if it does. See
+//      upsertOptionValues().
+//   2. Link that option (with just the value ids this product actually
+//      uses) to the product itself. See linkOptionsToProduct(). Skipping
+//      this step is why the old code's "options" 404'd — the dedicated
+//      per-product endpoint it was calling doesn't exist any more; a
+//      product/option link is now a batch operation.
+//
+// Both together replace the old (now-removed) syncProductOption().
+
+// Looks up an existing global option by title (case-insensitive). Returns
+// its id and current values (each with their own id) so the caller can
+// tell which of the values it needs already exist vs. need creating.
+//
+// BUG FIX ("Option value X does not exist for option Y" despite X clearly
+// existing somewhere): several duplicate "Color"/"Size" global options
+// can end up existing (e.g. from earlier failed save attempts that hit
+// the `!existing` branch below before this dedup logic existed). Title
+// search alone just grabs whichever one the API lists first — which may
+// not be the option actually linked to THIS product, so the value we
+// resolve/create can live on the wrong entity and never match what's
+// linked. When the caller knows which option id is already linked to
+// this product (from the product's own `options` field), pass it as
+// `preferredId` so we operate on that exact entity instead of guessing.
+async function findGlobalOption(
+  title: string,
+  preferredId?: string,
+): Promise<{ id: string; values: { id: string; value: string }[] } | null> {
+  const data = await api<any>('/api/admin/product-options', {
+    limit: 200,
+    fields: 'id,title,values.id,values.value',
+  })
+  const matches = (data.product_options ?? []).filter(
+    (o: any) => o.title.toLowerCase() === title.toLowerCase(),
+  )
+  const found =
+    (preferredId && matches.find((o: any) => o.id === preferredId)) ||
+    matches[0]
+  return found ? { id: found.id, values: found.values ?? [] } : null
+}
+
+// Ensures a global option with this title exists and has (at least) the
+// given values — creating the option if it's brand new, or adding any
+// values it's missing if it already exists elsewhere. Either way, returns
+// the option's id plus the value ids for exactly the `values` requested
+// (existing + newly-created), ready to hand to linkOptionsToProduct().
+//
+// Also returns `canonicalValues`: the exact casing each requested value
+// actually has in Medusa. Matching against existing values is
+// case-insensitive (so typing "black" reuses an existing "Black" instead
+// of creating a duplicate) — but a variant's `options` field later has to
+// send the EXACT stored string, or Medusa rejects it with "Option value
+// X does not exist for option Y". Callers must use `canonicalValues`, not
+// the original `values` they passed in, when building that payload.
+export async function upsertOptionValues(
+  title: string,
+  values: string[],
+  preferredId?: string,
+): Promise<{
+  optionId: string
+  valueIds: string[]
+  canonicalValues: string[]
+}> {
+  const existing = await findGlobalOption(title, preferredId)
+
+  if (!existing) {
+    const created = await mutate('/api/admin/product-options', 'POST', {
+      title,
+      values,
+    })
+    const opt = created.product_option
+    return {
+      optionId: opt.id,
+      valueIds: opt.values.map((v: any) => v.id),
+      canonicalValues: opt.values.map((v: any) => v.value),
+    }
+  }
+
+  const byValue = new Map(
+    existing.values.map((v) => [v.value.toLowerCase(), v]),
+  )
+  const missing = values.filter((v) => !byValue.has(v.toLowerCase()))
+
+  if (missing.length > 0) {
+    // BUG FIX: Medusa expects the FULL desired values list here, not just
+    // the new ones — sending only `missing` would silently drop every
+    // value not included in this request.
+    const updated = await mutate(
+      `/api/admin/product-options/${existing.id}`,
+      'POST',
+      { title, values: [...existing.values.map((v) => v.value), ...missing] },
+    )
+    for (const v of updated.product_option.values as {
+      id: string
+      value: string
+    }[]) {
+      byValue.set(v.value.toLowerCase(), v)
+    }
+  }
+
+  const resolved = values.map((v) => byValue.get(v.toLowerCase()))
+
+  return {
+    optionId: existing.id,
+    valueIds: resolved
+      .filter((v): v is { id: string; value: string } => !!v)
+      .map((v) => v.id),
+    canonicalValues: resolved
+      .filter((v): v is { id: string; value: string } => !!v)
+      .map((v) => v.value),
+  }
+}
+
+// Links (or updates the linked value set of) global options on a
+// product. `alreadyLinkedOptionIds` should be the ids of options this
+// product already has (from GET /admin/products/:id's `options` field) —
+// those go through `update` instead of `add`, since re-`add`-ing an
+// already-linked option is rejected by Medusa.
+export async function linkOptionsToProduct(
+  productId: string,
+  options: { id: string; value_ids: string[] }[],
+  alreadyLinkedOptionIds: Set<string>,
+  // BUG FIX ("Product has N option values but there were M provided..."):
+  // any option still linked to this product but NOT in `options` (e.g. a
+  // leftover single-variant "Default"/"Type" option from before this
+  // product had Size/Color variants) has to be unlinked here too. Medusa
+  // requires every variant to provide a value for every option still
+  // linked to the product — an orphaned option left linked makes every
+  // save fail with that count-mismatch error, even though the variants
+  // payload itself is correct.
+  removeOptionIds: string[] = [],
+) {
+  const add = options.filter((o) => !alreadyLinkedOptionIds.has(o.id))
+  // BUG FIX: unlike `add`, Medusa's options/batch validator requires each
+  // `update` item to be keyed `product_option_id`, not `id` — sending `id`
+  // (as we did before) fails with "Field 'update, N, product_option_id' is
+  // required" even though `value_ids` and everything else is correct.
+  const update = options
+    .filter((o) => alreadyLinkedOptionIds.has(o.id))
+    .map((o) => ({ product_option_id: o.id, value_ids: o.value_ids }))
+  if (add.length === 0 && update.length === 0 && removeOptionIds.length === 0)
+    return
+  return mutate(`/api/admin/products/${productId}/options/batch`, 'POST', {
+    add,
+    remove: removeOptionIds,
+    update,
+  })
+}
+
+export async function deleteProductVariant(
+  productId: string,
+  variantId: string,
+) {
+  return mutate(
+    `/api/admin/products/${productId}/variants/${variantId}`,
+    'DELETE',
+  )
 }
 
 export async function deleteProduct(id: string) {
@@ -310,7 +503,7 @@ export async function getCustomers(params?: {
       // c.orders?.[].total never resolves through this relation (Medusa
       // computed field limitation — see app/api/admin/customers/route.ts,
       // which now aggregates it separately from /admin/orders instead).
-      totalSpent: (c.orders_total_spent ?? 0),
+      totalSpent: c.orders_total_spent ?? 0,
       lastOrder: c.orders?.[0]
         ? new Date(c.orders[0].created_at).toLocaleDateString('en-GB', {
             day: 'numeric',
@@ -376,7 +569,7 @@ export async function getInventory(params?: {
         (pr: any) => pr.currency_code === 'gbp',
       )?.amount
       const anyPrice = v.prices?.[0]?.amount
-      const price = (gbpPrice ?? anyPrice ?? 0)
+      const price = gbpPrice ?? anyPrice ?? 0
 
       return {
         id: v.id,
@@ -440,9 +633,7 @@ export async function getDiscounts(params?: {
 
   return {
     discounts: data.promotions.map((d: any) => {
-      const quantityRule = d.rules?.find(
-        (r: any) => r.attribute === 'quantity',
-      )
+      const quantityRule = d.rules?.find((r: any) => r.attribute === 'quantity')
       // Same shape the create/edit form uses to build one: automatic +
       // percentage + a quantity>=N rule attached directly.
       const isQuantityDiscount =
@@ -459,8 +650,8 @@ export async function getDiscounts(params?: {
         value: d.application_method?.value ?? 0,
         minQuantity: quantityRule?.values?.[0]?.value ?? null,
         minOrderAmount:
-          d.rules?.find((r: any) => r.attribute === 'subtotal')
-            ?.values?.[0] ?? 0,
+          d.rules?.find((r: any) => r.attribute === 'subtotal')?.values?.[0] ??
+          0,
         maxUses: d.usage_limit ?? null,
         usedCount: d.usage_count ?? 0,
         startsAt: d.starts_at

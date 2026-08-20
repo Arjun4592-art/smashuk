@@ -67,13 +67,46 @@ function buildAutoMetaKeywords(
   return Array.from(new Set(parts)).join(', ')
 }
 
+// A single option on a variant — BOTH the option's name ("Size", "Weight",
+// "Grip Size", "String Tension"...) and its value ("L", "88g"...) are now
+// free text the admin types, instead of the form hardcoding "Size"/"Color"
+// as the only two options every product can have. This lets different
+// product types (rackets vs clothing vs strings) use whatever option names
+// actually make sense for them.
+interface VariantOptionEntry {
+  id: string
+  name: string
+  value: string
+}
+
 interface Variant {
   id: string
-  size: string
-  color: string
+  options: VariantOptionEntry[]
+  // Optional hex swatch (e.g. "#0A1F44") shown on the storefront when one
+  // of this variant's options is a colour — kept as its own field rather
+  // than tied to a specific option name, since that name is now free text.
+  colorCode: string
   sku: string
   price: string
   stock: string
+  // Medusa v2.11+ lets each variant have its own scoped subset of the
+  // product's images (e.g. show only the white-shoe photos when "White" is
+  // selected). These are picked from the product's uploaded `images` below
+  // — a variant can't have an image that isn't already on the product.
+  imageUrls: string[]
+}
+
+interface TierPricingRow {
+  minQty: number
+  maxQty?: number
+  discountPct: number
+}
+
+interface CrossSellItem {
+  id: string
+  productId: string
+  productTitle: string
+  discountPct: number
 }
 
 interface MedusaCategory {
@@ -141,16 +174,41 @@ export default function AddProductPage() {
     tags: '',
     badge: '',
     stringUpgrade: false,
+    // FEATURE: no dashboard field previously existed to mark a product as a
+    // bookable "Stringing Service" — the only way to enable one for
+    // components/website/StringingBookingForm.tsx was to hand-edit
+    // metadata.service_type / metadata.service_sport directly in Medusa's
+    // own admin (localhost:9000/app), which isn't discoverable and isn't
+    // where staff normally manage products. These two fields let a
+    // stringing-service product (e.g. "RPM Hurrican Stringing Service") be
+    // marked from this dashboard instead.
+    isStringingService: false,
+    stringingSport: '',
     metaTitle: '',
     metaDescription: '',
     metaKeywords: '',
   })
 
   const [variants, setVariants] = useState<Variant[]>([
-    { id: '1', size: '', color: '', sku: '', price: '', stock: '' },
+    {
+      id: '1',
+      options: [{ id: 'o1', name: '', value: '' }],
+      colorCode: '',
+      sku: '',
+      price: '',
+      stock: '',
+      imageUrls: [],
+    },
   ])
 
   const [specs, setSpecs] = useState<{ label: string; value: string }[]>([])
+  const [tierPricing, setTierPricing] = useState<TierPricingRow[]>([])
+  const [crossSells, setCrossSells] = useState<CrossSellItem[]>([])
+  const [crossSellSearch, setCrossSellSearch] = useState('')
+  const [crossSellResults, setCrossSeachResults] = useState<
+    { id: string; title: string }[]
+  >([])
+  const [crossSellLoading, setCrossSellLoading] = useState(false)
 
   const [images, setImages] = useState<UploadedImage[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -184,20 +242,117 @@ export default function AddProductPage() {
       ...prev,
       {
         id: Date.now().toString(),
-        size: '',
-        color: '',
+        options: [{ id: `o${Date.now()}`, name: '', value: '' }],
+        colorCode: '',
         sku: '',
         price: '',
         stock: '',
+        imageUrls: [],
       },
     ])
   }
   const removeVariant = (id: string) =>
     setVariants((prev) => prev.filter((v) => v.id !== id))
-  const updateVariant = (id: string, key: keyof Variant, value: string) => {
+  const updateVariant = (
+    id: string,
+    key: Exclude<keyof Variant, 'options' | 'imageUrls'>,
+    value: string,
+  ) => {
     setVariants((prev) =>
       prev.map((v) => (v.id === id ? { ...v, [key]: value } : v)),
     )
+  }
+  // ── Free-text option rows (e.g. "Size" / "L", "Weight" / "88g") ────────────
+  const addOptionRow = (variantId: string) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === variantId
+          ? {
+              ...v,
+              options: [
+                ...v.options,
+                { id: `o${Date.now()}`, name: '', value: '' },
+              ],
+            }
+          : v,
+      ),
+    )
+  const removeOptionRow = (variantId: string, optionId: string) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === variantId
+          ? { ...v, options: v.options.filter((o) => o.id !== optionId) }
+          : v,
+      ),
+    )
+  const updateOptionRow = (
+    variantId: string,
+    optionId: string,
+    key: 'name' | 'value',
+    value: string,
+  ) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === variantId
+          ? {
+              ...v,
+              options: v.options.map((o) =>
+                o.id === optionId ? { ...o, [key]: value } : o,
+              ),
+            }
+          : v,
+      ),
+    )
+  // Toggle one image url on/off a variant's picked-images list.
+  const toggleVariantImage = (id: string, url: string) => {
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === id
+          ? {
+              ...v,
+              imageUrls: v.imageUrls.includes(url)
+                ? v.imageUrls.filter((u) => u !== url)
+                : [...v.imageUrls, url],
+            }
+          : v,
+      ),
+    )
+  }
+
+  const searchCrossSellProducts = async (q: string) => {
+    if (!q.trim()) {
+      setCrossSeachResults([])
+      return
+    }
+    setCrossSellLoading(true)
+    try {
+      const res = await fetch(
+        `/api/admin/products?q=${encodeURIComponent(q)}&limit=8`,
+      )
+      const data = await res.json()
+      setCrossSeachResults(
+        (data.products ?? []).map((p: any) => ({ id: p.id, title: p.title })),
+      )
+    } catch {
+      setCrossSeachResults([])
+    } finally {
+      setCrossSellLoading(false)
+    }
+  }
+
+  const addCrossSell = (product: { id: string; title: string }) => {
+    if (crossSells.some((c) => c.productId === product.id)) return
+    setCrossSells((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        productId: product.id,
+        productTitle: product.title,
+        discountPct: 10,
+      },
+    ])
+    setCrossSellSearch('')
+    setCrossSeachResults([])
   }
 
   const addImages = async (files: FileList | File[]) => {
@@ -258,39 +413,33 @@ export default function AddProductPage() {
   }
 
   // ── Build Medusa product payload ───────────────────────────────────────────
+  // A filled-in option row: both name and value typed in.
+  const filledOptions = (v: Variant) =>
+    v.options.filter((o) => o.name.trim() && o.value.trim())
+
   const buildPayload = (saveStatus: 'active' | 'draft') => {
     const medusaStatus = saveStatus === 'active' ? 'published' : 'draft'
-    const hasExtraVariants = variants.some((v) => v.size || v.color)
+    const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
 
-    // Options array
-    const options = hasExtraVariants
-      ? [
-          ...(variants.some((v) => v.size)
-            ? [
-                {
-                  title: 'Size',
-                  values: [
-                    ...new Set(
-                      variants.filter((v) => v.size).map((v) => v.size),
-                    ),
-                  ],
-                },
-              ]
-            : []),
-          ...(variants.some((v) => v.color)
-            ? [
-                {
-                  title: 'Color',
-                  values: [
-                    ...new Set(
-                      variants.filter((v) => v.color).map((v) => v.color),
-                    ),
-                  ],
-                },
-              ]
-            : []),
-        ]
-      : [{ title: 'Default', values: ['Default'] }]
+    // Options array — built from whatever free-text option names the admin
+    // typed (e.g. "Size", "Weight", "Grip Size"), not a hardcoded pair.
+    // Preserves the order option names were first typed in.
+    const options: { title: string; values: string[] }[] = []
+    if (hasExtraVariants) {
+      const valuesByTitle = new Map<string, Set<string>>()
+      variants.forEach((v) => {
+        filledOptions(v).forEach((o) => {
+          const title = o.name.trim()
+          if (!valuesByTitle.has(title)) valuesByTitle.set(title, new Set())
+          valuesByTitle.get(title)!.add(o.value.trim())
+        })
+      })
+      valuesByTitle.forEach((values, title) => {
+        options.push({ title, values: Array.from(values) })
+      })
+    } else {
+      options.push({ title: 'Default', values: ['Default'] })
+    }
 
     // Base variant
     const baseVariant = {
@@ -312,24 +461,35 @@ export default function AddProductPage() {
 
     // Extra variants
     const extraVariants = variants
-      .filter((v) => v.size || v.color)
-      .map((v) => ({
-        title: [v.size, v.color].filter(Boolean).join(' / '),
-        sku: v.sku || undefined,
-        manage_inventory: form.trackInventory,
-        prices: v.price
-          ? [
-              {
-                amount: Math.round(parseFloat(v.price) * 100) / 100,
-                currency_code: 'gbp',
-              },
-            ]
-          : baseVariant.prices,
-        options: {
-          ...(v.size ? { Size: v.size } : {}),
-          ...(v.color ? { Color: v.color } : {}),
-        },
-      }))
+      .filter((v) => filledOptions(v).length > 0)
+      .map((v) => {
+        const filled = filledOptions(v)
+        return {
+          title: filled.map((o) => o.value.trim()).join(' / '),
+          sku: v.sku || undefined,
+          manage_inventory: form.trackInventory,
+          prices: v.price
+            ? [
+                {
+                  amount: Math.round(parseFloat(v.price) * 100) / 100,
+                  currency_code: 'gbp',
+                },
+              ]
+            : baseVariant.prices,
+          options: Object.fromEntries(
+            filled.map((o) => [o.name.trim(), o.value.trim()]),
+          ),
+          metadata: v.colorCode ? { color_code: v.colorCode } : undefined,
+          // Scoped variant images (Medusa v2.11+) — must be a subset of the
+          // product's own `images` above; Medusa rejects a url that isn't
+          // already attached to the product, so this only ever sends urls
+          // the admin picked from the product's uploaded photos.
+          images:
+            v.imageUrls.length > 0
+              ? v.imageUrls.map((url) => ({ url }))
+              : undefined,
+        }
+      })
 
     const allVariants = hasExtraVariants ? extraVariants : [baseVariant]
 
@@ -367,6 +527,15 @@ export default function AddProductPage() {
         sport: form.sport || undefined,
         badge: form.badge || undefined,
         string_upgrade_available: form.stringUpgrade,
+        // FEATURE: see isStringingService/stringingSport above — this is
+        // exactly what components/website/StringingBookingForm.tsx looks
+        // for (fetch('/api/store/products?q=Stringing') then filters on
+        // metadata.service_type === 'stringing', matches the booking
+        // form's racket-type dropdown against metadata.service_sport).
+        service_type: form.isStringingService ? 'stringing' : undefined,
+        service_sport: form.isStringingService
+          ? form.stringingSport || undefined
+          : undefined,
         specs: specs.filter((s) => s.label.trim() && s.value.trim()),
         compare_at_price: form.comparePrice
           ? parseFloat(form.comparePrice)
@@ -382,6 +551,15 @@ export default function AddProductPage() {
         // product's own title/description/brand/sport when left blank, so
         // every new product automatically shows up on the SEO page with
         // usable meta title/description instead of nothing.
+        tier_pricing: tierPricing.length > 0 ? tierPricing : undefined,
+        cross_sells:
+          crossSells.length > 0
+            ? crossSells.map((c) => ({
+                productId: c.productId,
+                productTitle: c.productTitle,
+                discountPct: c.discountPct,
+              }))
+            : undefined,
         metaTitle:
           form.metaTitle.trim() || buildAutoMetaTitle(form.name, form.brand),
         metaDescription:
@@ -403,6 +581,21 @@ export default function AddProductPage() {
         ogImage: uploadedImages[0]?.url || undefined,
       },
       _stock: form.stock ? Number(form.stock) : 0,
+      // Per-variant stock map: variantTitle → qty.
+      // The API uses this to set inventory per variant instead of applying
+      // the same top-level _stock to every variant (wrong for multi-variant products).
+      _variantStocks: hasExtraVariants
+        ? Object.fromEntries(
+            variants
+              .filter((v) => v.stock && filledOptions(v).length > 0)
+              .map((v) => [
+                filledOptions(v)
+                  .map((o) => o.value.trim())
+                  .join(' / '),
+                Number(v.stock),
+              ]),
+          )
+        : undefined,
       ...(form.name
         ? {
             handle: form.name
@@ -469,6 +662,7 @@ export default function AddProductPage() {
     { id: 'pricing', label: 'Pricing' },
     { id: 'inventory', label: 'Inventory' },
     { id: 'variants', label: 'Variants' },
+    { id: 'cross-sell', label: 'Cross-sell' },
     { id: 'seo', label: 'SEO' },
   ]
 
@@ -954,6 +1148,51 @@ export default function AddProductPage() {
                       </span>
                     </span>
                   </label>
+
+                  <label className='flex items-start gap-2.5 p-3 border border-[#E1E3E5] rounded-lg cursor-pointer'>
+                    <input
+                      type='checkbox'
+                      checked={form.isStringingService}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          isStringingService: e.target.checked,
+                          stringingSport: e.target.checked
+                            ? form.stringingSport
+                            : '',
+                        })
+                      }
+                      className='mt-0.5 accent-[#008060]'
+                    />
+                    <span className='flex-1'>
+                      <span className='block text-[13px] font-medium text-[#202223]'>
+                        This is a Stringing Service product
+                      </span>
+                      <span className='block text-[11.5px] text-[#8C9196] mt-0.5'>
+                        Makes this product bookable on the
+                        /local-store/stringing pages and the storefront's "Book
+                        Stringing" form. Pick which racket type it's for below.
+                      </span>
+                      {form.isStringingService && (
+                        <select
+                          value={form.stringingSport}
+                          onChange={(e) =>
+                            setForm({
+                              ...form,
+                              stringingSport: e.target.value,
+                            })
+                          }
+                          onClick={(e) => e.stopPropagation()}
+                          className='mt-2.5 w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] bg-white'
+                        >
+                          <option value=''>Select racket type...</option>
+                          <option value='badminton'>Badminton</option>
+                          <option value='tennis'>Tennis</option>
+                          <option value='squash'>Squash</option>
+                        </select>
+                      )}
+                    </span>
+                  </label>
                 </div>
               )}
               {activeTab === 'pricing' && (
@@ -1063,6 +1302,167 @@ export default function AddProductPage() {
                         className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.taxable ? 'right-0.5' : 'left-0.5'}`}
                       />
                     </button>
+                  </div>
+
+                  {/* Tier / Volume Pricing */}
+                  <div className='border border-[#E1E3E5] rounded-lg overflow-hidden'>
+                    <div className='flex items-center justify-between px-4 py-3 bg-[#FAFAFA] border-b border-[#E1E3E5]'>
+                      <div>
+                        <p className='text-[13px] font-medium text-[#202223]'>
+                          Volume / Tier Pricing
+                        </p>
+                        <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
+                          e.g. Buy 2–9 = 12% off, Buy 10+ = 20% off
+                        </p>
+                      </div>
+                      <button
+                        type='button'
+                        onClick={() =>
+                          setTierPricing((prev) => [
+                            ...prev,
+                            {
+                              minQty: (prev[prev.length - 1]?.maxQty ?? 1) + 1,
+                              maxQty: undefined,
+                              discountPct: 10,
+                            },
+                          ])
+                        }
+                        className='flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-[#008060] border border-[#008060]/30 rounded-lg hover:bg-[#008060]/5 transition-colors bg-white cursor-pointer'
+                      >
+                        + Add tier
+                      </button>
+                    </div>
+                    {tierPricing.length === 0 ? (
+                      <div className='px-4 py-6 text-center'>
+                        <p className='text-[12.5px] text-[#8C9196]'>
+                          No tiers yet. Click "Add tier" to set volume
+                          discounts.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className='divide-y divide-[#F1F1F1]'>
+                        <div className='grid grid-cols-[1fr_1fr_1fr_auto] gap-3 px-4 py-2 bg-[#FAFAFA]'>
+                          <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                            Min Qty
+                          </span>
+                          <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                            Max Qty
+                          </span>
+                          <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                            Discount %
+                          </span>
+                          <span className='w-8' />
+                        </div>
+                        {tierPricing.map((tier, i) => (
+                          <div
+                            key={i}
+                            className='grid grid-cols-[1fr_1fr_1fr_auto] gap-3 items-center px-4 py-3'
+                          >
+                            <input
+                              type='number'
+                              min='1'
+                              value={tier.minQty}
+                              onChange={(e) => {
+                                const updated = [...tierPricing]
+                                updated[i] = {
+                                  ...updated[i],
+                                  minQty: Number(e.target.value),
+                                }
+                                setTierPricing(updated)
+                              }}
+                              className='w-full px-2.5 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                              placeholder='2'
+                            />
+                            <input
+                              type='number'
+                              min='1'
+                              value={tier.maxQty ?? ''}
+                              onChange={(e) => {
+                                const updated = [...tierPricing]
+                                updated[i] = {
+                                  ...updated[i],
+                                  maxQty: e.target.value
+                                    ? Number(e.target.value)
+                                    : undefined,
+                                }
+                                setTierPricing(updated)
+                              }}
+                              className='w-full px-2.5 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                              placeholder='∞ (no limit)'
+                            />
+                            <div className='relative'>
+                              <input
+                                type='number'
+                                min='1'
+                                max='99'
+                                value={tier.discountPct}
+                                onChange={(e) => {
+                                  const updated = [...tierPricing]
+                                  updated[i] = {
+                                    ...updated[i],
+                                    discountPct: Number(e.target.value),
+                                  }
+                                  setTierPricing(updated)
+                                }}
+                                className='w-full pl-2.5 pr-6 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                                placeholder='10'
+                              />
+                              <span className='absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#8C9196]'>
+                                %
+                              </span>
+                            </div>
+                            <button
+                              type='button'
+                              onClick={() =>
+                                setTierPricing((prev) =>
+                                  prev.filter((_, j) => j !== i),
+                                )
+                              }
+                              className='w-8 h-8 flex items-center justify-center text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg bg-transparent border-none cursor-pointer text-base'
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        {form.price && (
+                          <div className='px-4 py-3 bg-[#F9F9F9] border-t border-[#E1E3E5]'>
+                            <p className='text-[11.5px] font-semibold text-[#6D7175] mb-2'>
+                              Preview (base price £{form.price})
+                            </p>
+                            <div className='space-y-1'>
+                              <p className='text-[11.5px] text-[#8C9196]'>
+                                Buy 1 →{' '}
+                                <strong className='text-[#202223]'>
+                                  £{parseFloat(form.price).toFixed(2)}
+                                </strong>{' '}
+                                each
+                              </p>
+                              {tierPricing.map((t, i) => {
+                                const discounted = (
+                                  parseFloat(form.price) *
+                                  (1 - t.discountPct / 100)
+                                ).toFixed(2)
+                                const label = t.maxQty
+                                  ? `${t.minQty}–${t.maxQty}`
+                                  : `${t.minQty}+`
+                                return (
+                                  <p
+                                    key={i}
+                                    className='text-[11.5px] text-[#8C9196]'
+                                  >
+                                    Buy {label} →{' '}
+                                    <strong className='text-[#008060]'>
+                                      £{discounted}
+                                    </strong>{' '}
+                                    each ({t.discountPct}% off)
+                                  </p>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1179,10 +1579,98 @@ export default function AddProductPage() {
                             </button>
                           )}
                         </div>
-                        <div className='grid grid-cols-2 gap-3'>
-                          {(
-                            ['size', 'color', 'sku', 'price', 'stock'] as const
-                          ).map((field) => (
+                        {/* Free-text option rows — the admin types BOTH
+                            the option name ("Size", "Weight", "Grip
+                            Size"...) and its value for this variant,
+                            instead of the form only offering Size/Color.
+                            Different product types (rackets, clothing,
+                            strings) can each use whatever options fit. */}
+                        <div className='space-y-2'>
+                          <div className='flex items-center justify-between'>
+                            <label className='block text-[11.5px] text-[#6D7175]'>
+                              Options
+                            </label>
+                            <button
+                              type='button'
+                              onClick={() => addOptionRow(variant.id)}
+                              className='text-[11.5px] text-[#008060] font-medium hover:underline bg-transparent border-none cursor-pointer'
+                            >
+                              + Add Option
+                            </button>
+                          </div>
+                          {variant.options.map((opt) => (
+                            <div
+                              key={opt.id}
+                              className='flex items-center gap-1.5'
+                            >
+                              <input
+                                type='text'
+                                value={opt.name}
+                                onChange={(e) =>
+                                  updateOptionRow(
+                                    variant.id,
+                                    opt.id,
+                                    'name',
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder='Option name (e.g. Size, Weight)'
+                                className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
+                              />
+                              <input
+                                type='text'
+                                value={opt.value}
+                                onChange={(e) =>
+                                  updateOptionRow(
+                                    variant.id,
+                                    opt.id,
+                                    'value',
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder='Value (e.g. L, 88g)'
+                                className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
+                              />
+                              {variant.options.length > 1 && (
+                                <button
+                                  type='button'
+                                  onClick={() =>
+                                    removeOptionRow(variant.id, opt.id)
+                                  }
+                                  title='Remove option'
+                                  className='px-2 py-2 text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer shrink-0'
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                          {/* Optional colour swatch — independent of the
+                              option name typed above; if any option here
+                              represents a colour, pick the hex that should
+                              drive the storefront swatch. */}
+                          <div className='flex items-center gap-2 pt-1'>
+                            <label className='text-[11.5px] text-[#6D7175] shrink-0'>
+                              Swatch colour (optional)
+                            </label>
+                            <input
+                              type='color'
+                              title='Swatch colour shown on the storefront'
+                              value={variant.colorCode || '#ffffff'}
+                              onChange={(e) =>
+                                updateVariant(
+                                  variant.id,
+                                  'colorCode',
+                                  e.target.value,
+                                )
+                              }
+                              className='w-10 h-8 p-1 border border-[#E1E3E5] rounded-lg cursor-pointer bg-white shrink-0'
+                            />
+                          </div>
+                        </div>
+
+                        <div className='grid grid-cols-3 gap-3'>
+                          {(['sku', 'price', 'stock'] as const).map((field) => (
                             <div key={field}>
                               <label className='block text-[11.5px] text-[#6D7175] mb-1 capitalize'>
                                 {field === 'price' ? 'Price (£)' : field}
@@ -1202,24 +1690,247 @@ export default function AddProductPage() {
                                   )
                                 }
                                 placeholder={
-                                  field === 'size'
-                                    ? 'e.g. UK 8, L, XL'
-                                    : field === 'color'
-                                      ? 'e.g. Black, Red'
-                                      : field === 'sku'
-                                        ? 'e.g. FB-001-BLK-8'
-                                        : field === 'price'
-                                          ? '0.00'
-                                          : '0'
+                                  field === 'sku'
+                                    ? 'e.g. FB-001-BLK-8'
+                                    : field === 'price'
+                                      ? '0.00'
+                                      : '0'
                                 }
                                 className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
                               />
                             </div>
                           ))}
                         </div>
+
+                        {/* Per-variant media — Medusa v2.11+ lets a variant
+                            show only a subset of the product's own photos
+                            (e.g. only the white-shoe shots for "White").
+                            Pick from images already uploaded in the Images
+                            tab; a variant can't have a photo the product
+                            doesn't have. */}
+                        <div>
+                          <label className='block text-[11.5px] text-[#6D7175] mb-1'>
+                            Variant Media
+                          </label>
+                          {images.filter((i) => i.url).length === 0 ? (
+                            <p className='text-[11.5px] text-[#8C9196] italic'>
+                              Upload product images in the Images tab first,
+                              then come back here to pick which ones belong to
+                              this variant.
+                            </p>
+                          ) : (
+                            <div className='flex flex-wrap gap-2'>
+                              {images
+                                .filter((i) => i.url)
+                                .map((img) => {
+                                  const picked = variant.imageUrls.includes(
+                                    img.url!,
+                                  )
+                                  return (
+                                    <button
+                                      key={img.url}
+                                      type='button'
+                                      onClick={() =>
+                                        toggleVariantImage(variant.id, img.url!)
+                                      }
+                                      title={
+                                        picked
+                                          ? 'Remove from this variant'
+                                          : 'Add to this variant'
+                                      }
+                                      className={`relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-all cursor-pointer bg-transparent p-0 ${
+                                        picked
+                                          ? 'border-[#008060] ring-2 ring-[#008060]/30'
+                                          : 'border-[#E1E3E5] hover:border-[#8C9196]'
+                                      }`}
+                                    >
+                                      <img
+                                        src={img.url}
+                                        alt=''
+                                        className='w-full h-full object-cover'
+                                      />
+                                      {picked && (
+                                        <span className='absolute inset-0 flex items-center justify-center bg-[#008060]/40 text-white text-[16px] font-bold'>
+                                          ✓
+                                        </span>
+                                      )}
+                                    </button>
+                                  )
+                                })}
+                            </div>
+                          )}
+                          {variant.imageUrls.length === 0 && (
+                            <p className='text-[11px] text-[#8C9196] mt-1'>
+                              No images picked — this variant will show the
+                              product's default images on the storefront.
+                            </p>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* ── CROSS-SELL TAB ── */}
+              {activeTab === 'cross-sell' && (
+                <div className='space-y-5'>
+                  <div>
+                    <p className='text-[13px] font-medium text-[#202223]'>
+                      Cross-sell Products
+                    </p>
+                    <p className='text-[12px] text-[#6D7175] mt-0.5'>
+                      Jab customer yeh product buy kare, tab usse related
+                      product discount ke saath offer hoga (e.g. Shoes ke saath
+                      Socks pe 10% off).
+                    </p>
+                  </div>
+
+                  {/* Search box */}
+                  <div className='relative'>
+                    <input
+                      type='text'
+                      value={crossSellSearch}
+                      onChange={(e) => {
+                        setCrossSellSearch(e.target.value)
+                        searchCrossSellProducts(e.target.value)
+                      }}
+                      placeholder='Product search karo (e.g. Socks, Grip, Shuttle)...'
+                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                    />
+                    {crossSellLoading && (
+                      <div className='absolute right-3 top-1/2 -translate-y-1/2'>
+                        <svg
+                          className='animate-spin w-4 h-4 text-[#8C9196]'
+                          viewBox='0 0 24 24'
+                          fill='none'
+                        >
+                          <circle
+                            className='opacity-25'
+                            cx='12'
+                            cy='12'
+                            r='10'
+                            stroke='currentColor'
+                            strokeWidth='4'
+                          />
+                          <path
+                            className='opacity-75'
+                            fill='currentColor'
+                            d='M4 12a8 8 0 018-8v8H4z'
+                          />
+                        </svg>
+                      </div>
+                    )}
+                    {crossSellResults.length > 0 && (
+                      <div className='absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#E1E3E5] rounded-lg shadow-lg overflow-hidden'>
+                        {crossSellResults.map((p) => (
+                          <button
+                            key={p.id}
+                            type='button'
+                            onClick={() => addCrossSell(p)}
+                            disabled={crossSells.some(
+                              (c) => c.productId === p.id,
+                            )}
+                            className='w-full text-left px-4 py-2.5 text-[13px] text-[#202223] hover:bg-[#F6F6F7] border-none bg-transparent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                          >
+                            {p.title}
+                            {crossSells.some((c) => c.productId === p.id) && (
+                              <span className='ml-2 text-[11px] text-[#8C9196]'>
+                                (already added)
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Added cross-sell list */}
+                  {crossSells.length === 0 ? (
+                    <div className='py-8 text-center border border-dashed border-[#E1E3E5] rounded-lg'>
+                      <p className='text-[12.5px] text-[#8C9196]'>
+                        Koi cross-sell product nahi add kiya abhi tak.
+                      </p>
+                      <p className='text-[12px] text-[#8C9196] mt-1'>
+                        Upar search karo aur product add karo.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className='border border-[#E1E3E5] rounded-lg overflow-hidden'>
+                      <div className='grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 bg-[#FAFAFA] border-b border-[#E1E3E5]'>
+                        <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                          Product
+                        </span>
+                        <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                          Discount %
+                        </span>
+                        <span className='w-8' />
+                      </div>
+                      <div className='divide-y divide-[#F1F1F1]'>
+                        {crossSells.map((cs) => (
+                          <div
+                            key={cs.id}
+                            className='grid grid-cols-[1fr_auto_auto] gap-3 items-center px-4 py-3'
+                          >
+                            <div>
+                              <p className='text-[13px] font-medium text-[#202223] truncate'>
+                                {cs.productTitle}
+                              </p>
+                              <p className='text-[11px] text-[#8C9196] mt-0.5'>
+                                ID: {cs.productId.slice(0, 16)}…
+                              </p>
+                            </div>
+                            <div className='relative w-24'>
+                              <input
+                                type='number'
+                                min='1'
+                                max='99'
+                                value={cs.discountPct}
+                                onChange={(e) =>
+                                  setCrossSells((prev) =>
+                                    prev.map((c) =>
+                                      c.id === cs.id
+                                        ? {
+                                            ...c,
+                                            discountPct: Number(e.target.value),
+                                          }
+                                        : c,
+                                    ),
+                                  )
+                                }
+                                className='w-full pl-2.5 pr-6 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                              />
+                              <span className='absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#8C9196]'>
+                                %
+                              </span>
+                            </div>
+                            <button
+                              type='button'
+                              onClick={() =>
+                                setCrossSells((prev) =>
+                                  prev.filter((c) => c.id !== cs.id),
+                                )
+                              }
+                              className='w-8 h-8 flex items-center justify-center text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg bg-transparent border-none cursor-pointer text-base'
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {crossSells.length > 0 && (
+                    <div className='p-3 bg-[#F2F7F5] border border-[#008060]/20 rounded-lg'>
+                      <p className='text-[12px] text-[#6D7175]'>
+                        <strong className='text-[#008060]'>ℹ️</strong> Customer
+                        jab yeh product cart mein add kare, tab product page ya
+                        cart page pe cross-sell products suggest honge — defined
+                        discount ke saath.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 

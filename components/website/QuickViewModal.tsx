@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useCartStore } from '@/store/cartStore'
-import { formatCurrency, calculateDiscount } from '@/lib/utils'
+import { formatCurrency, calculateDiscount, stripHtml } from '@/lib/utils'
 import type { Product } from '@/types'
 import { StarIcon, CartIcon, CheckIcon } from '@/components/ui/Icons'
 
@@ -102,7 +102,7 @@ export default function QuickViewModal({ product, onClose }: Props) {
 
           {product.description && (
             <p className='text-[13px] text-[#4B5563] font-lato leading-relaxed line-clamp-4 mb-5'>
-              {product.description}
+              {stripHtml(product.description)}
             </p>
           )}
 

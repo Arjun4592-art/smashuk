@@ -6,7 +6,7 @@ export const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? 'https://smash-pro.netlify.app'
 export const SITE_LOGO = '/icons/logo.png'
 export const SITE_OG_IMAGE = '/icons/og-image.jpg'
-export const CONTACT_EMAIL = 'info@smashuk.co'
+export const CONTACT_EMAIL = 'smashracketpro@gmail.com'
 export const CONTACT_PHONE = '0161 536 3594'
 
 // Handle of the gift card product created in Medusa Admin (variants are

@@ -16,7 +16,8 @@ import * as path from 'path'
 import * as readline from 'readline'
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
 
-const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
+const MEDUSA_URL =
+  process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 const ADMIN_EMAIL = process.env.MEDUSA_ADMIN_EMAIL
 const ADMIN_PASSWORD = process.env.MEDUSA_ADMIN_PASSWORD
 
@@ -34,7 +35,8 @@ async function getToken(): Promise<string> {
     body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
   })
   const data = await res.json()
-  if (!res.ok || !data.token) throw new Error('Auth failed: ' + (data.message ?? res.status))
+  if (!res.ok || !data.token)
+    throw new Error('Auth failed: ' + (data.message ?? res.status))
   return data.token as string
 }
 
@@ -55,12 +57,17 @@ async function medusaDelete(token: string, path: string) {
   })
   if (!res.ok) {
     const err = await res.text()
-    throw new Error(`DELETE ${path} failed (${res.status}): ${err.slice(0, 200)}`)
+    throw new Error(
+      `DELETE ${path} failed (${res.status}): ${err.slice(0, 200)}`,
+    )
   }
 }
 
 function confirm(question: string): Promise<boolean> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  })
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       rl.close()
@@ -73,8 +80,14 @@ async function main() {
   const token = await getToken()
   console.log('✅ Authenticated as admin\n')
 
-  const { count: productCount } = await medusaGet(token, '/admin/products?limit=1')
-  const { count: categoryCount } = await medusaGet(token, '/admin/product-categories?limit=1')
+  const { count: productCount } = await medusaGet(
+    token,
+    '/admin/products?limit=1',
+  )
+  const { count: categoryCount } = await medusaGet(
+    token,
+    '/admin/product-categories?limit=1',
+  )
 
   console.log(`Found ${productCount} products and ${categoryCount} categories.`)
   const ok = await confirm(
@@ -85,19 +98,70 @@ async function main() {
     return
   }
 
+  // 0) Delete all reservations first. BUG FIX: Medusa refuses to delete a
+  // product if any of its variants' inventory items still has an active
+  // reservation ("Cannot remove following inventory item(s) since they
+  // have reservations: [...]") — leftover from carts, in-progress POS
+  // sales, or abandoned checkouts. Since we're wiping the whole catalog
+  // anyway, clear every reservation first so no product delete below gets
+  // blocked by this.
+  console.log('\n🗑️  Deleting reservations...')
+  let resDeleted = 0
+  while (true) {
+    const { reservations } = await medusaGet(
+      token,
+      '/admin/reservations?limit=100&fields=id',
+    )
+    if (!reservations || reservations.length === 0) break
+    for (const r of reservations) {
+      try {
+        await medusaDelete(token, `/admin/reservations/${r.id}`)
+        resDeleted++
+      } catch (err: any) {
+        console.warn(
+          `  ⚠️  Could not delete reservation ${r.id}: ${err.message}`,
+        )
+      }
+    }
+  }
+  console.log(`✅ Deleted ${resDeleted} reservations`)
+
   // 1) Delete all products (paginated, 100 at a time)
   console.log('\n🗑️  Deleting products...')
   let deleted = 0
+  const failedProducts: string[] = []
   while (true) {
-    const { products } = await medusaGet(token, '/admin/products?limit=100&fields=id')
+    const { products } = await medusaGet(
+      token,
+      '/admin/products?limit=100&fields=id',
+    )
     if (!products || products.length === 0) break
+    let progressedThisPage = false
     for (const p of products) {
-      await medusaDelete(token, `/admin/products/${p.id}`)
-      deleted++
-      if (deleted % 20 === 0) console.log(`  ...${deleted} deleted`)
+      try {
+        await medusaDelete(token, `/admin/products/${p.id}`)
+        deleted++
+        progressedThisPage = true
+        if (deleted % 20 === 0) console.log(`  ...${deleted} deleted`)
+      } catch (err: any) {
+        // BUG FIX: a single product's delete failing (e.g. a reservation
+        // that slipped through, or some other constraint) used to crash
+        // the whole script and leave everything after it un-deleted. Log
+        // it and keep going — reported at the end so nothing is silently
+        // left behind.
+        console.warn(`  ⚠️  Could not delete product ${p.id}: ${err.message}`)
+        failedProducts.push(p.id)
+      }
     }
+    // Safety: if an entire page failed to delete anything, stop instead of
+    // looping forever re-fetching the same stuck products.
+    if (!progressedThisPage) break
   }
   console.log(`✅ Deleted ${deleted} products`)
+  if (failedProducts.length > 0) {
+    console.log(`⚠️  ${failedProducts.length} products could not be deleted:`)
+    failedProducts.forEach((id) => console.log(`   - ${id}`))
+  }
 
   // 2) Delete all categories (children first — Medusa rejects deleting a
   // category that still has children, so sort deepest-first)
@@ -120,7 +184,9 @@ async function main() {
   }
   console.log(`✅ Deleted ${catDeleted} categories`)
 
-  console.log('\n✨ Catalog cleared. Now run: npx ts-node --esm scripts/seed-smashuk.ts')
+  console.log(
+    '\n✨ Catalog cleared. Now run: npx ts-node --esm scripts/seed-smashuk.ts',
+  )
 }
 
 main().catch((err) => {

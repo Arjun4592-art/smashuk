@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useCartStore } from '@/store/cartStore'
 import { useWishlistStore } from '@/store/wishlistStore'
-import { formatCurrency, calculateDiscount } from '@/lib/utils'
+import { formatCurrency, calculateDiscount, stripHtml } from '@/lib/utils'
 import type { Product } from '@/types'
 import { HeartIcon, CartIcon, StarIcon, CheckIcon } from '@/components/ui/Icons'
 import QuickViewModal from '@/components/website/QuickViewModal'
@@ -133,7 +133,7 @@ export default function ProductCard({
 
             {/* Description */}
             <p className='text-[12px] text-[#4B5563] font-lato line-clamp-2 mb-3 hidden sm:block leading-relaxed'>
-              {product.description}
+              {stripHtml(product.description)}
             </p>
 
             {/* Price + Cart */}

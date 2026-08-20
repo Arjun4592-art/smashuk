@@ -2,7 +2,7 @@
 
 import { useSearchParams } from 'next/navigation'
 import { useMemo, useState, useCallback, useEffect } from 'react'
-import { useMedusaProducts as useStoreProducts } from '@/hooks/useProducts'
+import { useAllStoreProducts as useStoreProducts } from '@/hooks/useProducts'
 import { normalizeProduct, matchesBadgeFilter } from '@/lib/api/store'
 import ProductGrid from '@/components/website/ProductGrid'
 import { SPORTS } from '@/lib/constants'
@@ -109,7 +109,12 @@ export default function ShopClient() {
   }, [category])
 
   // Fetch products from Medusa
-  const { data, isLoading, isError } = useStoreProducts({ limit: 100 })
+  // BUG FIX: was useStoreProducts({ limit: 100 }) — a single capped page
+  // against a 1,736-product catalog. See useAllStoreProducts() in
+  // hooks/useProducts.ts for why that hid entire categories from both the
+  // sidebar and the results. useAllStoreProducts() pages through the full
+  // catalog instead.
+  const { data, isLoading, isError } = useStoreProducts()
 
   const products = useMemo(
     () => (data?.products ?? []).map(normalizeProduct),
@@ -169,11 +174,20 @@ export default function ShopClient() {
     // truth (synced with the URL's ?category= param above). Substring
     // match keeps it compatible with the navbar's short tokens ("rackets")
     // as well as full handles picked from the sidebar ("badminton-rackets").
+    // BUG FIX: `c.includes(p.category ?? '')` was vacuously true whenever a
+    // product had no Medusa category set (p.category === '') — any string
+    // includes the empty string, so every uncategorized product matched
+    // every category filter, making category filters (and the "Clothing"
+    // navbar link, which has plenty of uncategorized products) silently
+    // show all products instead of narrowing. Only match when the product
+    // actually has a category set.
     if (filters.categories.length)
-      result = result.filter((p) =>
-        filters.categories.some(
-          (c) => p.category?.includes(c) || c.includes(p.category ?? ''),
-        ),
+      result = result.filter(
+        (p) =>
+          !!p.category &&
+          filters.categories.some(
+            (c) => p.category!.includes(c) || c.includes(p.category!),
+          ),
       )
     if (filters.brands.length)
       result = result.filter((p) => filters.brands.includes(p.brand))
@@ -229,10 +243,12 @@ export default function ShopClient() {
     if (filters.sports.length)
       result = result.filter((p) => filters.sports.includes(p.sport))
     if (filters.categories.length)
-      result = result.filter((p) =>
-        filters.categories.some(
-          (c) => p.category?.includes(c) || c.includes(p.category ?? ''),
-        ),
+      result = result.filter(
+        (p) =>
+          !!p.category &&
+          filters.categories.some(
+            (c) => p.category!.includes(c) || c.includes(p.category!),
+          ),
       )
     return result
   }, [products, badge, brandParam, filters.sports, filters.categories])
@@ -325,7 +341,10 @@ export default function ShopClient() {
               Home
             </Link>
             &nbsp;/&nbsp;
-            <Link href='/shop' className='hover:text-white/70 transition-colors'>
+            <Link
+              href='/shop'
+              className='hover:text-white/70 transition-colors'
+            >
               Shop
             </Link>
             {(sport || badge || q) && (

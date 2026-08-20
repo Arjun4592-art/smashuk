@@ -36,7 +36,9 @@ export async function GET(req: NextRequest) {
       const err = await safeJson(res, 'app/api/admin/categories/route.ts')
       return NextResponse.json({ error: err.message }, { status: res.status })
     }
-    return NextResponse.json(await safeJson(res, 'app/api/admin/categories/route.ts'))
+    return NextResponse.json(
+      await safeJson(res, 'app/api/admin/categories/route.ts'),
+    )
   } catch (err: any) {
     console.error('[API] categories error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -63,7 +65,10 @@ export async function POST(req: NextRequest) {
       const err = await safeJson(res, 'app/api/admin/categories/route.ts')
       return NextResponse.json({ error: err.message }, { status: res.status })
     }
-    return NextResponse.json(await safeJson(res, 'app/api/admin/categories/route.ts'), { status: 201 })
+    return NextResponse.json(
+      await safeJson(res, 'app/api/admin/categories/route.ts'),
+      { status: 201 },
+    )
   } catch (err: any) {
     console.error('[API] category create error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })

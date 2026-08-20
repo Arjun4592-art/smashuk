@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useCartStore } from '@/store/cartStore'
+import { normalizeProduct } from '@/lib/api/store'
 import type { Product } from '@/types'
 import type { Sport } from '@/lib/stringing-options'
 import {
@@ -43,13 +44,35 @@ function todayISO() {
 export default function StringingBookingForm() {
   const router = useRouter()
   const { cartId, addItem } = useCartStore()
-  const [services, setServices] = useState<Product[]>([])
+  // BUG FIX: this used to be typed `Product[]` and store the raw Medusa
+  // products straight from /api/store/products (a plain passthrough proxy —
+  // see app/api/store/products/route.ts — it does NOT run normalizeProduct()
+  // like ShopClient.tsx / wishlistStore.ts do). A raw Medusa product has no
+  // top-level .name/.slug/.images/.price — those only exist after
+  // normalizeProduct(). Passing the raw shape straight into addItem() meant
+  // the cart page (which reads item.product.name/.slug/.images[0]/.price)
+  // rendered a blank name, a broken image, a dead "/shop/undefined" link,
+  // and £NaN for that item's price *and* the cart's subtotal/tax/total.
+  // Kept as raw `any[]` here (not `Product[]`) because matching by sport
+  // still needs the raw `metadata.service_sport` field, which
+  // normalizeProduct() doesn't carry over — normalization now happens right
+  // before a product is used (see selectedProduct below).
+  const [services, setServices] = useState<any[]>([])
   const [sport, setSport] = useState('')
   const [stringChoice, setStringChoice] = useState('')
   const [tension, setTension] = useState('')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // Manually-managed "which strings are available right now" catalog from
+  // the dashboard (Settings → Stringing String Catalog). See
+  // lib/stringing-catalog.ts. Empty array = nothing configured there yet,
+  // in which case the form falls back to the static full list from
+  // lib/stringing-options.ts (getStringGroupsForSport below) so it never
+  // shows an empty dropdown.
+  const [catalogStrings, setCatalogStrings] = useState<
+    { sport: string; brand: string; name: string }[]
+  >([])
 
   useEffect(() => {
     fetch('/api/store/products?q=Stringing')
@@ -62,16 +85,49 @@ export default function StringingBookingForm() {
         if (found.length) setSport(found[0].metadata.service_sport)
       })
       .catch(() => {})
+
+    fetch('/api/store/stringing-catalog')
+      .then((res) => res.json())
+      .then((data) => setCatalogStrings(data.items ?? []))
+      .catch(() => {})
   }, [])
 
   const timeSlots = useMemo(() => slotsForDate(date), [date])
-  const selectedProduct = services.find(
+  // Match on the raw metadata field, then normalize just the matched
+  // product — see the BUG FIX note on `services` above for why.
+  const selectedRaw = services.find(
     (p: any) => p.metadata?.service_sport === sport,
   )
+  const selectedProduct: Product | undefined = selectedRaw
+    ? normalizeProduct(selectedRaw)
+    : undefined
   // String/tension options change with the racket type — re-derived
   // whenever `sport` changes (see lib/stringing-options.ts, shared with the
   // /local-store/stringing/{badminton,tennis,squash} guide pages).
-  const stringGroups = useMemo(() => getStringGroupsForSport(sport), [sport])
+  //
+  // If the dashboard's manual "Stringing String Catalog" has entries for
+  // this sport, those take priority (they reflect real current
+  // availability) — grouped by brand the same shape as the static list.
+  // Otherwise fall back to the full static list so the dropdown is never
+  // empty for a sport nobody has configured yet.
+  const catalogGroupsForSport = useMemo(() => {
+    const matches = catalogStrings.filter((s) => s.sport === sport)
+    if (!matches.length) return null
+    const byBrand = new Map<string, string[]>()
+    for (const s of matches) {
+      if (!byBrand.has(s.brand)) byBrand.set(s.brand, [])
+      byBrand.get(s.brand)!.push(s.name)
+    }
+    return Array.from(byBrand.entries()).map(([group, items]) => ({
+      group,
+      items,
+    }))
+  }, [catalogStrings, sport])
+
+  const stringGroups = useMemo(
+    () => catalogGroupsForSport ?? getStringGroupsForSport(sport),
+    [catalogGroupsForSport, sport],
+  )
   const tensionOptions = useMemo(() => getTensionsForSport(sport), [sport])
 
   // Selected racket type changed — the previous string/tension pick may not

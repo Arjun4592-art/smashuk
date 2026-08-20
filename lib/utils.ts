@@ -1,6 +1,29 @@
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
+// ─── HTML → plain text ───────────────────────────────────────────
+// product.description comes from the Shopify CSV import as raw HTML
+// (e.g. "<p>...</p><h3>Key features</h3><ul><li>...</li></ul>"). Anywhere
+// it's shown as a plain text teaser (card blurbs, meta tags) — not the
+// full formatted description tab — it needs to be stripped to plain text
+// first, or the literal tags show up on the page.
+export function stripHtml(html: string, maxLength = 160): string {
+  if (!html) return ''
+  const text = html
+    .replace(/<\/(p|div|li|h[1-6])>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (text.length <= maxLength) return text
+  return text.slice(0, maxLength).replace(/\s+\S*$/, '') + '…'
+}
+
 // ─── Tailwind class merger ───────────────────────────────────────
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))

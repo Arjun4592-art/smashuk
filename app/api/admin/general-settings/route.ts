@@ -105,9 +105,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'storeId required' }, { status: 400 })
     }
 
+    // BUG FIX: this used to build `metadata` from ONLY this form's own
+    // fields (email/phone/address/...), without first fetching and
+    // spreading the store's CURRENT metadata. Any other feature that
+    // stores its own data in store.metadata (e.g. lib/stringing-catalog.ts
+    // → metadata.stringing_catalog) would get silently wiped out the next
+    // time an admin saved this General Settings form, since Medusa's store
+    // update replaces `metadata` wholesale rather than merging it.
+    // Uses the same list-endpoint + fields pattern as every other route in
+    // this codebase that reads store metadata (GET above,
+    // report-history.ts, etc.) rather than a single-resource GET by ID,
+    // whose response shape isn't used/confirmed anywhere else here.
+    const currentRes = await fetch(
+      `${MEDUSA_URL}/admin/stores?limit=1&fields=id,metadata`,
+      { headers: { Authorization: authHeader } },
+    )
+    const currentData = await safeJson(currentRes)
+    const currentMetadata = currentRes.ok
+      ? (currentData.stores?.[0]?.metadata ?? {})
+      : {}
+
     const payload = {
       name: store?.name,
       metadata: {
+        ...currentMetadata,
         email: store?.email ?? '',
         phone: store?.phone ?? '',
         website: store?.website ?? '',

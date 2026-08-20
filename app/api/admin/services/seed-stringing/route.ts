@@ -49,14 +49,24 @@ export async function POST(req: NextRequest) {
   try {
     // Find which of the 3 already exist so re-running this is a no-op for them.
     const existingRes = await fetch(
-      `${MEDUSA_URL}/admin/products?q=Stringing&limit=50&fields=id,metadata`,
+      `${MEDUSA_URL}/admin/products?q=Stringing&limit=50&fields=id,title,metadata`,
       { headers: { Authorization: authorization } },
     )
     const existingData = await existingRes.json()
+    const existingProducts: any[] = existingData.products ?? []
+    const titleToSport = new Map(SERVICES.map((s) => [s.title, s.sport]))
     const existingSports = new Set(
-      (existingData.products ?? [])
-        .filter((p: any) => p.metadata?.service_type === 'stringing')
-        .map((p: any) => p.metadata?.service_sport),
+      existingProducts
+        .map(
+          (p: any) =>
+            p.metadata?.service_sport ??
+            // Fallback for a product that already occupies one of our
+            // fixed titles/handles but wasn't stamped with our metadata
+            // (e.g. a leftover from an earlier interrupted run) — still
+            // counts as "already set up" so it isn't recreated.
+            titleToSport.get(p.title),
+        )
+        .filter(Boolean),
     )
 
     const cookie = req.headers.get('cookie') ?? ''
@@ -92,9 +102,27 @@ export async function POST(req: NextRequest) {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
+        const message: string = err.error ?? ''
+
+        // A product already sits on this handle — most likely a leftover
+        // from an earlier run of this same endpoint that got interrupted
+        // AFTER Medusa created the product but before/while this route
+        // finished (e.g. inventory/sales-channel/shipping-profile setup
+        // failing). The pre-check above only recognises an existing
+        // service via metadata.service_type === 'stringing', so that
+        // leftover product — created by us, just missing that stamp —
+        // was invisible to it and collided here every time, killing the
+        // rest of the loop. A handle clash for one of OUR fixed slugs
+        // means "already set up", not a real failure — skip it and keep
+        // going so tennis/squash aren't blocked by badminton's leftover.
+        if (/already exists/i.test(message)) {
+          skipped.push(s.title)
+          continue
+        }
+
         return NextResponse.json(
           {
-            error: `Failed creating "${s.title}": ${err.error ?? res.status}`,
+            error: `Failed creating "${s.title}": ${message || res.status}`,
             created,
             skipped,
           },

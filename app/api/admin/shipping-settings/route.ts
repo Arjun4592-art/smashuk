@@ -84,11 +84,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
 
     const storeRes = await fetch(
-      `${MEDUSA_URL}/admin/stores?limit=1&fields=id`,
+      `${MEDUSA_URL}/admin/stores?limit=1&fields=id,metadata`,
       { headers: { Authorization: authHeader } },
     )
     const storeData = await safeJson(storeRes)
     const storeId = storeData.stores?.[0]?.id
+    const currentMetadata = storeData.stores?.[0]?.metadata ?? {}
     if (!storeRes.ok || !storeId) {
       return NextResponse.json(
         { error: storeData.message ?? 'No store found' },
@@ -96,13 +97,19 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // BUG FIX: used to write `metadata: { shippingSettings: body }`
+    // directly, wiping every other feature's metadata (seoConfig,
+    // notificationSettings, reportHistory, stringing_catalog, etc.) —
+    // spread the current metadata first, same as reviews/route.ts.
     const res = await fetch(`${MEDUSA_URL}/admin/stores/${storeId}`, {
       method: 'POST',
       headers: {
         Authorization: authHeader,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ metadata: { shippingSettings: body } }),
+      body: JSON.stringify({
+        metadata: { ...currentMetadata, shippingSettings: body },
+      }),
     })
     const data = await safeJson(res)
     if (!res.ok) {

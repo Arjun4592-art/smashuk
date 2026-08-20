@@ -57,7 +57,7 @@ export default function ProductGrid({ products, onAdd }: Props) {
             key={p.id}
             onClick={() => !isOut && onAdd(p)}
             disabled={isOut}
-            title={p.description || p.name}
+            title={p.name}
             className='flex flex-col p-3 rounded-lg border text-left transition-all'
             style={{
               background: '#FFFFFF',

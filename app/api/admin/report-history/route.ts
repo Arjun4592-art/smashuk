@@ -43,7 +43,7 @@ async function safeJson(res: Response) {
 
 async function getStoreIdAndHistory(
   authHeader: string,
-): Promise<{ storeId: string; history: ReportRecord[] } | null> {
+): Promise<{ storeId: string; history: ReportRecord[]; metadata: any } | null> {
   const res = await fetch(
     `${MEDUSA_URL}/admin/stores?limit=1&fields=id,metadata`,
     { headers: { Authorization: authHeader } },
@@ -51,7 +51,11 @@ async function getStoreIdAndHistory(
   const data = await safeJson(res)
   const store = data.stores?.[0]
   if (!res.ok || !store) return null
-  return { storeId: store.id, history: store.metadata?.reportHistory ?? [] }
+  return {
+    storeId: store.id,
+    history: store.metadata?.reportHistory ?? [],
+    metadata: store.metadata ?? {},
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -70,10 +74,21 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json()
-    const { name, type, dateRange, downloadedBy, downloadedByEmail, rowCount, fileName } = body
+    const {
+      name,
+      type,
+      dateRange,
+      downloadedBy,
+      downloadedByEmail,
+      rowCount,
+      fileName,
+    } = body
 
     if (!name || !type || !downloadedBy) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Missing required fields' },
+        { status: 400 },
+      )
     }
 
     const record: ReportRecord = {
@@ -100,7 +115,13 @@ export async function POST(req: NextRequest) {
         Authorization: authHeader,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ metadata: { reportHistory: updated } }),
+      // BUG FIX: used to write `metadata: { reportHistory: updated }`
+      // directly, wiping every other feature's metadata (seoConfig,
+      // shippingSettings, notificationSettings, stringing_catalog, etc.)
+      // — spread the current metadata first, same as reviews/route.ts.
+      body: JSON.stringify({
+        metadata: { ...result.metadata, reportHistory: updated },
+      }),
     })
     const data = await safeJson(res)
     if (!res.ok) {
@@ -133,7 +154,11 @@ export async function DELETE(req: NextRequest) {
         Authorization: authHeader,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ metadata: { reportHistory: [] } }),
+      // BUG FIX: same clobber issue as POST above — spread current
+      // metadata so clearing report history doesn't wipe everything else.
+      body: JSON.stringify({
+        metadata: { ...result.metadata, reportHistory: [] },
+      }),
     })
     const data = await safeJson(res)
     if (!res.ok) {

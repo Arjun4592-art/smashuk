@@ -12,6 +12,9 @@
 import type { Metadata } from 'next'
 import { SITE_NAME, SITE_URL } from '@/lib/constants'
 import { readSeoConfig, DEFAULT_SEO } from '@/lib/seo-config'
+import { stripHtml } from '@/lib/utils'
+
+export { stripHtml }
 
 // ── Shared helper ─────────────────────────────────────────────────────────────
 
@@ -78,7 +81,7 @@ export async function generateProductMetadata(
       canonical: seo.canonical,
       noIndex: seo.noIndex,
       fallbackTitle: `${product.title} — ${SITE_NAME}`,
-      fallbackDescription: product.description ?? '',
+      fallbackDescription: stripHtml(product.description ?? ''),
       fallbackCanonical: `${SITE_URL}/shop/product/${productId}`,
     })
   } catch (err) {
@@ -191,7 +194,7 @@ export function generateProductSchema(product: any) {
     '@context': 'https://schema.org',
     '@type': 'Product',
     name: product.name,
-    description: product.description ?? '',
+    description: stripHtml(product.description ?? '', 5000),
     image: product.images ?? [],
     sku: product.sku ?? '',
     brand: {

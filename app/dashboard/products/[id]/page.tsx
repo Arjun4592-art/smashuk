@@ -1,9 +1,14 @@
 'use client'
 
-import { useState, useEffect, use } from 'react'
+import { useState, useEffect, useRef, use } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { updateProduct } from '@/lib/api/dashboard'
+import {
+  updateProduct,
+  upsertOptionValues,
+  linkOptionsToProduct,
+  deleteProductVariant,
+} from '@/lib/api/dashboard'
 import { inferSellingChannel } from '@/lib/api/selling-channels-client'
 import { toast } from 'sonner'
 
@@ -13,14 +18,41 @@ import { toast } from 'sonner'
 // the catalog) — see that route. metadata.brand/metadata.sport themselves
 // are untouched, so nothing else that reads them changes.
 
+// A single option on a variant — BOTH the option's name ("Size", "Weight",
+// "Grip Size", "String Tension"...) and its value ("L", "88g"...) are now
+// free text the admin types, instead of the form hardcoding "Size"/"Color"
+// as the only two options every product can have. Matches the shape used
+// on the new-product page.
+interface VariantOptionEntry {
+  id: string
+  name: string
+  value: string
+}
+
 interface Variant {
   id: string
   medusaId?: string
-  size: string
-  color: string
+  options: VariantOptionEntry[]
+  colorCode: string
   sku: string
   price: string
   stock: string
+  // Medusa v2.11+ scoped variant images — subset of the product's own
+  // `images` (see the new-product page for the same field/rationale).
+  imageUrls: string[]
+}
+
+interface TierPricingRow {
+  minQty: number
+  maxQty?: number
+  discountPct: number
+}
+
+interface CrossSellItem {
+  id: string
+  productId: string
+  productTitle: string
+  discountPct: number
 }
 
 interface MedusaCategory {
@@ -96,6 +128,11 @@ export default function EditProductPage({
     tags: '',
     badge: '',
     stringUpgrade: false,
+    // FEATURE: see the matching comment in app/dashboard/products/new/page.tsx
+    // — lets a stringing-service product be marked/edited from this
+    // dashboard instead of hand-editing metadata in Medusa's own admin.
+    isStringingService: false,
+    stringingSport: '',
     metaTitle: '',
     metaDescription: '',
     metaKeywords: '',
@@ -105,9 +142,23 @@ export default function EditProductPage({
   const [tierPricing, setTierPricing] = useState<
     { minQty: number; maxQty?: number; discountPct: number }[]
   >([])
+  const [crossSells, setCrossSells] = useState<CrossSellItem[]>([])
+  const [crossSellSearch, setCrossSellSearch] = useState('')
+  const [crossSellResults, setCrossSeachResults] = useState<
+    { id: string; title: string }[]
+  >([])
+  const [crossSellLoading, setCrossSellLoading] = useState(false)
 
   const [variants, setVariants] = useState<Variant[]>([
-    { id: '1', size: '', color: '', sku: '', price: '', stock: '' },
+    {
+      id: '1',
+      options: [{ id: 'o1', name: '', value: '' }],
+      colorCode: '',
+      sku: '',
+      price: '',
+      stock: '',
+      imageUrls: [],
+    },
   ])
 
   // BUG FIX ("already exists" on save): when a product has only a single
@@ -133,6 +184,52 @@ export default function EditProductPage({
   const [existingOptions, setExistingOptions] = useState<
     { id: string; title: string }[]
   >([])
+
+  // BUG FIX ("Option value Black does not exist for option Color"):
+  // upsertOptionValues() matches values case-insensitively so it doesn't
+  // create duplicate values ("black" vs "Black") — but the variant
+  // payload sent to Medusa needs the value's EXACT stored casing, which
+  // can differ from what the user just typed if that value already
+  // existed with different casing. Populated by syncOptionsForVariants()
+  // right before buildPayload() runs, keyed by
+  // `${title.toLowerCase()}::${typedValue.toLowerCase()}` -> canonical
+  // string. A ref (not state) because buildPayload needs it synchronously
+  // right after the async sync call, with no re-render in between.
+  const optionValueCasingRef = useRef<Map<string, string>>(new Map())
+
+  // BUG FIX ("SKU/price/inventory vanish when a Size/Color variant is
+  // added, and the new variant never actually gets created"): converting
+  // a single-variant product to Size/Color variants has to delete the old
+  // "Default" variant before Medusa will let that option be unlinked (see
+  // syncOptionsForVariants below). That delete used to run unconditionally
+  // BEFORE we knew the replacement variant(s) would actually save — so a
+  // failure afterwards (a transient Medusa error, a duplicate SKU on a new
+  // row, etc.) left the product with the old variant gone and no new one
+  // in its place. This tracks whether that delete has happened in the
+  // current save attempt so handleSave can recreate an equivalent variant
+  // if anything after it fails, instead of silently losing the data.
+  const deletedDefaultVariantRef = useRef(false)
+  // BUG FIX ("Cannot unassign product option from product which has
+  // variants for that option"): when the old "Default" variant survives
+  // as an in-place update (its Type→Size/Color conversion happens inside
+  // the SAME updateProduct call), Medusa still sees it referencing the
+  // stale option (e.g. "Type") at the moment syncOptionsForVariants runs
+  // — the variant hasn't switched over yet. Unlinking it there always
+  // 400s. Stale option ids are stashed here instead and actually removed
+  // in handleSave AFTER updateProduct succeeds, once no variant
+  // references them any more.
+  const staleOptionIdsRef = useRef<string[]>([])
+  // BUG FIX (leftover variants in Medusa after clicking "Remove" on an
+  // already-saved variant row): removeVariant() only dropped the row from
+  // local state — buildPayload only sends variants still present in
+  // `variants`, and Medusa's product update does NOT delete variants that
+  // are simply left out of that array (same reason a stale "Default"
+  // variant needs an explicit DELETE elsewhere in this file). Without
+  // this, the variant kept existing server-side, out of sync with what
+  // the dashboard showed, and could later block unlinking an option the
+  // same way the "Type" bug did. Ids removed from the UI are queued here
+  // and actually deleted from Medusa in handleSave.
+  const variantsToDeleteRef = useRef<string[]>([])
 
   const [specs, setSpecs] = useState<{ label: string; value: string }[]>([])
 
@@ -161,6 +258,8 @@ export default function EditProductPage({
           sport: p.metadata?.sport ?? '',
           badge: p.metadata?.badge ?? '',
           stringUpgrade: p.metadata?.string_upgrade_available === true,
+          isStringingService: p.metadata?.service_type === 'stringing',
+          stringingSport: p.metadata?.service_sport ?? '',
           category: p.categories?.[0]?.id ?? '',
           categoryName: p.categories?.[0]?.name ?? '',
           sku: firstVariant?.sku ?? '',
@@ -201,6 +300,17 @@ export default function EditProductPage({
           'taxable',
           'tier_pricing',
         ])
+        // Load cross-sells from metadata
+        if (Array.isArray(p.metadata?.cross_sells)) {
+          setCrossSells(
+            p.metadata.cross_sells.map((c: any, i: number) => ({
+              id: String(i),
+              productId: c.productId ?? '',
+              productTitle: c.productTitle ?? c.productId ?? '',
+              discountPct: c.discountPct ?? 10,
+            })),
+          )
+        }
         // Load tier pricing
         if (Array.isArray(p.metadata?.tier_pricing)) {
           setTierPricing(p.metadata.tier_pricing)
@@ -227,25 +337,58 @@ export default function EditProductPage({
             p.variants.map((v: any) => ({
               id: v.id,
               medusaId: v.id,
-              size:
-                v.options?.find((o: any) => o.option?.title === 'Size')
-                  ?.value ?? '',
-              color:
-                v.options?.find((o: any) => o.option?.title === 'Color')
-                  ?.value ?? '',
+              // Load whatever real option names/values Medusa has for this
+              // variant — not just "Size"/"Color" — so products that used
+              // other option names (e.g. "Weight", "Grip Size") still show
+              // their real options here instead of an empty row.
+              options:
+                (v.options ?? [])
+                  .map((o: any, i: number) => ({
+                    id: `${v.id}-${i}`,
+                    name: o.option?.title ?? '',
+                    value: o.value ?? '',
+                  }))
+                  .filter((o: any) => o.name) ?? [],
+              colorCode: v.metadata?.color_code ?? '',
               sku: v.sku ?? '',
               price: v.prices?.[0]?.amount ? String(v.prices[0].amount) : '',
               stock: String(v.inventory_quantity ?? ''),
+              imageUrls: (v.images ?? []).map((img: any) => img.url),
             })),
           )
         } else if (p.variants && p.variants.length === 1) {
           // Single "Default" variant — keep its real id so the save
           // payload updates it instead of creating a duplicate.
-          setDefaultVariantId(p.variants[0].id)
-          const opt = p.variants[0].options?.[0]
+          const v = p.variants[0]
+          setDefaultVariantId(v.id)
+          const opt = v.options?.[0]
           if (opt?.option?.title && opt?.value) {
             setDefaultOption({ title: opt.option.title, value: opt.value })
           }
+          // BUG FIX ("SKU/price/stock vanish when new option rows are
+          // added"): the Variants tab used to start from a blank
+          // placeholder row for single-variant products — this variant's
+          // real id, SKU, price and stock were never loaded into it, only
+          // into the General/Pricing tabs' `form` fields. The moment a
+          // user typed real options into that blank row, buildPayload had
+          // no id to tell it apart from a brand-new variant and no
+          // SKU/price/stock to carry forward, and the delete-then-recreate
+          // flow below (needed to unlink the old "Default" option) ended
+          // up destroying the real variant with nothing equivalent to
+          // replace it. Seed row 1 with the real data so filling in
+          // options on it converts this exact variant in place.
+          setVariants([
+            {
+              id: '1',
+              medusaId: v.id,
+              options: [{ id: 'o1', name: '', value: '' }],
+              colorCode: v.metadata?.color_code ?? '',
+              sku: v.sku ?? '',
+              price: v.prices?.[0]?.amount ? String(v.prices[0].amount) : '',
+              stock: String(v.inventory_quantity ?? ''),
+              imageUrls: (v.images ?? []).map((img: any) => img.url),
+            },
+          ])
         }
 
         if (Array.isArray(p.options)) {
@@ -301,21 +444,135 @@ export default function EditProductPage({
       ...prev,
       {
         id: Date.now().toString(),
-        size: '',
-        color: '',
+        options: [{ id: `o${Date.now()}`, name: '', value: '' }],
+        colorCode: '',
         sku: '',
         price: '',
         stock: '',
+        imageUrls: [],
       },
     ])
   const removeVariant = (vid: string) =>
-    setVariants((prev) => prev.filter((v) => v.id !== vid))
-  const updateVariant = (vid: string, key: keyof Variant, value: string) =>
+    setVariants((prev) => {
+      // If this row already exists in Medusa (has a medusaId), queue it
+      // for server-side deletion on the next Save — see
+      // variantsToDeleteRef above. Rows never saved yet (no medusaId,
+      // just added via "Add Variant") only need the local removal.
+      const target = prev.find((v) => v.id === vid)
+      if (target?.medusaId) {
+        variantsToDeleteRef.current = [
+          ...variantsToDeleteRef.current,
+          target.medusaId,
+        ]
+      }
+      return prev.filter((v) => v.id !== vid)
+    })
+  const updateVariant = (
+    vid: string,
+    key: Exclude<keyof Variant, 'options' | 'imageUrls'>,
+    value: string,
+  ) =>
     setVariants((prev) =>
       prev.map((v) => (v.id === vid ? { ...v, [key]: value } : v)),
     )
+  // ── Free-text option rows (e.g. "Size" / "L", "Weight" / "88g") ────────────
+  const addOptionRow = (variantId: string) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === variantId
+          ? {
+              ...v,
+              options: [
+                ...v.options,
+                { id: `o${Date.now()}`, name: '', value: '' },
+              ],
+            }
+          : v,
+      ),
+    )
+  const removeOptionRow = (variantId: string, optionId: string) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === variantId
+          ? { ...v, options: v.options.filter((o) => o.id !== optionId) }
+          : v,
+      ),
+    )
+  const updateOptionRow = (
+    variantId: string,
+    optionId: string,
+    key: 'name' | 'value',
+    value: string,
+  ) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === variantId
+          ? {
+              ...v,
+              options: v.options.map((o) =>
+                o.id === optionId ? { ...o, [key]: value } : o,
+              ),
+            }
+          : v,
+      ),
+    )
+  // Toggle one image url on/off a variant's picked-images list.
+  const toggleVariantImage = (vid: string, url: string) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === vid
+          ? {
+              ...v,
+              imageUrls: v.imageUrls.includes(url)
+                ? v.imageUrls.filter((u) => u !== url)
+                : [...v.imageUrls, url],
+            }
+          : v,
+      ),
+    )
 
   // ── Image helpers ──────────────────────────────────────────────────────────
+  // BUG FIX: search results used to include the product currently being
+  // edited, which let it be added as its own cross-sell. Filter it out by
+  // `id` (the product id from the route params) before setting results.
+  const searchCrossSellProducts = async (q: string) => {
+    if (!q.trim()) {
+      setCrossSeachResults([])
+      return
+    }
+    setCrossSellLoading(true)
+    try {
+      const res = await fetch(
+        `/api/admin/products?q=${encodeURIComponent(q)}&limit=8`,
+      )
+      const data = await res.json()
+      setCrossSeachResults(
+        (data.products ?? [])
+          .filter((p: any) => p.id !== id)
+          .map((p: any) => ({ id: p.id, title: p.title })),
+      )
+    } catch {
+      setCrossSeachResults([])
+    } finally {
+      setCrossSellLoading(false)
+    }
+  }
+
+  const addCrossSell = (product: { id: string; title: string }) => {
+    if (crossSells.some((c) => c.productId === product.id)) return
+    setCrossSells((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        productId: product.id,
+        productTitle: product.title,
+        discountPct: 10,
+      },
+    ])
+    setCrossSellSearch('')
+    setCrossSeachResults([])
+  }
+
   const addImages = async (files: FileList | File[]) => {
     const newImages: UploadedImage[] = Array.from(files).map((file) => ({
       file,
@@ -370,13 +627,20 @@ export default function EditProductPage({
   }
 
   // ── Build payload ──────────────────────────────────────────────────────────
-  const buildPayload = (saveStatus: 'published' | 'draft') => {
-    const hasExtraVariants = variants.some((v) => v.size || v.color)
+  // Medusa v2.17 "Global Product Options" — options are no longer part of
+  // this payload at all (the old top-level `options` field was removed,
+  // and the old per-product nested endpoint this used to call was too).
+  // Linking Size/Color options (and creating any new values they need) to
+  // this product now happens BEFORE this payload is built — see
+  // syncOptionsForVariants(), called from handleSave. By the time
+  // buildPayload runs, every option this product needs is already linked,
+  // so the variants below can safely reference their values.
+  // A filled-in option row: both name and value typed in.
+  const filledOptions = (v: Variant) =>
+    v.options.filter((o) => o.name.trim() && o.value.trim())
 
-    // NOTE: option definitions (Size/Color) used to be built here and sent
-    // as a top-level `options` field, but Medusa 2.16.0 removed that field
-    // from the product-update payload — see the comment in the return
-    // object below.
+  const buildPayload = (saveStatus: 'published' | 'draft') => {
+    const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
 
     const baseVariant = {
       // BUG FIX: without this `id`, saving a single-variant product sent a
@@ -405,37 +669,61 @@ export default function EditProductPage({
         : { Default: 'Default' },
     }
 
+    // BUG FIX ("Option value Black does not exist for option Color"): use
+    // the exact casing Medusa actually stored for each value (captured by
+    // syncOptionsForVariants into optionValueCasingRef just before this
+    // runs), not the raw text the user typed — those can differ when a
+    // value with different casing already existed. Falls back to the
+    // typed text if nothing was captured (e.g. this option title wasn't
+    // synced this save).
+    const canonicalValue = (title: string, typed: string) =>
+      optionValueCasingRef.current.get(
+        `${title.toLowerCase()}::${typed.toLowerCase()}`,
+      ) ?? typed
+
     const extraVariants = variants
-      .filter((v) => v.size || v.color)
-      .map((v) => ({
-        // Same fix as baseVariant.id above — keep the real id for
-        // existing rows so they're updated, not duplicated. New rows
-        // added via "Add Variant" have no medusaId, so they're still
-        // created as expected.
-        id: v.medusaId || undefined,
-        title: [v.size, v.color].filter(Boolean).join(' / '),
-        sku: v.sku || undefined,
-        manage_inventory: form.trackInventory,
-        prices: v.price
-          ? [
-              {
-                amount: Math.round(parseFloat(v.price) * 100) / 100,
-                currency_code: 'gbp',
-              },
-            ]
-          : baseVariant.prices,
-        options: {
-          ...(v.size ? { Size: v.size } : {}),
-          ...(v.color ? { Color: v.color } : {}),
-        },
-      }))
+      .filter((v) => filledOptions(v).length > 0)
+      .map((v) => {
+        const filled = filledOptions(v)
+        return {
+          // Same fix as baseVariant.id above — keep the real id for
+          // existing rows so they're updated, not duplicated. New rows
+          // added via "Add Variant" have no medusaId, so they're still
+          // created as expected.
+          id: v.medusaId || undefined,
+          title: filled.map((o) => o.value.trim()).join(' / '),
+          sku: v.sku || undefined,
+          manage_inventory: form.trackInventory,
+          prices: v.price
+            ? [
+                {
+                  amount: Math.round(parseFloat(v.price) * 100) / 100,
+                  currency_code: 'gbp',
+                },
+              ]
+            : baseVariant.prices,
+          options: Object.fromEntries(
+            filled.map((o) => [
+              o.name.trim(),
+              canonicalValue(o.name.trim(), o.value.trim()),
+            ]),
+          ),
+          metadata: v.colorCode ? { color_code: v.colorCode } : undefined,
+          // Scoped variant images (Medusa v2.11+) — subset of the product's
+          // own images picked in the Variant Media grid below.
+          images:
+            v.imageUrls.length > 0
+              ? v.imageUrls.map((url) => ({ url }))
+              : undefined,
+        }
+      })
 
     const allVariants = hasExtraVariants ? extraVariants : [baseVariant]
     const uploadedImages = images
       .filter((i) => i.url)
       .map((i, idx) => ({ url: i.url!, rank: idx }))
 
-    return {
+    const productPayload = {
       title: form.name,
       description: form.description || undefined,
       status: saveStatus,
@@ -446,20 +734,20 @@ export default function EditProductPage({
       thumbnail: uploadedImages[0]?.url ?? undefined,
       images: uploadedImages.length > 0 ? uploadedImages : undefined,
       categories: form.category ? [{ id: form.category }] : [],
-      // BUG FIX: Medusa 2.16.0 removed the top-level `options` property from
-      // the product-update payload entirely — sending it (even unchanged)
-      // now fails the WHOLE save with "Invalid request: The 'options'
-      // property was removed in version 2.16.0", before any other field
-      // (including the Sell on channel) gets saved. Product options are
-      // managed through a separate endpoint in 2.16+, not inline here.
-      // Per-variant `options` (the Size/Color value mapping below) is a
-      // different field and is still required/accepted.
+      // No `options` field here at all — Medusa v2.17 removed it from this
+      // payload entirely. Options are linked to the product separately,
+      // BEFORE this payload is sent — see syncOptionsForVariants() in
+      // handleSave.
       variants: allVariants,
       metadata: {
         brand: form.brand || undefined,
         sport: form.sport || undefined,
         badge: form.badge || undefined,
         string_upgrade_available: form.stringUpgrade,
+        service_type: form.isStringingService ? 'stringing' : undefined,
+        service_sport: form.isStringingService
+          ? form.stringingSport || undefined
+          : undefined,
         specs: specs.filter((s) => s.label.trim() && s.value.trim()),
         tags: form.tags || undefined,
         compare_at_price: form.comparePrice
@@ -469,7 +757,245 @@ export default function EditProductPage({
         low_stock_alert: form.lowStockAlert ? Number(form.lowStockAlert) : 5,
         taxable: form.taxable,
         tier_pricing: tierPricing.length > 0 ? tierPricing : undefined,
+        cross_sells:
+          crossSells.length > 0
+            ? crossSells.map((c) => ({
+                productId: c.productId,
+                productTitle: c.productTitle,
+                discountPct: c.discountPct,
+              }))
+            : undefined,
       },
+      // BUG FIX: inventory was never saved when editing a product — the
+      // stock field in Inventory tab and per-variant stock were collected
+      // in the form but never sent to the API. The PATCH route now reads
+      // these (same as the POST/create route) and sets location-levels.
+      _stock: form.stock ? Number(form.stock) : 0,
+      _variantStocks: hasExtraVariants
+        ? Object.fromEntries(
+            variants
+              .filter((v) => v.stock && filledOptions(v).length > 0)
+              .map((v) => [
+                filledOptions(v)
+                  .map((o) => o.value.trim())
+                  .join(' / '),
+                Number(v.stock),
+              ]),
+          )
+        : undefined,
+    }
+
+    return productPayload
+  }
+
+  // ── Sync Size/Color options for the variants below ─────────────────────────
+  // Medusa v2.17 "Global Product Options": before the variants payload can
+  // reference a Size/Color value, that value has to (1) exist on the
+  // global option and (2) be linked to THIS product. Two-step flow per
+  // option title used by the variants:
+  //   1. upsertOptionValues() — create the global option if it's new, or
+  //      add any values to it that don't exist yet.
+  //   2. linkOptionsToProduct() — attach (or update the attached value
+  //      set of) that option on this product.
+  const syncOptionsForVariants = async () => {
+    const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
+    // BUG FIX ("Option value Default does not exist for option Default"):
+    // this used to return here immediately whenever the admin hadn't typed
+    // any Size/Color-style option (the single-variant "Default" case).
+    // That skipped ever creating/linking a "Default" product option in
+    // Medusa — fine for a product that already had one loaded into
+    // `defaultOption`, but for a genuinely option-less product (no
+    // "Default" option exists yet, e.g. one seeded/imported without any
+    // options at all) buildPayload's `{ Default: 'Default' }` fallback
+    // then referenced an option Medusa had never heard of, and the save
+    // was rejected. Fall through below to create+link it in that case
+    // instead of bailing out early.
+    if (!hasExtraVariants) {
+      if (defaultOption) return
+      const { optionId, valueIds } = await upsertOptionValues('Default', [
+        'Default',
+      ])
+      const alreadyLinked = new Set(existingOptions.map((o) => o.id))
+      const linkTargets: { id: string; title: string; value_ids: string[] }[] =
+        [{ id: optionId, title: 'Default', value_ids: valueIds }]
+      await linkOptionsToProduct(id, linkTargets, alreadyLinked, [])
+      setDefaultOption({ title: 'Default', value: 'Default' })
+      setExistingOptions((prev) =>
+        prev.some((o) => o.id === optionId)
+          ? prev
+          : [...prev, { id: optionId, title: 'Default' }],
+      )
+      return
+    }
+
+    // Collect whatever free-text option names the admin actually typed
+    // (e.g. "Size", "Weight", "Grip Size") and the values used for each,
+    // instead of only ever looking for "Size"/"Color".
+    const neededByTitle = new Map<string, Set<string>>()
+    variants.forEach((v) => {
+      filledOptions(v).forEach((o) => {
+        const title = o.name.trim()
+        if (!neededByTitle.has(title)) neededByTitle.set(title, new Set())
+        neededByTitle.get(title)!.add(o.value.trim())
+      })
+    })
+    if (neededByTitle.size === 0) return
+
+    const linkTargets: { id: string; title: string; value_ids: string[] }[] = []
+    for (const [title, valueSet] of neededByTitle) {
+      const requested = Array.from(valueSet)
+      const preferredId = existingOptions.find(
+        (o) => o.title.toLowerCase() === title.toLowerCase(),
+      )?.id
+      const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
+        title,
+        requested,
+        preferredId,
+      )
+      linkTargets.push({ id: optionId, title, value_ids: valueIds })
+      requested.forEach((typed, i) => {
+        const canonical = canonicalValues[i]
+        if (canonical) {
+          optionValueCasingRef.current.set(
+            `${title.toLowerCase()}::${typed.toLowerCase()}`,
+            canonical,
+          )
+        }
+      })
+    }
+
+    const alreadyLinked = new Set(existingOptions.map((o) => o.id))
+
+    // Any option currently linked to this product whose title isn't one
+    // we're syncing (i.e. not "Size" or "Color") is stale — most commonly
+    // a leftover "Default"/"Type" option from when this was a
+    // single-variant product. Unlink it, or every variant save fails with
+    // Medusa's option-count mismatch error.
+    const neededTitles = new Set(neededByTitle.keys())
+    const removeOptionIds = existingOptions
+      .filter((o) => !neededTitles.has(o.title))
+      .map((o) => o.id)
+
+    // BUG FIX ("Cannot unassign product option from product which has
+    // variants for that option"): Medusa refuses to unlink a stale option
+    // while any variant still references it. The old single "Default"
+    // variant (tracked in defaultVariantId) is exactly that variant —
+    // but there are two different cases:
+    //
+    //  a) It's excluded from this save entirely (a different, brand-new
+    //     row carries the Size/Color instead) — genuinely orphaned, so
+    //     delete it now; nothing later will touch it.
+    //  b) It survives as an in-place update — the SAME row/medusaId is
+    //     being converted from Type→Size/Color inside the upcoming
+    //     updateProduct call. It's NOT safe to unlink the stale option
+    //     yet here, because on Medusa's side this variant still
+    //     references it right now (the conversion hasn't happened yet).
+    //     Stash it in staleOptionIdsRef and unlink it in handleSave
+    //     AFTER updateProduct succeeds — see there for the actual call.
+    const defaultVariantSurvives = variants.some(
+      (v) => v.medusaId === defaultVariantId && filledOptions(v).length > 0,
+    )
+    if (removeOptionIds.length > 0 && defaultVariantId) {
+      if (!defaultVariantSurvives) {
+        await deleteProductVariant(id, defaultVariantId)
+        deletedDefaultVariantRef.current = true
+        setDefaultVariantId('')
+      } else {
+        staleOptionIdsRef.current = removeOptionIds
+      }
+    }
+
+    // Only add/update here — removal of anything still in
+    // staleOptionIdsRef is deferred to after the variant update (see
+    // above). Anything in removeOptionIds NOT deferred (i.e. the
+    // orphaned-variant-was-just-deleted case) is safe to remove now.
+    const removeNow = staleOptionIdsRef.current.length ? [] : removeOptionIds
+
+    try {
+      await linkOptionsToProduct(id, linkTargets, alreadyLinked, removeNow)
+    } catch (err) {
+      // BUG FIX: if linking the new option (or unlinking the stale one)
+      // fails right after we deleted the old default variant above, the
+      // product is left with zero variants and the original SKU/price/
+      // stock is gone — even though nothing new was ever saved. handleSave
+      // checks deletedDefaultVariantRef and recreates an equivalent
+      // variant in that case, so a failed save never destroys data.
+      throw err
+    }
+
+    // Keep existingOptions in sync so a second Save in this same session
+    // (no page reload in between) correctly treats these as already-linked
+    // — otherwise it would try to `add` an option that's now already
+    // linked, which Medusa rejects. Options still pending removal in
+    // staleOptionIdsRef are kept as "known" here on purpose (they're
+    // still genuinely linked in Medusa until the deferred call runs).
+    setExistingOptions((prev) => {
+      const known = new Set(prev.map((o) => o.id))
+      const additions = linkTargets
+        .filter((t) => !known.has(t.id))
+        .map((t) => ({ id: t.id, title: t.title }))
+      const removedSet = new Set(removeNow)
+      const survivors = prev.filter((o) => !removedSet.has(o.id))
+      return additions.length > 0 || removeNow.length > 0
+        ? [...survivors, ...additions]
+        : prev
+    })
+  }
+
+  // BUG FIX (safety net for the delete-then-recreate flow above): if the
+  // old "Default" variant was already deleted this save attempt and
+  // anything afterwards fails, put back an equivalent variant using the
+  // SKU/price/stock still sitting in `form` and the option this product
+  // actually had, so a failed save never leaves the product with zero
+  // variants and no way to recover the original data short of re-entering
+  // everything by hand.
+  const restoreDeletedDefaultVariant = async () => {
+    try {
+      const result = await updateProduct(id, {
+        variants: [
+          {
+            title: 'Default',
+            sku: form.sku || undefined,
+            barcode: form.barcode || undefined,
+            manage_inventory: form.trackInventory,
+            prices: form.price
+              ? [
+                  {
+                    amount: Math.round(parseFloat(form.price) * 100) / 100,
+                    currency_code: 'gbp',
+                  },
+                ]
+              : [],
+            options: defaultOption
+              ? { [defaultOption.title]: defaultOption.value }
+              : { Default: 'Default' },
+          },
+        ],
+      })
+      // Re-sync state to the recreated variant's real id so the next Save
+      // attempt (no page reload needed) treats it as an update again
+      // instead of trying this whole recovery dance a second time.
+      const restoredId = result?.product?.variants?.[0]?.id
+      if (restoredId) {
+        setDefaultVariantId(restoredId)
+        setVariants((prev) =>
+          prev.map((v, i) =>
+            i === 0 && filledOptions(v).length === 0
+              ? { ...v, medusaId: restoredId }
+              : v,
+          ),
+        )
+      }
+      toast.error(
+        'Save failed — your original SKU/price/stock have been restored. Please try adding the variant again.',
+      )
+    } catch (restoreErr) {
+      console.error('[restore deleted default variant]', restoreErr)
+      toast.error(
+        'Save failed and the original variant could not be restored automatically — please refresh and check this product before saving again.',
+      )
+    } finally {
+      deletedDefaultVariantRef.current = false
     }
   }
 
@@ -496,11 +1022,85 @@ export default function EditProductPage({
     setStatus(saveStatus)
 
     try {
-      await updateProduct(id, buildPayload(saveStatus))
+      // Options must be linked to the product BEFORE the variants payload
+      // below can reference their values — see syncOptionsForVariants().
+      await syncOptionsForVariants()
+      const payload = buildPayload(saveStatus)
+      const updateResult = await updateProduct(id, payload)
+
+      // BUG FIX (leftover variants after "Remove" on a saved row): delete
+      // any queued variant ids now that the replacement/remaining
+      // variants above have been saved successfully. Best-effort — the
+      // core save already succeeded, so one failing here just leaves an
+      // extra hidden variant rather than losing data; it'll be retried
+      // next Save since the id stays queued.
+      if (variantsToDeleteRef.current.length > 0) {
+        const toDelete = variantsToDeleteRef.current
+        variantsToDeleteRef.current = []
+        for (const variantId of toDelete) {
+          try {
+            await deleteProductVariant(id, variantId)
+          } catch (deleteErr) {
+            console.error('[delete removed variant]', deleteErr)
+            variantsToDeleteRef.current.push(variantId)
+          }
+        }
+      }
+
+      // BUG FIX ("Cannot unassign product option..."): now that the
+      // variant update above has gone through, any stale option (e.g.
+      // "Type") stashed by syncOptionsForVariants is finally safe to
+      // unlink — the variant it used to block on has already switched
+      // over to Size/Color as part of the update we just sent. Best-
+      // effort: the core save already succeeded, so a failure here just
+      // leaves a harmless unused option linked rather than losing data.
+      if (staleOptionIdsRef.current.length > 0) {
+        const toRemove = staleOptionIdsRef.current
+        staleOptionIdsRef.current = []
+        try {
+          await linkOptionsToProduct(
+            id,
+            [],
+            new Set(existingOptions.map((o) => o.id)),
+            toRemove,
+          )
+          setExistingOptions((prev) => {
+            const removedSet = new Set(toRemove)
+            return prev.filter((o) => !removedSet.has(o.id))
+          })
+        } catch (cleanupErr) {
+          console.error('[cleanup stale product option]', cleanupErr)
+        }
+      }
+
       setSaveSuccess(true)
       toast.success('Product updated successfully!')
       setTimeout(() => setSaveSuccess(false), 3000)
+
+      // TEMP DEBUG: surface exactly what happened in the inventory-item
+      // steps (see app/api/admin/products/[id]/route.ts) right here in
+      // the UI — added because "available at 0 locations" kept happening
+      // with no visible cause and server-terminal logs weren't
+      // accessible to check. Shown AFTER the success toast so it doesn't
+      // block the normal save flow. Remove this block once the real
+      // cause is confirmed and fixed.
+      const inventoryDebug: string[] = updateResult?._inventoryDebug ?? []
+      if (inventoryDebug.length > 0) {
+        console.log('[Inventory Debug]', inventoryDebug)
+        const hasFailure = inventoryDebug.some((line) =>
+          /FAILED|SKIPPED|THREW|No stock location|still NOT FOUND/.test(line),
+        )
+        if (hasFailure) {
+          setSaveError('Inventory debug:\n' + inventoryDebug.join('\n'))
+          toast.error('Inventory setup had issues — see details below Save.')
+        }
+      }
     } catch (err: any) {
+      // BUG FIX: don't let a failed save leave the product variant-less —
+      // see deletedDefaultVariantRef / restoreDeletedDefaultVariant above.
+      if (deletedDefaultVariantRef.current) {
+        await restoreDeletedDefaultVariant()
+      }
       const msg = err.message ?? 'Failed to save product.'
       setSaveError(msg)
       toast.error(msg)
@@ -527,6 +1127,7 @@ export default function EditProductPage({
     { id: 'pricing', label: 'Pricing' },
     { id: 'inventory', label: 'Inventory' },
     { id: 'variants', label: 'Variants' },
+    { id: 'cross-sell', label: 'Cross-sell' },
     { id: 'seo', label: 'SEO' },
   ]
 
@@ -647,7 +1248,7 @@ export default function EditProductPage({
 
       {/* Error banner */}
       {saveError && (
-        <div className='flex items-center gap-3 px-4 py-3 bg-[#FFF4F4] border border-[#D82C0D]/20 rounded-xl text-[13px] text-[#D82C0D]'>
+        <div className='flex items-start gap-3 px-4 py-3 bg-[#FFF4F4] border border-[#D82C0D]/20 rounded-xl text-[13px] text-[#D82C0D]'>
           <svg
             width='16'
             height='16'
@@ -655,12 +1256,13 @@ export default function EditProductPage({
             fill='none'
             stroke='currentColor'
             strokeWidth='2'
+            className='mt-0.5 shrink-0'
           >
             <circle cx='12' cy='12' r='10' />
             <line x1='12' y1='8' x2='12' y2='12' />
             <line x1='12' y1='16' x2='12.01' y2='16' />
           </svg>
-          {saveError}
+          <span className='whitespace-pre-wrap break-words'>{saveError}</span>
           <button
             onClick={() => setSaveError(null)}
             className='ml-auto bg-transparent border-none cursor-pointer text-[#D82C0D]'
@@ -1065,6 +1667,51 @@ export default function EditProductPage({
                       </span>
                     </span>
                   </label>
+
+                  <label className='flex items-start gap-2.5 p-3 border border-[#E1E3E5] rounded-lg cursor-pointer'>
+                    <input
+                      type='checkbox'
+                      checked={form.isStringingService}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          isStringingService: e.target.checked,
+                          stringingSport: e.target.checked
+                            ? form.stringingSport
+                            : '',
+                        })
+                      }
+                      className='mt-0.5 accent-[#008060]'
+                    />
+                    <span className='flex-1'>
+                      <span className='block text-[13px] font-medium text-[#202223]'>
+                        This is a Stringing Service product
+                      </span>
+                      <span className='block text-[11.5px] text-[#8C9196] mt-0.5'>
+                        Makes this product bookable on the
+                        /local-store/stringing pages and the storefront's "Book
+                        Stringing" form. Pick which racket type it's for below.
+                      </span>
+                      {form.isStringingService && (
+                        <select
+                          value={form.stringingSport}
+                          onChange={(e) =>
+                            setForm({
+                              ...form,
+                              stringingSport: e.target.value,
+                            })
+                          }
+                          onClick={(e) => e.stopPropagation()}
+                          className='mt-2.5 w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] bg-white'
+                        >
+                          <option value=''>Select racket type...</option>
+                          <option value='badminton'>Badminton</option>
+                          <option value='tennis'>Tennis</option>
+                          <option value='squash'>Squash</option>
+                        </select>
+                      )}
+                    </span>
+                  </label>
                 </div>
               )}
 
@@ -1453,10 +2100,98 @@ export default function EditProductPage({
                             </button>
                           )}
                         </div>
-                        <div className='grid grid-cols-2 gap-3'>
-                          {(
-                            ['size', 'color', 'sku', 'price', 'stock'] as const
-                          ).map((field) => (
+                        {/* Free-text option rows — the admin types BOTH
+                            the option name ("Size", "Weight", "Grip
+                            Size"...) and its value for this variant,
+                            instead of the form only offering Size/Color.
+                            Different product types (rackets, clothing,
+                            strings) can each use whatever options fit. */}
+                        <div className='space-y-2'>
+                          <div className='flex items-center justify-between'>
+                            <label className='block text-[11.5px] text-[#6D7175]'>
+                              Options
+                            </label>
+                            <button
+                              type='button'
+                              onClick={() => addOptionRow(variant.id)}
+                              className='text-[11.5px] text-[#008060] font-medium hover:underline bg-transparent border-none cursor-pointer'
+                            >
+                              + Add Option
+                            </button>
+                          </div>
+                          {variant.options.map((opt) => (
+                            <div
+                              key={opt.id}
+                              className='flex items-center gap-1.5'
+                            >
+                              <input
+                                type='text'
+                                value={opt.name}
+                                onChange={(e) =>
+                                  updateOptionRow(
+                                    variant.id,
+                                    opt.id,
+                                    'name',
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder='Option name (e.g. Size, Weight)'
+                                className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
+                              />
+                              <input
+                                type='text'
+                                value={opt.value}
+                                onChange={(e) =>
+                                  updateOptionRow(
+                                    variant.id,
+                                    opt.id,
+                                    'value',
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder='Value (e.g. L, 88g)'
+                                className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
+                              />
+                              {variant.options.length > 1 && (
+                                <button
+                                  type='button'
+                                  onClick={() =>
+                                    removeOptionRow(variant.id, opt.id)
+                                  }
+                                  title='Remove option'
+                                  className='px-2 py-2 text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer shrink-0'
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                          {/* Optional colour swatch — independent of the
+                              option name typed above; if any option here
+                              represents a colour, pick the hex that should
+                              drive the storefront swatch. */}
+                          <div className='flex items-center gap-2 pt-1'>
+                            <label className='text-[11.5px] text-[#6D7175] shrink-0'>
+                              Swatch colour (optional)
+                            </label>
+                            <input
+                              type='color'
+                              title='Swatch colour shown on the storefront'
+                              value={variant.colorCode || '#ffffff'}
+                              onChange={(e) =>
+                                updateVariant(
+                                  variant.id,
+                                  'colorCode',
+                                  e.target.value,
+                                )
+                              }
+                              className='w-10 h-8 p-1 border border-[#E1E3E5] rounded-lg cursor-pointer bg-white shrink-0'
+                            />
+                          </div>
+                        </div>
+
+                        <div className='grid grid-cols-3 gap-3'>
+                          {(['sku', 'price', 'stock'] as const).map((field) => (
                             <div key={field}>
                               <label className='block text-[11.5px] text-[#6D7175] mb-1 capitalize'>
                                 {field === 'price' ? 'Price (£)' : field}
@@ -1480,9 +2215,229 @@ export default function EditProductPage({
                             </div>
                           ))}
                         </div>
+
+                        {/* Per-variant media — same as the new-product
+                            page: pick from images already uploaded in the
+                            Images tab (Medusa v2.11+ scoped variant
+                            images). */}
+                        <div>
+                          <label className='block text-[11.5px] text-[#6D7175] mb-1'>
+                            Variant Media
+                          </label>
+                          {images.filter((i) => i.url).length === 0 ? (
+                            <p className='text-[11.5px] text-[#8C9196] italic'>
+                              Upload product images in the Images tab first,
+                              then come back here to pick which ones belong to
+                              this variant.
+                            </p>
+                          ) : (
+                            <div className='flex flex-wrap gap-2'>
+                              {images
+                                .filter((i) => i.url)
+                                .map((img) => {
+                                  const picked = variant.imageUrls.includes(
+                                    img.url!,
+                                  )
+                                  return (
+                                    <button
+                                      key={img.url}
+                                      type='button'
+                                      onClick={() =>
+                                        toggleVariantImage(variant.id, img.url!)
+                                      }
+                                      title={
+                                        picked
+                                          ? 'Remove from this variant'
+                                          : 'Add to this variant'
+                                      }
+                                      className={`relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-all cursor-pointer bg-transparent p-0 ${
+                                        picked
+                                          ? 'border-[#008060] ring-2 ring-[#008060]/30'
+                                          : 'border-[#E1E3E5] hover:border-[#8C9196]'
+                                      }`}
+                                    >
+                                      <img
+                                        src={img.url}
+                                        alt=''
+                                        className='w-full h-full object-cover'
+                                      />
+                                      {picked && (
+                                        <span className='absolute inset-0 flex items-center justify-center bg-[#008060]/40 text-white text-[16px] font-bold'>
+                                          ✓
+                                        </span>
+                                      )}
+                                    </button>
+                                  )
+                                })}
+                            </div>
+                          )}
+                          {variant.imageUrls.length === 0 && (
+                            <p className='text-[11px] text-[#8C9196] mt-1'>
+                              No images picked — this variant will show the
+                              product's default images on the storefront.
+                            </p>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* ── CROSS-SELL TAB ── */}
+              {activeTab === 'cross-sell' && (
+                <div className='space-y-5'>
+                  <div>
+                    <p className='text-[13px] font-medium text-[#202223]'>
+                      Cross-sell Products
+                    </p>
+                    <p className='text-[12px] text-[#6D7175] mt-0.5'>
+                      When a customer buys this product, a related product will
+                      be offered with a discount (e.g. 10% off Socks with
+                      Shoes).
+                    </p>
+                  </div>
+                  <div className='relative'>
+                    <input
+                      type='text'
+                      value={crossSellSearch}
+                      onChange={(e) => {
+                        setCrossSellSearch(e.target.value)
+                        searchCrossSellProducts(e.target.value)
+                      }}
+                      placeholder='Search for a product (e.g. Socks, Grip, Shuttle)...'
+                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                    />
+                    {crossSellLoading && (
+                      <div className='absolute right-3 top-1/2 -translate-y-1/2'>
+                        <svg
+                          className='animate-spin w-4 h-4 text-[#8C9196]'
+                          viewBox='0 0 24 24'
+                          fill='none'
+                        >
+                          <circle
+                            className='opacity-25'
+                            cx='12'
+                            cy='12'
+                            r='10'
+                            stroke='currentColor'
+                            strokeWidth='4'
+                          />
+                          <path
+                            className='opacity-75'
+                            fill='currentColor'
+                            d='M4 12a8 8 0 018-8v8H4z'
+                          />
+                        </svg>
+                      </div>
+                    )}
+                    {crossSellResults.length > 0 && (
+                      <div className='absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#E1E3E5] rounded-lg shadow-lg overflow-hidden'>
+                        {crossSellResults.map((p) => (
+                          <button
+                            key={p.id}
+                            type='button'
+                            onClick={() => addCrossSell(p)}
+                            disabled={crossSells.some(
+                              (c) => c.productId === p.id,
+                            )}
+                            className='w-full text-left px-4 py-2.5 text-[13px] text-[#202223] hover:bg-[#F6F6F7] border-none bg-transparent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                          >
+                            {p.title}
+                            {crossSells.some((c) => c.productId === p.id) && (
+                              <span className='ml-2 text-[11px] text-[#8C9196]'>
+                                (already added)
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {crossSells.length === 0 ? (
+                    <div className='py-8 text-center border border-dashed border-[#E1E3E5] rounded-lg'>
+                      <p className='text-[12.5px] text-[#8C9196]'>
+                        No cross-sell products added yet.
+                      </p>
+                      <p className='text-[12px] text-[#8C9196] mt-1'>
+                        Search above and add a product.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className='border border-[#E1E3E5] rounded-lg overflow-hidden'>
+                      <div className='grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 bg-[#FAFAFA] border-b border-[#E1E3E5]'>
+                        <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                          Product
+                        </span>
+                        <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                          Discount %
+                        </span>
+                        <span className='w-8' />
+                      </div>
+                      <div className='divide-y divide-[#F1F1F1]'>
+                        {crossSells.map((cs) => (
+                          <div
+                            key={cs.id}
+                            className='grid grid-cols-[1fr_auto_auto] gap-3 items-center px-4 py-3'
+                          >
+                            <div>
+                              <p className='text-[13px] font-medium text-[#202223] truncate'>
+                                {cs.productTitle}
+                              </p>
+                              <p className='text-[11px] text-[#8C9196] mt-0.5'>
+                                ID: {cs.productId.slice(0, 16)}…
+                              </p>
+                            </div>
+                            <div className='relative w-24'>
+                              <input
+                                type='number'
+                                min='1'
+                                max='99'
+                                value={cs.discountPct}
+                                onChange={(e) =>
+                                  setCrossSells((prev) =>
+                                    prev.map((c) =>
+                                      c.id === cs.id
+                                        ? {
+                                            ...c,
+                                            discountPct: Number(e.target.value),
+                                          }
+                                        : c,
+                                    ),
+                                  )
+                                }
+                                className='w-full pl-2.5 pr-6 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                              />
+                              <span className='absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#8C9196]'>
+                                %
+                              </span>
+                            </div>
+                            <button
+                              type='button'
+                              onClick={() =>
+                                setCrossSells((prev) =>
+                                  prev.filter((c) => c.id !== cs.id),
+                                )
+                              }
+                              className='w-8 h-8 flex items-center justify-center text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg bg-transparent border-none cursor-pointer text-base'
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {crossSells.length > 0 && (
+                    <div className='p-3 bg-[#F2F7F5] border border-[#008060]/20 rounded-lg'>
+                      <p className='text-[12px] text-[#6D7175]'>
+                        <strong className='text-[#008060]'>ℹ️</strong> When a
+                        customer adds this product to their cart, these
+                        cross-sell products will be suggested on the product or
+                        cart page — with the discount defined above.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 

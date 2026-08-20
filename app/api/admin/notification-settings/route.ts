@@ -26,7 +26,10 @@ const DEFAULTS = {
   // (e.g. "new_order", "order_cancelled" — see NOTIFICATION_GROUPS on the
   // page). Empty until the admin saves; the page fills in its own sensible
   // per-type defaults on first load.
-  settings: {} as Record<string, { email: boolean; sms: boolean; push: boolean }>,
+  settings: {} as Record<
+    string,
+    { email: boolean; sms: boolean; push: boolean }
+  >,
   channels: {
     email: '',
     smsPhone: '',
@@ -78,11 +81,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
 
     const storeRes = await fetch(
-      `${MEDUSA_URL}/admin/stores?limit=1&fields=id`,
+      `${MEDUSA_URL}/admin/stores?limit=1&fields=id,metadata`,
       { headers: { Authorization: authHeader } },
     )
     const storeData = await safeJson(storeRes)
     const storeId = storeData.stores?.[0]?.id
+    const currentMetadata = storeData.stores?.[0]?.metadata ?? {}
     if (!storeRes.ok || !storeId) {
       return NextResponse.json(
         { error: storeData.message ?? 'No store found' },
@@ -90,13 +94,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // BUG FIX: this used to write `metadata: { notificationSettings: body }`
+    // directly, replacing the store's ENTIRE metadata object — wiping out
+    // every other feature's data stored there (seoConfig, shippingSettings,
+    // reportHistory, stringing_catalog, etc.), since Medusa's store update
+    // replaces `metadata` wholesale rather than merging it. Now spreads the
+    // current metadata first, same pattern as app/api/admin/reviews/route.ts.
     const res = await fetch(`${MEDUSA_URL}/admin/stores/${storeId}`, {
       method: 'POST',
       headers: {
         Authorization: authHeader,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ metadata: { notificationSettings: body } }),
+      body: JSON.stringify({
+        metadata: { ...currentMetadata, notificationSettings: body },
+      }),
     })
     const data = await safeJson(res)
     if (!res.ok) {

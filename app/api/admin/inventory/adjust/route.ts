@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
 
     // Saare products loop karke target variant dhoondo
     let inventoryItemId: string | null = null
+    let foundProductId: string | null = null
     let offset = 0
     const limit = 100
 
@@ -65,6 +66,7 @@ export async function POST(req: NextRequest) {
             variant.inventory_items?.[0]?.inventory_item_id ??
             variant.inventory_items?.[0]?.id ??
             null
+          foundProductId = product.id
           break
         }
       }
@@ -78,11 +80,28 @@ export async function POST(req: NextRequest) {
       // No inventory item was linked at all yet (not just a missing
       // location-level) — this is why stock adjust always 404'd for
       // imported products (e.g. the smashuk.co scrape). Create an
-      // inventory item and link it to the variant in the same call.
+      // inventory item, then explicitly link it to the variant.
+      //
+      // BUG FIX: this used to pass { variant_id } to the create call and
+      // assume that alone would link it — confirmed against Medusa's own
+      // Admin API reference that it does NOT reliably do so. There's a
+      // dedicated endpoint for linking:
+      //   POST /admin/products/{id}/variants/{variant_id}/inventory-items
+      //   body: { inventory_item_id, required_quantity }
+      // Without this second call the item gets created but stays
+      // unlinked, so it looks like nothing happened even though a stray
+      // inventory item now exists in Medusa with no SKU or variant tie.
+      if (!foundProductId) {
+        return NextResponse.json(
+          { error: 'Variant not found in any product — cannot create/link an inventory item for it.' },
+          { status: 404 },
+        )
+      }
+
       const createItemRes = await fetch(`${MEDUSA_URL}/admin/inventory-items`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ variant_id }),
+        body: JSON.stringify({}),
       })
       const createItemData = await safeJson(createItemRes, 'inventory item create')
 
@@ -104,6 +123,22 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           { error: 'Variant not found or no inventory item linked.' },
           { status: 404 },
+        )
+      }
+
+      const linkRes = await fetch(
+        `${MEDUSA_URL}/admin/products/${foundProductId}/variants/${variant_id}/inventory-items`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ inventory_item_id: inventoryItemId, required_quantity: 1 }),
+        },
+      )
+      if (!linkRes.ok) {
+        const linkData = await safeJson(linkRes, 'inventory item link')
+        return NextResponse.json(
+          { error: linkData.message ?? 'Inventory item created but could not be linked to the variant.' },
+          { status: linkRes.status || 500 },
         )
       }
     }

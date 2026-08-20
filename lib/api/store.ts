@@ -14,7 +14,7 @@ import type { Product } from '@/types'
 // never got any metadata to read. Added `+metadata` so specs actually show
 // up on the storefront.
 export const STORE_PRODUCT_FIELDS =
-  '+description,+metadata,*variants,*variants.prices,*variants.calculated_price,*variants.inventory_quantity,*categories,*images,*tags'
+  '+description,+metadata,*variants,*variants.prices,*variants.calculated_price,*variants.inventory_quantity,*variants.options,*variants.images,*options,*options.values,*categories,*images,*tags'
 
 // ── Normalize ─────────────────────────────────────────────────────────────────
 export function normalizeProduct(p: any): Product {
@@ -86,6 +86,17 @@ export function normalizeProduct(p: any): Product {
     specs: extractSpecs(p.metadata),
     stringUpgradeAvailable: p.metadata?.string_upgrade_available === true,
     variants: p.variants ?? [],
+    options: p.options ?? [],
+    // Set from the dashboard's Pricing tab — see types/index.ts for shape.
+    tierPricing: Array.isArray(p.metadata?.tier_pricing)
+      ? p.metadata.tier_pricing
+      : [],
+    // Set from the dashboard's Cross-sell tab — resolved to full products
+    // by the product detail page (getProductsByIds), not here, since this
+    // function only has the single raw product to work with.
+    crossSells: Array.isArray(p.metadata?.cross_sells)
+      ? p.metadata.cross_sells
+      : [],
   }
 }
 
@@ -142,6 +153,13 @@ const SYSTEM_METADATA_KEYS = new Set([
   'badge',
   'tags',
   'specs',
+  // BUG FIX: a since-fixed import script (scripts/import-shopify-csv.ts)
+  // used to write specs as a JSON.stringify()'d blob under this key
+  // instead of the real `specs` array. Excluding it here stops any
+  // already-imported products with that leftover key from having their
+  // raw JSON string picked up by the fallback below and shown as a bogus
+  // filter chip (e.g. `{"Colour":"black"}`) until they're re-imported.
+  'specifications',
   'string_upgrade_available',
   'sale_price',
   'regular_price',
@@ -306,6 +324,53 @@ export async function getProducts(params?: {
 export async function getProduct(handle: string) {
   const data = await fetchProducts({ handle, limit: '1' })
   return data.products?.[0] ?? null
+}
+
+// ── Full-catalog fetch ───────────────────────────────────────────────────────
+// BUG FIX: the shop listing (app/(website)/shop/ShopClient.tsx) does ALL of
+// its filtering — sport, category, brand, price, specs — and builds the
+// entire sidebar's category/brand option lists purely from whatever product
+// array it has in memory. It used to call getProducts({ limit: 100 }), a
+// single capped page, against a 1,736-product catalog. Rackets/Shoes/
+// Clothing/Bags happen to dominate that first page, so smaller categories
+// like Grips, Strings, Shuttlecocks, Balls, and Accessories were never
+// present in the fetched set at all — they silently vanished from the
+// sidebar's Category list, and any URL param or filter selecting them
+// (e.g. /shop?category=shuttlecocks) filtered an array that never had them
+// to begin with, showing "0 products found" for perfectly real, published,
+// in-stock products.
+// getAllProducts() pages through the store API in PRODUCTS_PAGE_SIZE-sized
+// chunks (parallelized after the first page tells us the real total) until
+// every product is retrieved, so the shop page always filters over the
+// complete catalog.
+const PRODUCTS_PAGE_SIZE = 100
+
+export async function getAllProducts(params?: {
+  q?: string
+  category_id?: string[]
+}): Promise<{ products: any[]; count: number }> {
+  const first = await getProducts({
+    ...params,
+    limit: PRODUCTS_PAGE_SIZE,
+    offset: 0,
+  })
+  let products = first.products
+  const count = first.count
+
+  if (count > products.length) {
+    const offsets: number[] = []
+    for (let o = products.length; o < count; o += PRODUCTS_PAGE_SIZE) {
+      offsets.push(o)
+    }
+    const pages = await Promise.all(
+      offsets.map((offset) =>
+        getProducts({ ...params, limit: PRODUCTS_PAGE_SIZE, offset }),
+      ),
+    )
+    products = products.concat(...pages.map((p) => p.products))
+  }
+
+  return { products, count }
 }
 
 // Used by the wishlist store to turn the id list synced from Medusa

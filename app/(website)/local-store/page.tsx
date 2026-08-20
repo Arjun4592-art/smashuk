@@ -186,12 +186,14 @@ export default async function LocalStorePage() {
                 days a week.
               </p>
               <div className='flex flex-wrap gap-3'>
-                <Link
-                  href='/local-store/stringing'
+                <a
+                  href={directionsUrl}
+                  target='_blank'
+                  rel='noopener noreferrer'
                   className='bg-[#E8553A] hover:bg-[#D4441F] text-white px-7 py-3.5 rounded-full text-sm font-montserrat font-bold transition-colors'
                 >
-                  Book A Stringing Slot
-                </Link>
+                  Visit Us
+                </a>
                 <Link
                   href='/contact'
                   className='border border-white/20 hover:border-white/40 text-white/70 hover:text-white px-7 py-3.5 rounded-full text-sm font-montserrat transition-colors'
@@ -353,14 +355,14 @@ export default async function LocalStorePage() {
             ))}
           </div>
 
-          <div className='flex flex-col sm:flex-row items-center justify-center gap-3'>
+          <div className='flex flex-col items-center justify-center gap-4 text-center'>
             <Link
               href='/local-store/stringing'
               className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'
             >
               Book A Stringing Slot
             </Link>
-            <p className='text-xs text-white/40'>
+            <p className='text-xs text-white/40 max-w-sm'>
               Need it faster? Give us a call — we'll always try to fit in an
               emergency restring before a match if we can.
             </p>
@@ -370,24 +372,85 @@ export default async function LocalStorePage() {
 
       {/* ── GIFT CARDS ───────────────────────────────────────────────── */}
       <section className='reveal max-w-5xl mx-auto px-4 md:px-6 py-16'>
-        <div className='bg-white border border-[#0A1F44]/8 rounded-2xl px-8 py-10 flex flex-col md:flex-row items-center gap-6 justify-between'>
-          <div>
-            <h2 className='font-montserrat font-black text-[#0A1F44] text-xl mb-2'>
-              Gift Cards
-            </h2>
-            <p className='text-gray-400 text-sm max-w-xl leading-relaxed'>
-              {SITE_NAME} gift cards can be used on equipment, stringing, court
-              essentials and accessories — both in-store and online. A simple
-              gift for any racket sports player, whether it's a birthday, a
-              tournament prize, or a thank-you.
-            </p>
+        <div className='bg-white border border-[#0A1F44]/8 rounded-2xl px-8 py-10 flex flex-col md:flex-row items-center gap-8 justify-between'>
+          <div className='flex flex-col items-start gap-6 md:order-1'>
+            <div>
+              <h2 className='font-montserrat font-black text-[#0A1F44] text-xl mb-2'>
+                Gift Cards
+              </h2>
+              <p className='text-gray-400 text-sm max-w-xl leading-relaxed'>
+                {SITE_NAME} gift cards can be used on equipment, stringing,
+                court essentials and accessories — both in-store and online. A
+                simple gift for any racket sports player, whether it's a
+                birthday, a tournament prize, or a thank-you.
+              </p>
+            </div>
+            <Link
+              href='/gift-cards'
+              className='flex-shrink-0 inline-block bg-[#0A1F44] hover:bg-[#142d5e] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'
+            >
+              Buy A Gift Card
+            </Link>
           </div>
-          <Link
-            href='/gift-cards'
-            className='flex-shrink-0 inline-block bg-[#0A1F44] hover:bg-[#142d5e] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'
-          >
-            Buy A Gift Card
-          </Link>
+
+          <div className='flex-shrink-0 md:order-2'>
+            <svg
+              width='220'
+              height='140'
+              viewBox='0 0 220 140'
+              className='drop-shadow-lg'
+            >
+              <rect
+                x='4'
+                y='4'
+                width='212'
+                height='132'
+                rx='16'
+                fill='#0A1F44'
+              />
+              <rect
+                x='4'
+                y='4'
+                width='212'
+                height='132'
+                rx='16'
+                fill='none'
+                stroke='#E8553A'
+                strokeWidth='2'
+              />
+              <circle cx='170' cy='30' r='34' fill='#E8553A' opacity='0.15' />
+              <text
+                x='24'
+                y='40'
+                fontFamily='Montserrat, sans-serif'
+                fontWeight='900'
+                fontSize='14'
+                fill='white'
+              >
+                {SITE_NAME}
+              </text>
+              <text
+                x='24'
+                y='90'
+                fontFamily='Montserrat, sans-serif'
+                fontWeight='900'
+                fontSize='20'
+                fill='#E8553A'
+              >
+                GIFT CARD
+              </text>
+              <text
+                x='24'
+                y='114'
+                fontFamily='monospace'
+                fontSize='11'
+                fill='rgba(255,255,255,0.5)'
+                letterSpacing='2'
+              >
+                •••• •••• •••• 4821
+              </text>
+            </svg>
+          </div>
         </div>
       </section>
 
@@ -506,34 +569,50 @@ export default async function LocalStorePage() {
 
       {/* ── CONTACT / DIRECTIONS ────────────────────────────────────── */}
       <section className='reveal max-w-5xl mx-auto px-4 md:px-6 py-16'>
-        <div className='bg-white border border-[#0A1F44]/8 rounded-2xl p-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6'>
-          <div>
-            <h2 className='font-montserrat font-black text-[#0A1F44] text-xl mb-1'>
-              Visit Us
-            </h2>
-            <p className='text-gray-400 text-sm'>{fullAddress}</p>
-            <p className='text-gray-400 text-sm mt-1'>
-              Mon–Fri 11am–7pm · Sat 11am–5pm · Sun closed
-            </p>
-            <p className='text-gray-400 text-sm mt-1'>
-              {contact.phone} · {contact.email}
-            </p>
+        <div className='bg-white border border-[#0A1F44]/8 rounded-2xl p-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-8'>
+          <div className='md:order-1 flex flex-col items-start gap-6 w-full md:w-auto'>
+            <div>
+              <h2 className='font-montserrat font-black text-[#0A1F44] text-xl mb-1'>
+                Visit Us
+              </h2>
+              <p className='text-gray-400 text-sm'>{fullAddress}</p>
+              <p className='text-gray-400 text-sm mt-1'>
+                Mon–Fri 11am–7pm · Sat 11am–5pm · Sun closed
+              </p>
+              <p className='text-gray-400 text-sm mt-1'>
+                {contact.phone} · {contact.email}
+              </p>
+            </div>
+            <div className='flex flex-col sm:flex-row gap-3 w-full md:w-auto'>
+              <a
+                href={directionsUrl}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='bg-[#0A1F44]/5 hover:bg-[#0A1F44]/10 text-[#0A1F44] font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors whitespace-nowrap text-center'
+              >
+                📍 Get Directions
+              </a>
+              <Link
+                href='/contact'
+                className='bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors whitespace-nowrap text-center'
+              >
+                Contact Us
+              </Link>
+            </div>
           </div>
-          <div className='flex flex-col sm:flex-row gap-3 w-full md:w-auto'>
-            <a
-              href={directionsUrl}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='bg-[#0A1F44]/5 hover:bg-[#0A1F44]/10 text-[#0A1F44] font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors whitespace-nowrap text-center'
-            >
-              📍 Get Directions
-            </a>
-            <Link
-              href='/contact'
-              className='bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors whitespace-nowrap text-center'
-            >
-              Contact Us
-            </Link>
+
+          <div className='md:order-2 flex-shrink-0 w-full md:w-[340px] h-[220px] rounded-2xl overflow-hidden border border-[#0A1F44]/8'>
+            <iframe
+              title={`${contact.name} map`}
+              src={`https://www.google.com/maps?q=${encodeURIComponent(
+                `${contact.name}, ${fullAddress}`,
+              )}&output=embed`}
+              width='100%'
+              height='100%'
+              style={{ border: 0 }}
+              loading='lazy'
+              referrerPolicy='no-referrer-when-downgrade'
+            />
           </div>
         </div>
       </section>
