@@ -336,7 +336,12 @@ function formatCurrency(n: number) {
 }
 
 function formatCurrencyFull(n: number) {
-  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+  return new Intl.NumberFormat('en-GB', {
+    style: 'currency',
+    currency: 'GBP',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n)
 }
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
@@ -433,8 +438,8 @@ function ScheduledReports() {
           Scheduled reports aren't set up yet
         </p>
         <p className='text-[12.5px] text-[#8C9196] max-w-sm'>
-          This needs an email-scheduling backend (e.g. a cron job or queue)
-          to actually send reports on a recurring basis.
+          This needs an email-scheduling backend (e.g. a cron job or queue) to
+          actually send reports on a recurring basis.
         </p>
       </div>
     </div>
@@ -457,6 +462,14 @@ function SalesPageContent() {
   const [reportHistory, setReportHistory] = useState<ReportRecord[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [clearingHistory, setClearingHistory] = useState(false)
+  const [liveData, setLiveData] = useState<{
+    connected: boolean
+    activeVisitors?: number
+    cartsActive?: number
+    checkouts?: number
+    todaysOrders?: { count: number; amount: number }
+    error?: string
+  } | null>(null)
 
   const fetchAnalytics = useCallback(async () => {
     setLoading(true)
@@ -476,10 +489,37 @@ function SalesPageContent() {
     fetchAnalytics()
   }, [fetchAnalytics])
 
+  useEffect(() => {
+    if (view !== 'live') return
+
+    let cancelled = false
+
+    const fetchLive = async () => {
+      try {
+        const res = await fetch('/api/admin/analytics/live')
+        const data = await res.json()
+        if (!cancelled) setLiveData(data)
+      } catch {
+        if (!cancelled)
+          setLiveData({ connected: false, error: 'Failed to fetch' })
+      }
+    }
+
+    fetchLive()
+    const interval = setInterval(fetchLive, 15000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [view])
+
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
-      const res = await fetch('/api/admin/report-history', { credentials: 'include' })
+      const res = await fetch('/api/admin/report-history', {
+        credentials: 'include',
+      })
       if (res.ok) {
         const data = await res.json()
         setReportHistory(data.history ?? [])
@@ -497,7 +537,12 @@ function SalesPageContent() {
   }, [view, fetchHistory])
 
   // Record a download in server-side history
-  async function recordDownload(name: string, type: string, rowCount: number, fileName: string) {
+  async function recordDownload(
+    name: string,
+    type: string,
+    rowCount: number,
+    fileName: string,
+  ) {
     try {
       await fetch('/api/admin/report-history', {
         method: 'POST',
@@ -589,7 +634,12 @@ function SalesPageContent() {
               URL.revokeObjectURL(url)
               toast.success('Exported sales data')
               const fileName2 = `sales-export-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`
-              await recordDownload('Sales Export', 'sales-export', rows.length, fileName2)
+              await recordDownload(
+                'Sales Export',
+                'sales-export',
+                rows.length,
+                fileName2,
+              )
             }}
             className='flex items-center gap-1.5 px-3 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors cursor-pointer'
           >
@@ -1147,7 +1197,9 @@ function SalesPageContent() {
                     ),
                   ]
                   const csv = sections.join('\n')
-                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+                  const blob = new Blob([csv], {
+                    type: 'text/csv;charset=utf-8;',
+                  })
                   const url = URL.createObjectURL(blob)
                   const a = document.createElement('a')
                   a.href = url
@@ -1160,8 +1212,10 @@ function SalesPageContent() {
                   await recordDownload(
                     'Full Report',
                     'full',
-                    analytics.chartData.length + analytics.topProducts.length + analytics.citiesData.length,
-                    `full-report-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`
+                    analytics.chartData.length +
+                      analytics.topProducts.length +
+                      analytics.citiesData.length,
+                    `full-report-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`,
                   )
                 }}
                 className='flex items-center gap-1.5 px-4 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-medium rounded-lg border-none cursor-pointer transition-colors'
@@ -1232,7 +1286,9 @@ function SalesPageContent() {
                     // these shapes at runtime — only the type needed relaxing.
                     const fileName = `${r.label.toLowerCase().replace(/ /g, '-')}-${new Date().toISOString().slice(0, 10)}.csv`
                     const csv = Papa.unparse(rows as Record<string, unknown>[])
-                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+                    const blob = new Blob([csv], {
+                      type: 'text/csv;charset=utf-8;',
+                    })
                     const url = URL.createObjectURL(blob)
                     const a = document.createElement('a')
                     a.href = url
@@ -1242,7 +1298,12 @@ function SalesPageContent() {
                     document.body.removeChild(a)
                     URL.revokeObjectURL(url)
                     toast.success(`${r.label} exported`)
-                    await recordDownload(r.label, r.label.toLowerCase().replace(/ /g, '-'), rows.length, fileName)
+                    await recordDownload(
+                      r.label,
+                      r.label.toLowerCase().replace(/ /g, '-'),
+                      rows.length,
+                      fileName,
+                    )
                   }}
                   className='flex flex-col items-start gap-3 p-4 border border-[#E1E3E5] rounded-xl hover:border-[#008060]/30 hover:bg-[#F2F7F5] transition-all cursor-pointer bg-white text-left'
                 >
@@ -1270,7 +1331,10 @@ function SalesPageContent() {
                     onClick={async () => {
                       setClearingHistory(true)
                       try {
-                        await fetch('/api/admin/report-history', { method: 'DELETE', credentials: 'include' })
+                        await fetch('/api/admin/report-history', {
+                          method: 'DELETE',
+                          credentials: 'include',
+                        })
                         setReportHistory([])
                         toast.success('History cleared')
                       } catch {
@@ -1290,7 +1354,10 @@ function SalesPageContent() {
               {historyLoading ? (
                 <div className='divide-y divide-[#F1F1F1]'>
                   {[...Array(3)].map((_, i) => (
-                    <div key={i} className='flex items-center gap-4 px-5 py-3.5 animate-pulse'>
+                    <div
+                      key={i}
+                      className='flex items-center gap-4 px-5 py-3.5 animate-pulse'
+                    >
                       <div className='w-8 h-8 bg-[#F1F1F1] rounded-lg shrink-0' />
                       <div className='flex-1 space-y-2'>
                         <div className='w-40 h-2.5 bg-[#F1F1F1] rounded-full' />
@@ -1302,21 +1369,35 @@ function SalesPageContent() {
                 </div>
               ) : reportHistory.length === 0 ? (
                 <div className='flex flex-col items-center justify-center gap-1.5 py-10 px-5 text-center'>
-                  <svg width='28' height='28' viewBox='0 0 24 24' fill='none' stroke='#D1D5DB' strokeWidth='1.5'>
+                  <svg
+                    width='28'
+                    height='28'
+                    viewBox='0 0 24 24'
+                    fill='none'
+                    stroke='#D1D5DB'
+                    strokeWidth='1.5'
+                  >
                     <path d='M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z' />
                     <polyline points='14 2 14 8 20 8' />
                     <line x1='16' y1='13' x2='8' y2='13' />
                     <line x1='16' y1='17' x2='8' y2='17' />
                   </svg>
-                  <p className='text-[13px] font-medium text-[#202223]'>No downloads yet</p>
-                  <p className='text-[12px] text-[#8C9196]'>Reports you download above will appear here</p>
+                  <p className='text-[13px] font-medium text-[#202223]'>
+                    No downloads yet
+                  </p>
+                  <p className='text-[12px] text-[#8C9196]'>
+                    Reports you download above will appear here
+                  </p>
                 </div>
               ) : (
                 <div className='divide-y divide-[#F1F1F1]'>
                   {reportHistory.map((r) => {
                     const RANGE_LABELS: Record<string, string> = {
-                      today: 'Today', last7: 'Last 7 days', last30: 'Last 30 days',
-                      last90: 'Last 90 days', thisyear: 'This year',
+                      today: 'Today',
+                      last7: 'Last 7 days',
+                      last30: 'Last 30 days',
+                      last90: 'Last 90 days',
+                      thisyear: 'This year',
                     }
                     const TYPE_COLORS: Record<string, string> = {
                       full: 'bg-[#008060]/10 text-[#008060]',
@@ -1325,7 +1406,8 @@ function SalesPageContent() {
                       'customer-report': 'bg-purple-100 text-purple-700',
                       'inventory-report': 'bg-[#FFC453]/20 text-[#916A00]',
                     }
-                    const typeColor = TYPE_COLORS[r.type] ?? 'bg-[#F1F1F1] text-[#6D7175]'
+                    const typeColor =
+                      TYPE_COLORS[r.type] ?? 'bg-[#F1F1F1] text-[#6D7175]'
                     const downloadedAt = new Date(r.downloadedAt)
                     const timeAgo = (() => {
                       const diff = Date.now() - downloadedAt.getTime()
@@ -1336,17 +1418,38 @@ function SalesPageContent() {
                       if (hrs < 24) return `${hrs}h ago`
                       const days = Math.floor(hrs / 24)
                       if (days < 7) return `${days}d ago`
-                      return downloadedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                      return downloadedAt.toLocaleDateString('en-GB', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      })
                     })()
 
                     // avatar initials from downloader name
-                    const initials = r.downloadedBy.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+                    const initials = r.downloadedBy
+                      .split(' ')
+                      .map((w) => w[0])
+                      .join('')
+                      .toUpperCase()
+                      .slice(0, 2)
 
                     return (
-                      <div key={r.id} className='flex items-center gap-3.5 px-5 py-3.5 hover:bg-[#FAFAFA] transition-colors'>
+                      <div
+                        key={r.id}
+                        className='flex items-center gap-3.5 px-5 py-3.5 hover:bg-[#FAFAFA] transition-colors'
+                      >
                         {/* Report type icon */}
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${typeColor}`}>
-                          <svg width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'>
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${typeColor}`}
+                        >
+                          <svg
+                            width='13'
+                            height='13'
+                            viewBox='0 0 24 24'
+                            fill='none'
+                            stroke='currentColor'
+                            strokeWidth='2'
+                          >
                             <path d='M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z' />
                             <polyline points='14 2 14 8 20 8' />
                           </svg>
@@ -1354,24 +1457,43 @@ function SalesPageContent() {
 
                         {/* Report info */}
                         <div className='flex-1 min-w-0'>
-                          <p className='text-[13px] font-medium text-[#202223] truncate'>{r.name}</p>
+                          <p className='text-[13px] font-medium text-[#202223] truncate'>
+                            {r.name}
+                          </p>
                           <div className='flex items-center gap-2 mt-0.5 flex-wrap'>
-                            <span className='text-[11px] text-[#8C9196]'>{r.rowCount} rows</span>
-                            <span className='text-[#D1D5DB] text-[10px]'>·</span>
-                            <span className='text-[11px] text-[#8C9196]'>{RANGE_LABELS[r.dateRange] ?? r.dateRange}</span>
-                            <span className='text-[#D1D5DB] text-[10px]'>·</span>
-                            <span className='text-[11px] text-[#B0B5BA] font-mono truncate max-w-[160px]'>{r.fileName}</span>
+                            <span className='text-[11px] text-[#8C9196]'>
+                              {r.rowCount} rows
+                            </span>
+                            <span className='text-[#D1D5DB] text-[10px]'>
+                              ·
+                            </span>
+                            <span className='text-[11px] text-[#8C9196]'>
+                              {RANGE_LABELS[r.dateRange] ?? r.dateRange}
+                            </span>
+                            <span className='text-[#D1D5DB] text-[10px]'>
+                              ·
+                            </span>
+                            <span className='text-[11px] text-[#B0B5BA] font-mono truncate max-w-[160px]'>
+                              {r.fileName}
+                            </span>
                           </div>
                         </div>
 
                         {/* Who downloaded */}
                         <div className='flex items-center gap-2 shrink-0'>
-                          <div className='w-6 h-6 rounded-full bg-[#008060] flex items-center justify-center text-white text-[9px] font-bold' title={r.downloadedByEmail || r.downloadedBy}>
+                          <div
+                            className='w-6 h-6 rounded-full bg-[#008060] flex items-center justify-center text-white text-[9px] font-bold'
+                            title={r.downloadedByEmail || r.downloadedBy}
+                          >
                             {initials || 'A'}
                           </div>
                           <div className='text-right hidden sm:block'>
-                            <p className='text-[12px] font-medium text-[#202223]'>{r.downloadedBy}</p>
-                            <p className='text-[11px] text-[#8C9196]'>{timeAgo}</p>
+                            <p className='text-[12px] font-medium text-[#202223]'>
+                              {r.downloadedBy}
+                            </p>
+                            <p className='text-[11px] text-[#8C9196]'>
+                              {timeAgo}
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -1389,12 +1511,21 @@ function SalesPageContent() {
           <div className='p-5 space-y-5'>
             <div className='flex items-center justify-between'>
               <div className='flex items-center gap-3'>
-                <div className='flex items-center gap-2 px-3 py-1.5 bg-[#8C9196]/10 border border-[#8C9196]/20 rounded-full'>
-                  <span className='w-2 h-2 rounded-full bg-[#8C9196]' />
-                  <span className='text-[12px] font-semibold text-[#6D7175]'>
-                    NOT CONNECTED
-                  </span>
-                </div>
+                {liveData?.connected ? (
+                  <div className='flex items-center gap-2 px-3 py-1.5 bg-[#008060]/10 border border-[#008060]/20 rounded-full'>
+                    <span className='w-2 h-2 rounded-full bg-[#008060] animate-pulse' />
+                    <span className='text-[12px] font-semibold text-[#008060]'>
+                      LIVE
+                    </span>
+                  </div>
+                ) : (
+                  <div className='flex items-center gap-2 px-3 py-1.5 bg-[#8C9196]/10 border border-[#8C9196]/20 rounded-full'>
+                    <span className='w-2 h-2 rounded-full bg-[#8C9196]' />
+                    <span className='text-[12px] font-semibold text-[#6D7175]'>
+                      {liveData === null ? 'CONNECTING…' : 'NOT CONNECTED'}
+                    </span>
+                  </div>
+                )}
                 <p className='text-[13px] text-[#6D7175]'>
                   Real-time store activity
                 </p>
@@ -1404,22 +1535,29 @@ function SalesPageContent() {
               {[
                 {
                   label: 'Active Visitors',
-                  value: '—',
+                  value: liveData?.connected
+                    ? (liveData.activeVisitors ?? 0)
+                    : '—',
                   icon: Icons.eye,
                 },
                 {
                   label: 'Carts Active',
-                  value: '—',
+                  value: liveData?.connected
+                    ? (liveData.cartsActive ?? 0)
+                    : '—',
                   icon: Icons.cart,
                 },
                 {
                   label: 'Checkouts',
-                  value: '—',
+                  value: liveData?.connected ? (liveData.checkouts ?? 0) : '—',
                   icon: Icons.orders,
                 },
                 {
                   label: "Today's Orders",
-                  value: stats?.totalOrders ?? 0,
+                  value: liveData?.todaysOrders?.count ?? 0,
+                  sub: liveData?.todaysOrders
+                    ? formatCurrencyFull(liveData.todaysOrders.amount)
+                    : undefined,
                   icon: Icons.revenue,
                   color: 'text-[#2C6ECB]',
                   bg: 'bg-[#2C6ECB]/10',
@@ -1442,6 +1580,7 @@ function SalesPageContent() {
                     </p>
                     <p className='text-[11.5px] text-[#6D7175] mt-0.5'>
                       {stat.label}
+                      {stat.sub ? ` · ${stat.sub}` : ''}
                     </p>
                   </div>
                 </div>
@@ -1453,17 +1592,28 @@ function SalesPageContent() {
                   Active Visitors
                 </p>
               </div>
-              <div className='flex flex-col items-center justify-center gap-2 py-12 px-5 text-center'>
-                <p className='text-[13.5px] font-medium text-[#202223]'>
-                  Live visitor tracking isn't connected yet
-                </p>
-                <p className='text-[12.5px] text-[#8C9196] max-w-sm'>
-                  This requires a real-time analytics/session-tracking
-                  integration on the storefront (e.g. Google Analytics
-                  Realtime API or PostHog). Once connected, live visitor
-                  activity will show up here.
-                </p>
-              </div>
+              {liveData?.connected ? (
+                <div className='flex flex-col items-center justify-center gap-2 py-12 px-5 text-center'>
+                  <p className='font-sora text-[32px] font-bold text-[#008060]'>
+                    {liveData.activeVisitors ?? 0}
+                  </p>
+                  <p className='text-[12.5px] text-[#8C9196]'>
+                    people on smashuk.co right now, via Google Analytics
+                  </p>
+                </div>
+              ) : (
+                <div className='flex flex-col items-center justify-center gap-2 py-12 px-5 text-center'>
+                  <p className='text-[13.5px] font-medium text-[#202223]'>
+                    {liveData?.error
+                      ? 'Could not reach Google Analytics'
+                      : "Live visitor tracking isn't connected yet"}
+                  </p>
+                  <p className='text-[12.5px] text-[#8C9196] max-w-sm'>
+                    {liveData?.error ??
+                      'This requires a real-time analytics/session-tracking integration on the storefront (e.g. Google Analytics Realtime API or PostHog). Once connected, live visitor activity will show up here.'}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

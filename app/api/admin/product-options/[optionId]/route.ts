@@ -50,3 +50,34 @@ export async function POST(
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
+
+// Deletes a global option outright — used for cleaning up a stale
+// exclusive option (e.g. leftover "Default"/"Type") once nothing on the
+// product references it anymore. CONFIRMED per Medusa's documented Admin
+// API route list: DELETE /admin/product-options/:id.
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ optionId: string }> },
+) {
+  try {
+    const { optionId } = await params
+    const authorization = (await getAdminAuthHeader(req)) ?? ''
+    if (!authorization) {
+      return NextResponse.json(
+        { error: 'Missing Authorization header' },
+        { status: 401 },
+      )
+    }
+
+    const res = await fetch(`${MEDUSA_URL}/admin/product-options/${optionId}`, {
+      method: 'DELETE',
+      headers: { Authorization: authorization },
+    })
+
+    const data = await safeJson(res)
+    return NextResponse.json(data, { status: res.status })
+  } catch (err: any) {
+    console.error('[DELETE product-options/:id]', err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
+}

@@ -151,6 +151,32 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // BUG FIX ("Invalid request: Unrecognized fields: 'images'" when
+    // creating a product with variants that have picked images): same
+    // issue already fixed on the update route
+    // (app/api/admin/products/[id]/route.ts) — this Medusa version's
+    // product-create DTO doesn't accept a per-variant `images` array
+    // either, but app/dashboard/products/new/page.tsx's "Variant Media"
+    // picker still sends variant.images: [{ url }, ...]. Medusa rejected
+    // the ENTIRE create request because of it — not just the images —
+    // which is why the whole product failed to save. Move each variant's
+    // picked image urls into variant.metadata.variant_images instead (so
+    // nothing is lost) and strip the unsupported field before forwarding.
+    if (Array.isArray(body.variants)) {
+      body.variants = body.variants.map((v: any) => {
+        if (!v || !Array.isArray(v.images)) return v
+        const urls = v.images.map((img: any) => img.url).filter(Boolean)
+        const { images, ...rest } = v
+        return {
+          ...rest,
+          metadata: {
+            ...(rest.metadata || {}),
+            variant_images: urls,
+          },
+        }
+      })
+    }
+
     // Step 1: Create product
     const res = await fetch(`${MEDUSA_URL}/admin/products`, {
       method: 'POST',
@@ -204,7 +230,10 @@ export async function POST(req: NextRequest) {
           `${MEDUSA_URL}/admin/products/${data.product.id}?fields=*variants,*variants.inventory_items`,
           { headers: { Authorization: authorization } },
         )
-        const skuProductData = await safeJson(skuProductRes, 'sku product refetch')
+        const skuProductData = await safeJson(
+          skuProductRes,
+          'sku product refetch',
+        )
         const skuVariants: any[] = skuProductData.product?.variants ?? []
 
         for (const variant of skuVariants) {
@@ -225,33 +254,54 @@ export async function POST(req: NextRequest) {
             `${MEDUSA_URL}/admin/inventory-items/${invItemId}`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: authorization },
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: authorization,
+              },
               body: JSON.stringify(patchBody),
             },
           )
           const skuPatchData = await safeJson(skuPatchRes, 'sku patch')
           if (!skuPatchRes.ok) {
-            console.warn('[products POST] SKU patch failed for', invItemId, ':', skuPatchData.message)
+            console.warn(
+              '[products POST] SKU patch failed for',
+              invItemId,
+              ':',
+              skuPatchData.message,
+            )
           } else {
-            console.log('[products POST] Inventory SKU auto-set:', invItemId, '→', patchBody.sku ?? '(no sku)')
+            console.log(
+              '[products POST] Inventory SKU auto-set:',
+              invItemId,
+              '→',
+              patchBody.sku ?? '(no sku)',
+            )
           }
         }
       } catch (skuErr: any) {
         // Non-fatal — product is created fine, just SKU won't be pre-filled in Medusa admin
-        console.warn('[products POST] SKU auto-set failed (non-fatal):', skuErr.message)
+        console.warn(
+          '[products POST] SKU auto-set failed (non-fatal):',
+          skuErr.message,
+        )
       }
     }
 
     if (hasVariantsToLink && data.product?.id) {
       // 2a. Get stock location
-      const locRes = await fetch(`${MEDUSA_URL}/admin/stock-locations?limit=1`, {
-        headers: { Authorization: authorization },
-      })
+      const locRes = await fetch(
+        `${MEDUSA_URL}/admin/stock-locations?limit=1`,
+        {
+          headers: { Authorization: authorization },
+        },
+      )
       const locData = await safeJson(locRes, 'stock-locations')
       const locationId = locData.stock_locations?.[0]?.id
 
       if (!locationId) {
-        console.warn('[products POST] No stock location found — inventory not set. Add one in Medusa → Settings → Stock Locations.')
+        console.warn(
+          '[products POST] No stock location found — inventory not set. Add one in Medusa → Settings → Stock Locations.',
+        )
       } else {
         // 2b. Re-fetch product with inventory_items expanded (Medusa v2 path)
         const productRes = await fetch(
@@ -286,41 +336,81 @@ export async function POST(req: NextRequest) {
           // exactly like the admin UI itself does under the hood.
           if (!inventoryItemId) {
             try {
-              const createRes = await fetch(`${MEDUSA_URL}/admin/inventory-items`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: authorization },
-                body: JSON.stringify({ sku: variant.sku || undefined }),
-              })
-              const createData = await safeJson(createRes, 'inventory item create')
+              const createRes = await fetch(
+                `${MEDUSA_URL}/admin/inventory-items`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: authorization,
+                  },
+                  body: JSON.stringify({ sku: variant.sku || undefined }),
+                },
+              )
+              const createData = await safeJson(
+                createRes,
+                'inventory item create',
+              )
               if (!createRes.ok) {
-                console.warn('[products POST] Inventory item create failed for variant', variant.id, ':', createData.message)
+                console.warn(
+                  '[products POST] Inventory item create failed for variant',
+                  variant.id,
+                  ':',
+                  createData.message,
+                )
                 continue
               }
-              const newInvItemId = createData.inventory_item?.id ?? createData.id
+              const newInvItemId =
+                createData.inventory_item?.id ?? createData.id
 
               const linkRes = await fetch(
                 `${MEDUSA_URL}/admin/products/${data.product.id}/variants/${variant.id}/inventory-items`,
                 {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json', Authorization: authorization },
-                  body: JSON.stringify({ inventory_item_id: newInvItemId, required_quantity: 1 }),
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: authorization,
+                  },
+                  body: JSON.stringify({
+                    inventory_item_id: newInvItemId,
+                    required_quantity: 1,
+                  }),
                 },
               )
               if (!linkRes.ok) {
                 const linkData = await safeJson(linkRes, 'inventory item link')
-                console.warn('[products POST] Inventory item LINK failed for variant', variant.id, ':', linkData.message)
+                console.warn(
+                  '[products POST] Inventory item LINK failed for variant',
+                  variant.id,
+                  ':',
+                  linkData.message,
+                )
                 continue
               }
-              console.log('[products POST] Inventory item created + linked for variant', variant.id, '→', newInvItemId)
+              console.log(
+                '[products POST] Inventory item created + linked for variant',
+                variant.id,
+                '→',
+                newInvItemId,
+              )
               inventoryItemId = newInvItemId
             } catch (invItemErr: any) {
-              console.warn('[products POST] Inventory item create/link threw for variant', variant.id, ':', invItemErr.message)
+              console.warn(
+                '[products POST] Inventory item create/link threw for variant',
+                variant.id,
+                ':',
+                invItemErr.message,
+              )
               continue
             }
           }
 
           if (!inventoryItemId) {
-            console.warn('[products POST] No inventory item for variant:', variant.id, '— skipping')
+            console.warn(
+              '[products POST] No inventory item for variant:',
+              variant.id,
+              '— skipping',
+            )
             continue
           }
 
@@ -369,25 +459,49 @@ export async function POST(req: NextRequest) {
               `${MEDUSA_URL}/admin/inventory-items/${inventoryItemId}/location-levels/${locationId}`,
               {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: authorization },
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: authorization,
+                },
                 body: JSON.stringify({ stocked_quantity: safeQty }),
               },
             )
             const upData = await safeJson(upRes, 'level update')
-            if (!upRes.ok) console.warn('[products POST] Level update failed:', upData.message)
+            if (!upRes.ok)
+              console.warn(
+                '[products POST] Level update failed:',
+                upData.message,
+              )
           } else {
             // No level yet — create it
             const createRes = await fetch(
               `${MEDUSA_URL}/admin/inventory-items/${inventoryItemId}/location-levels`,
               {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: authorization },
-                body: JSON.stringify({ location_id: locationId, stocked_quantity: safeQty }),
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: authorization,
+                },
+                body: JSON.stringify({
+                  location_id: locationId,
+                  stocked_quantity: safeQty,
+                }),
               },
             )
             const createData = await safeJson(createRes, 'level create')
-            if (!createRes.ok) console.warn('[products POST] Level create failed:', createData.message)
-            else console.log('[products POST] Inventory set: variant', variant.id, '→', safeQty, 'units')
+            if (!createRes.ok)
+              console.warn(
+                '[products POST] Level create failed:',
+                createData.message,
+              )
+            else
+              console.log(
+                '[products POST] Inventory set: variant',
+                variant.id,
+                '→',
+                safeQty,
+                'units',
+              )
           }
         }
       }

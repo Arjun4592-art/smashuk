@@ -3,6 +3,7 @@ import { Inter, Poppins, Sora } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 import { Toaster } from 'sonner'
+import { GoogleAnalytics } from '@/components/providers/GoogleAnalytics'
 import {
   DEFAULT_SEO,
   SITE_NAME,
@@ -89,6 +90,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className='font-inter antialiased' suppressHydrationWarning>
+        <GoogleAnalytics />
         <Providers>{children}</Providers>
         <Toaster position='top-right' richColors closeButton duration={3000} />
       </body>

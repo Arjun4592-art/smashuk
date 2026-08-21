@@ -11,6 +11,7 @@ import {
   updateCartItem,
 } from '@/lib/api/store'
 import { GIFT_CARD_PRODUCT_HANDLE } from '@/lib/constants'
+import { trackAddToCart } from '@/lib/analytics-events'
 
 export interface CartItem {
   product: Product
@@ -56,6 +57,7 @@ interface CartState {
     quantity?: number,
     variant?: CartItem['variant'],
     metadata?: Record<string, any>,
+    discountPerUnit?: number,
   ) => void
   removeItem: (productId: string, variantId?: string) => void
   updateQuantity: (
@@ -89,7 +91,10 @@ function computeTotals(
   giftCardTotal: number = 0,
   taxRate: number = DEFAULT_TAX_RATE,
 ) {
-  const subtotal = items.reduce((s, i) => s + i.product.price * i.quantity, 0)
+  const subtotal = items.reduce(
+    (s, i) => s + (i.product.price - (i.discount ?? 0)) * i.quantity,
+    0,
+  )
   // Gift cards are digital/emailed — they never incur shipping and don't
   // count toward the free-shipping threshold. Shipping is £0 whenever the
   // cart has no physical (non-gift-card) items at all, and is otherwise
@@ -98,7 +103,7 @@ function computeTotals(
     (i) => i.product.slug !== GIFT_CARD_PRODUCT_HANDLE,
   )
   const physicalSubtotal = physicalItems.reduce(
-    (s, i) => s + i.product.price * i.quantity,
+    (s, i) => s + (i.product.price - (i.discount ?? 0)) * i.quantity,
     0,
   )
   const shipping =
@@ -143,7 +148,7 @@ export const useCartStore = create<CartState>()(
           ),
         })),
 
-      addItem: (product, quantity = 1, variant, metadata) => {
+      addItem: (product, quantity = 1, variant, metadata, discountPerUnit) => {
         set((state) => {
           const existingIndex = state.items.findIndex(
             (i) => i.product.id === product.id && i.variant?.id === variant?.id,
@@ -152,13 +157,26 @@ export const useCartStore = create<CartState>()(
           if (existingIndex >= 0) {
             newItems = state.items.map((item, i) =>
               i === existingIndex
-                ? { ...item, quantity: item.quantity + quantity }
+                ? {
+                    ...item,
+                    quantity: item.quantity + quantity,
+                    // Keep whichever discount is already on the line —
+                    // re-adding the same product/variant shouldn't wipe out
+                    // a cross-sell discount it was originally added with.
+                    discount: item.discount ?? discountPerUnit,
+                  }
                 : item,
             )
           } else {
             newItems = [
               ...state.items,
-              { product, quantity, variant, metadata },
+              {
+                product,
+                quantity,
+                variant,
+                metadata,
+                discount: discountPerUnit,
+              },
             ]
           }
           return {
@@ -170,6 +188,15 @@ export const useCartStore = create<CartState>()(
               state.taxRate,
             ),
           }
+        })
+
+        // Report to GA4 so the dashboard's Live View "Carts Active" stat
+        // reflects real activity instead of always showing 0.
+        trackAddToCart({
+          itemId: variant?.id ?? product.id,
+          itemName: product.name ?? 'Product',
+          price: product.price - (discountPerUnit ?? 0),
+          quantity,
         })
 
         // Keep a real Medusa cart in sync in the background so that cartId

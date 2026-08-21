@@ -28,8 +28,8 @@ export default function CrossSellSuggestions({
         People Also Buy
       </h2>
       <p className='text-sm text-gray-500 font-lato mb-6'>
-        Frequently bought together with this product — save when you add
-        these too.
+        Frequently bought together with this product — save when you add these
+        too.
       </p>
       <div className='flex gap-4 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory'>
         {products.map((p) => (
@@ -45,10 +45,11 @@ function CrossSellCard({ product }: { product: CrossSellProduct }) {
   const [added, setAdded] = useState(false)
   const addItem = useCartStore((s) => s.addItem)
 
-  const discountedPrice =
+  const discountPerUnit =
     product.crossSellDiscountPct > 0
-      ? product.price * (1 - product.crossSellDiscountPct / 100)
-      : product.price
+      ? product.price * (product.crossSellDiscountPct / 100)
+      : 0
+  const discountedPrice = product.price - discountPerUnit
 
   const handleAddToCart = async (e: React.MouseEvent) => {
     e.preventDefault()
@@ -56,7 +57,7 @@ function CrossSellCard({ product }: { product: CrossSellProduct }) {
     if (adding || added || !product.inStock) return
     setAdding(true)
     await new Promise((r) => setTimeout(r, 300))
-    addItem(product, 1)
+    addItem(product, 1, undefined, undefined, discountPerUnit)
     setAdding(false)
     setAdded(true)
     setTimeout(() => setAdded(false), 2000)

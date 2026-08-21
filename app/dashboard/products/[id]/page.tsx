@@ -181,8 +181,14 @@ export default function EditProductPage({
     title: string
     value: string
   } | null>(null)
+  // Global Product Options (Medusa v2.17 GA) linked to THIS product, via
+  // GET /admin/products/:id's `options` field. `values` is the set of
+  // values currently linked to this product for that option — used to
+  // build the UNION (never a narrowed subset) sent to linkOptionsToProduct
+  // before updateProduct runs. See syncOptionsForVariants() for why this
+  // must never narrow before the variant update.
   const [existingOptions, setExistingOptions] = useState<
-    { id: string; title: string }[]
+    { id: string; title: string; values: string[] }[]
   >([])
 
   // BUG FIX ("Option value Black does not exist for option Color"):
@@ -286,12 +292,26 @@ export default function EditProductPage({
         // legacy flat spec keys some older seeded products still have
         // (e.g. metadata.player_level, metadata.balance) so editing an old
         // product doesn't show an empty specs list.
+        // BUG FIX ("bogus specs like OgImage/MetaTitle appear after
+        // editing a product"): this set was missing several keys that the
+        // save flow always writes to metadata (ogImage, metaTitle,
+        // metaDescription, metaKeywords, string_upgrade_available,
+        // cross_sells, specifications, originalPrice, rating,
+        // reviewCount). Because they're never actually empty (ogImage =
+        // first uploaded image, metaTitle/etc. are auto-generated when
+        // left blank), they fell through into "legacy specs" below on
+        // every edit-page load, got pre-filled into the Specifications
+        // tab, and — once the admin hit Save for ANY reason — got baked
+        // permanently into metadata.specs, which the storefront then
+        // renders as-is (see extractSpecs in lib/api/store.ts). Kept in
+        // sync with SYSTEM_METADATA_KEYS there.
         const KNOWN_KEYS = new Set([
           'brand',
           'sport',
           'badge',
           'tags',
           'specs',
+          'specifications',
           'sale_price',
           'regular_price',
           'compare_at_price',
@@ -299,6 +319,17 @@ export default function EditProductPage({
           'low_stock_alert',
           'taxable',
           'tier_pricing',
+          'cross_sells',
+          'string_upgrade_available',
+          'originalPrice',
+          'rating',
+          'reviewCount',
+          'metaTitle',
+          'metaDescription',
+          'metaKeywords',
+          'ogImage',
+          'service_type',
+          'service_sport',
         ])
         // Load cross-sells from metadata
         if (Array.isArray(p.metadata?.cross_sells)) {
@@ -324,8 +355,15 @@ export default function EditProductPage({
                 !KNOWN_KEYS.has(k) && v !== undefined && v !== null && v !== '',
             )
             .map(([k, v]) => ({
+              // Also split camelCase (e.g. a future "playerLevel" key)
+              // into words before capitalizing — previously only
+              // underscores were split, so any camelCase key that slipped
+              // through KNOWN_KEYS rendered as a single squashed word
+              // ("OgImage") instead of "Og Image". Matches prettifyLabel()
+              // in lib/api/store.ts.
               label: k
                 .replace(/_/g, ' ')
+                .replace(/([a-z])([A-Z])/g, '$1 $2')
                 .replace(/\b\w/g, (c) => c.toUpperCase()),
               value: typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v),
             }))
@@ -353,7 +391,20 @@ export default function EditProductPage({
               sku: v.sku ?? '',
               price: v.prices?.[0]?.amount ? String(v.prices[0].amount) : '',
               stock: String(v.inventory_quantity ?? ''),
-              imageUrls: (v.images ?? []).map((img: any) => img.url),
+              // BUG FIX ("all images show checked for every variant"):
+              // real per-variant image picks are saved into
+              // `metadata.variant_images` (see app/api/admin/products/
+              // [id]/route.ts and .../products/route.ts — Medusa's DTO
+              // here rejects a real per-variant `images` array outright).
+              // Loading from `v.images` instead read Medusa's default
+              // relation, which — since no variant ever actually got a
+              // real scoped image set — just returns the FULL product
+              // image list for every variant, making every checkbox show
+              // as picked regardless of what was actually chosen. Read
+              // back the real saved picks instead.
+              imageUrls: Array.isArray(v.metadata?.variant_images)
+                ? v.metadata.variant_images
+                : [],
             })),
           )
         } else if (p.variants && p.variants.length === 1) {
@@ -381,19 +432,42 @@ export default function EditProductPage({
             {
               id: '1',
               medusaId: v.id,
-              options: [{ id: 'o1', name: '', value: '' }],
+              // BUG FIX ("Options blank when editing a single-variant
+              // product"): this used to hardcode { name: '', value: '' }
+              // here regardless of `opt` above, so the real option Medusa
+              // already has for this variant (e.g. Color: red — visible in
+              // Medusa's own admin) never made it into the Variants tab's
+              // Option name/Value inputs. Multi-variant products never had
+              // this bug (see the `p.variants.length > 1` branch above,
+              // which always mapped `v.options` into name/value). Seed the
+              // real option here too so it's visible and editable, and so
+              // filledOptions() correctly treats it as a real option on
+              // save instead of silently relying on `defaultOption` alone.
+              options: [
+                {
+                  id: 'o1',
+                  name: opt?.option?.title ?? '',
+                  value: opt?.value ?? '',
+                },
+              ],
               colorCode: v.metadata?.color_code ?? '',
               sku: v.sku ?? '',
               price: v.prices?.[0]?.amount ? String(v.prices[0].amount) : '',
               stock: String(v.inventory_quantity ?? ''),
-              imageUrls: (v.images ?? []).map((img: any) => img.url),
+              imageUrls: Array.isArray(v.metadata?.variant_images)
+                ? v.metadata.variant_images
+                : [],
             },
           ])
         }
 
         if (Array.isArray(p.options)) {
           setExistingOptions(
-            p.options.map((o: any) => ({ id: o.id, title: o.title })),
+            p.options.map((o: any) => ({
+              id: o.id,
+              title: o.title,
+              values: (o.values ?? []).map((v: any) => v.value),
+            })),
           )
         }
 
@@ -789,14 +863,38 @@ export default function EditProductPage({
   }
 
   // ── Sync Size/Color options for the variants below ─────────────────────────
-  // Medusa v2.17 "Global Product Options": before the variants payload can
-  // reference a Size/Color value, that value has to (1) exist on the
-  // global option and (2) be linked to THIS product. Two-step flow per
-  // option title used by the variants:
+  // Medusa v2.17 "Global Product Options" (GA): options are a standalone
+  // resource (/admin/product-options), reusable across products, and have
+  // to be explicitly linked to a product before its variants can reference
+  // their values. There is no per-product options endpoint in this Medusa
+  // version — editing an existing product's options always goes through
+  // this flow. Two steps per option title used by the variants:
   //   1. upsertOptionValues() — create the global option if it's new, or
   //      add any values to it that don't exist yet.
   //   2. linkOptionsToProduct() — attach (or update the attached value
   //      set of) that option on this product.
+  //
+  // BUG FIX ("Option value X does not exist for option Y"), root cause —
+  // not a timing race, an ORDERING bug: step 2 used to send only the
+  // values THIS save's variants need, narrowing away any value a
+  // surviving variant currently has in Medusa but is changing away from
+  // (e.g. Size "1" → "11.5" on a variant that already has a real Size
+  // option — not just the single "Default variant" conversion case, which
+  // was the only case the old code protected). If that narrowed link
+  // lands before updateProduct actually switches the variant over, Medusa
+  // immediately rejects it: the variant still points at "1", which the
+  // link no longer includes. A bounded retry loop used to paper over this
+  // by hoping updateProduct's read of the link raced ahead of it — it
+  // didn't reliably.
+  //
+  // The actual fix: never narrow the linked value set before
+  // updateProduct. Step 2 always sends the UNION of whatever's already
+  // linked plus whatever this save's variants need — additive only. That
+  // removes the ordering dependency entirely (no value a variant still
+  // references can ever be missing from the link, no matter when Medusa
+  // processes either request), so no retry is needed. Values that become
+  // unused are simply left linked afterwards — harmless, and mirrors how
+  // Shopify keeps past option values around for reuse.
   const syncOptionsForVariants = async () => {
     const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
     // BUG FIX ("Option value Default does not exist for option Default"):
@@ -812,19 +910,25 @@ export default function EditProductPage({
     // instead of bailing out early.
     if (!hasExtraVariants) {
       if (defaultOption) return
-      const { optionId, valueIds } = await upsertOptionValues('Default', [
+      const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
         'Default',
-      ])
+        ['Default'],
+      )
       const alreadyLinked = new Set(existingOptions.map((o) => o.id))
       const linkTargets: { id: string; title: string; value_ids: string[] }[] =
         [{ id: optionId, title: 'Default', value_ids: valueIds }]
       await linkOptionsToProduct(id, linkTargets, alreadyLinked, [])
-      setDefaultOption({ title: 'Default', value: 'Default' })
-      setExistingOptions((prev) =>
-        prev.some((o) => o.id === optionId)
-          ? prev
-          : [...prev, { id: optionId, title: 'Default' }],
-      )
+      setDefaultOption({
+        title: 'Default',
+        value: canonicalValues[0] ?? 'Default',
+      })
+      setExistingOptions((prev) => {
+        const others = prev.filter((o) => o.id !== optionId)
+        return [
+          ...others,
+          { id: optionId, title: 'Default', values: canonicalValues },
+        ]
+      })
       return
     }
 
@@ -844,23 +948,51 @@ export default function EditProductPage({
     const linkTargets: { id: string; title: string; value_ids: string[] }[] = []
     for (const [title, valueSet] of neededByTitle) {
       const requested = Array.from(valueSet)
-      const preferredId = existingOptions.find(
+      const existingOption = existingOptions.find(
         (o) => o.title.toLowerCase() === title.toLowerCase(),
-      )?.id
+      )
+
+      // Always resolve/link the UNION of whatever's currently linked to
+      // this product for this option PLUS whatever's newly requested —
+      // never just `requested` on its own. This is what makes the link
+      // additive-only (see the fix note above): any value a not-yet-saved
+      // variant still points at in Medusa stays linked through this call,
+      // no matter what this save is changing it to.
+      const union = Array.from(
+        new Set([...(existingOption?.values ?? []), ...requested]),
+      )
+
       const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
         title,
-        requested,
-        preferredId,
+        union,
+        existingOption?.id,
       )
+
       linkTargets.push({ id: optionId, title, value_ids: valueIds })
-      requested.forEach((typed, i) => {
-        const canonical = canonicalValues[i]
+
+      // Canonical casing is only needed for the values THIS save's
+      // variants actually use — map those specifically (canonicalValues
+      // is parallel to `union`, not `requested`, so index by position in
+      // `union`).
+      requested.forEach((typed) => {
+        const idx = union.findIndex(
+          (v) => v.toLowerCase() === typed.toLowerCase(),
+        )
+        const canonical = idx >= 0 ? canonicalValues[idx] : undefined
         if (canonical) {
           optionValueCasingRef.current.set(
             `${title.toLowerCase()}::${typed.toLowerCase()}`,
             canonical,
           )
         }
+      })
+
+      setExistingOptions((prev) => {
+        const others = prev.filter(
+          (o) =>
+            o.id !== optionId && o.title.toLowerCase() !== title.toLowerCase(),
+        )
+        return [...others, { id: optionId, title, values: canonicalValues }]
       })
     }
 
@@ -870,7 +1002,11 @@ export default function EditProductPage({
     // we're syncing (i.e. not "Size" or "Color") is stale — most commonly
     // a leftover "Default"/"Type" option from when this was a
     // single-variant product. Unlink it, or every variant save fails with
-    // Medusa's option-count mismatch error.
+    // Medusa's option-count mismatch error. This is a WHOLE-OPTION
+    // removal (different option entirely), not value narrowing, so the
+    // "never narrow before update" fix above doesn't apply to it — it
+    // still needs the same before/after-updateProduct timing check as
+    // before.
     const neededTitles = new Set(neededByTitle.keys())
     const removeOptionIds = existingOptions
       .filter((o) => !neededTitles.has(o.title))
@@ -923,23 +1059,11 @@ export default function EditProductPage({
       throw err
     }
 
-    // Keep existingOptions in sync so a second Save in this same session
-    // (no page reload in between) correctly treats these as already-linked
-    // — otherwise it would try to `add` an option that's now already
-    // linked, which Medusa rejects. Options still pending removal in
-    // staleOptionIdsRef are kept as "known" here on purpose (they're
-    // still genuinely linked in Medusa until the deferred call runs).
-    setExistingOptions((prev) => {
-      const known = new Set(prev.map((o) => o.id))
-      const additions = linkTargets
-        .filter((t) => !known.has(t.id))
-        .map((t) => ({ id: t.id, title: t.title }))
-      const removedSet = new Set(removeNow)
-      const survivors = prev.filter((o) => !removedSet.has(o.id))
-      return additions.length > 0 || removeNow.length > 0
-        ? [...survivors, ...additions]
-        : prev
-    })
+    if (removeNow.length > 0) {
+      setExistingOptions((prev) =>
+        prev.filter((o) => !removeNow.includes(o.id)),
+      )
+    }
   }
 
   // BUG FIX (safety net for the delete-then-recreate flow above): if the
@@ -1024,9 +1148,25 @@ export default function EditProductPage({
     try {
       // Options must be linked to the product BEFORE the variants payload
       // below can reference their values — see syncOptionsForVariants().
+      const hadExtraVariants = variants.some((v) => filledOptions(v).length > 0)
       await syncOptionsForVariants()
       const payload = buildPayload(saveStatus)
       const updateResult = await updateProduct(id, payload)
+
+      // BUG FIX (unnecessary re-link of an already-narrowed-away old
+      // value on a SECOND Save in the same session, no reload in
+      // between): defaultOption still holds the option this product had
+      // BEFORE it was first converted into Size/Color variants — nothing
+      // ever cleared it once that conversion succeeded. Left stale, the
+      // next Save's keepsOldValue check in syncOptionsForVariants would
+      // keep trying to temporarily re-link that old, already-gone value
+      // for no reason (harmless, but a wasted round-trip every save).
+      // Once this save has genuine Size/Color variants, the product is
+      // no longer a "single Default variant" product, so there's no
+      // more old value to protect — clear it.
+      if (hadExtraVariants) {
+        setDefaultOption(null)
+      }
 
       // BUG FIX (leftover variants after "Remove" on a saved row): delete
       // any queued variant ids now that the replacement/remaining

@@ -24,6 +24,7 @@ import {
   getCart,
 } from '@/lib/api/store'
 import { useAuthStore } from '@/store/authStore'
+import { trackBeginCheckout } from '@/lib/analytics-events'
 import {
   FREE_SHIPPING_THRESHOLD,
   GIFT_CARD_PRODUCT_HANDLE,
@@ -219,6 +220,23 @@ export default function CheckoutPage() {
       .catch(() => {
         /* Pickup will just show a blank location card if this fails */
       })
+  }, [])
+
+  // Report to GA4 so the dashboard's Live View "Checkouts" stat reflects
+  // real activity instead of always showing 0. Fires once per page load
+  // (checkout is a single-page flow here, not a multi-step route change).
+  useEffect(() => {
+    if (items.length === 0) return
+    trackBeginCheckout({
+      value: total,
+      items: items.map((i) => ({
+        itemId: i.variant?.id ?? i.product.id,
+        itemName: i.product.name ?? 'Product',
+        price: i.product.price,
+        quantity: i.quantity,
+      })),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally fire-once on mount, not on every cart/total change
   }, [])
 
   const [paymentElementReady, setPaymentElementReady] = useState(false)

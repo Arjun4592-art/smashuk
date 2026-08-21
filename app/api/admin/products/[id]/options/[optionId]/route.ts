@@ -53,3 +53,39 @@ export async function POST(
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
+
+// Deletes an option scoped to this product — used to remove a stale
+// leftover option (e.g. "Default"/"Type" from before this product had
+// real Size/Color variants). Since options here are exclusive to one
+// product (see lib/api/dashboard.ts deleteProductOption), deleting it is
+// the correct operation — there's no other product to unlink it from.
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string; optionId: string }> },
+) {
+  try {
+    const { id, optionId } = await params
+    const authorization = (await getAdminAuthHeader(req)) ?? ''
+
+    if (!authorization) {
+      return NextResponse.json(
+        { error: 'Missing Authorization header' },
+        { status: 401 },
+      )
+    }
+
+    const res = await fetch(
+      `${MEDUSA_URL}/admin/products/${id}/options/${optionId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: authorization },
+      },
+    )
+
+    const data = await safeJson(res)
+    return NextResponse.json(data, { status: res.status })
+  } catch (err: any) {
+    console.error('[DELETE product option]', err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
+}

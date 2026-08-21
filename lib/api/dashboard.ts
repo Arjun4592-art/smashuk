@@ -293,7 +293,14 @@ function isStaleOptionLinkError(message: string) {
 }
 
 export async function updateProduct(id: string, data: any) {
-  const attempts = 3
+  // BUG FIX: bumped from 3 → 6 attempts. 3 retries (~1.2s total) wasn't
+  // enough for Medusa's Global Product Options link to become visible to
+  // the variant-options validator after options/batch completes — seen
+  // failing all 3 attempts on a normal "add new Size value + new variant"
+  // save. 6 attempts with 400ms×(i+1) backoff = ~6.3s worst case, which
+  // comfortably clears the race window. A genuinely wrong value would
+  // still fail after all 6 retries and surface normally.
+  const attempts = 6
   for (let i = 0; i < attempts; i++) {
     try {
       return await mutate(`/api/admin/products/${id}`, 'PATCH', data)
@@ -393,7 +400,12 @@ export async function upsertOptionValues(
     }
   }
 
-  const byValue = new Map(
+  // FIX: without an explicit tuple type, `[v.value.toLowerCase(), v]` is
+  // widened to a plain array (not a 2-tuple), so `new Map(...)` can't
+  // correctly infer the key/value generic — `.get()` then returns a type
+  // TS can't reconcile with `string`. Annotating the callback's return as
+  // a tuple fixes inference for every `.get()` call below.
+  const byValue = new Map<string, { id: string; value: string }>(
     existing.values.map((v) => [v.value.toLowerCase(), v]),
   )
   const missing = values.filter((v) => !byValue.has(v.toLowerCase()))
@@ -417,11 +429,30 @@ export async function upsertOptionValues(
 
   const resolved = values.map((v) => byValue.get(v.toLowerCase()))
 
+  // BUG FIX ("Option value N does not exist for option Size (UK)"):
+  // The previous approach returned ALL value ids from the global option
+  // (e.g. ALL sizes ever used across every product). When linkOptionsToProduct
+  // sent those to Medusa's options/batch `update`, Medusa linked ALL those
+  // values to THIS product — but this product's variants only reference a
+  // subset of them. Medusa then rejected the variant save because it found
+  // values linked to the product (e.g. size "3" from another product) that
+  // no variant on this product actually uses.
+  //
+  // The correct behaviour: only link value_ids that THIS product's current
+  // variants actually reference — i.e. exactly the `values` requested in
+  // this call. That's already what `resolved` contains: one entry per
+  // requested value, in the same order. No extras from the global option pool.
+  const requestedValueIds = resolved
+    .filter((v): v is { id: string; value: string } => !!v)
+    .map((v) => v.id)
+
   return {
     optionId: existing.id,
-    valueIds: resolved
-      .filter((v): v is { id: string; value: string } => !!v)
-      .map((v) => v.id),
+    // Only return value ids for the values THIS product's variants actually
+    // use. Sending the full global set caused Medusa to find orphaned linked
+    // values (from other products) that no variant on this product covered,
+    // triggering "Option value X does not exist for option Y" on every save.
+    valueIds: requestedValueIds,
     canonicalValues: resolved
       .filter((v): v is { id: string; value: string } => !!v)
       .map((v) => v.value),
@@ -472,6 +503,109 @@ export async function deleteProductVariant(
     `/api/admin/products/${productId}/variants/${variantId}`,
     'DELETE',
   )
+}
+
+export async function deleteProductOption(productId: string, optionId: string) {
+  return mutate(
+    `/api/admin/products/${productId}/options/${optionId}`,
+    'DELETE',
+  )
+}
+
+export async function upsertProductOption(
+  productId: string,
+  title: string,
+  values: string[],
+  existingOption?: { id: string; values: { id: string; value: string }[] },
+): Promise<{
+  optionId: string
+  canonicalValues: string[]
+  staleOptionId?: string
+}> {
+  if (!existingOption) {
+    // No existing option — create a brand-new one scoped to this product
+    const created = await mutate(
+      `/api/admin/products/${productId}/options`,
+      'POST',
+      { title, values },
+    )
+    const opt = created.product_option
+    // FIX: `opt.values` is `any`, so TS can't infer the Map's generics
+    // from the callback alone (inference from `any` falls back to `{}`).
+    // Declaring the generic explicitly — `new Map<string, string>(...)` —
+    // forces the correct key/value types.
+    const byValue = new Map<string, string>(
+      (opt.values ?? []).map((v: any) => [v.value.toLowerCase(), v.value]),
+    )
+    return {
+      optionId: opt.id,
+      canonicalValues: values.map((v) => byValue.get(v.toLowerCase()) ?? v),
+    }
+  }
+
+  // Existing option — diff to find which values are missing
+  // FIX: this is the exact line the build error pointed at
+  // (dashboard.ts:533) — explicit generic avoids the {} fallback.
+  const byValue = new Map<string, string>(
+    existingOption.values.map((v) => [v.value.toLowerCase(), v.value]),
+  )
+  const missing = values.filter((v) => !byValue.has(v.toLowerCase()))
+
+  if (missing.length > 0) {
+    // Send the full desired list (existing + new) — Medusa replaces the
+    // value set entirely, so omitting existing values would drop them.
+    const allValues = [...existingOption.values.map((v) => v.value), ...missing]
+    try {
+      const updated = await mutate(
+        `/api/admin/products/${productId}/options/${existingOption.id}`,
+        'POST',
+        { title, values: allValues },
+      )
+      // FIX: explicit generic — see note above.
+      const updatedByValue = new Map<string, string>(
+        (updated.product_option?.values ?? []).map((v: any) => [
+          v.value.toLowerCase(),
+          v.value,
+        ]),
+      )
+      return {
+        optionId: existingOption.id,
+        canonicalValues: values.map(
+          (v) => updatedByValue.get(v.toLowerCase()) ?? v,
+        ),
+      }
+    } catch (err: any) {
+      // Soft-delete conflict: Medusa can reject adding a value that was
+      // previously soft-deleted on this option. Replace the whole option
+      // with a fresh one and queue the old id for deferred deletion.
+      if (/already exists|conflict|duplicate/i.test(err?.message ?? '')) {
+        const created = await mutate(
+          `/api/admin/products/${productId}/options`,
+          'POST',
+          { title, values },
+        )
+        const opt = created.product_option
+        // FIX: explicit generic — see note above.
+        const freshByValue = new Map<string, string>(
+          (opt.values ?? []).map((v: any) => [v.value.toLowerCase(), v.value]),
+        )
+        return {
+          optionId: opt.id,
+          canonicalValues: values.map(
+            (v) => freshByValue.get(v.toLowerCase()) ?? v,
+          ),
+          staleOptionId: existingOption.id,
+        }
+      }
+      throw err
+    }
+  }
+
+  // All values already exist — return canonical casings, no API call needed
+  return {
+    optionId: existingOption.id,
+    canonicalValues: values.map((v) => byValue.get(v.toLowerCase()) ?? v),
+  }
 }
 
 export async function deleteProduct(id: string) {

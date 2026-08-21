@@ -9,6 +9,13 @@ export const SITE_OG_IMAGE = '/icons/og-image.jpg'
 export const CONTACT_EMAIL = 'smashracketpro@gmail.com'
 export const CONTACT_PHONE = '0161 536 3594'
 
+// Short brand wordmark used on the POS receipt header — deliberately
+// separate from SITE_NAME ('Smash Pro'), which is the fuller site/legal
+// name used everywhere else (page titles, SEO, emails).
+export const STORE_DISPLAY_NAME = 'SMASH'
+export const STORE_ADDRESS_LINE1 = '112A Hulme High Street'
+export const STORE_ADDRESS_LINE2 = 'Manchester, England M15 5JP'
+
 // Handle of the gift card product created in Medusa Admin (variants are
 // the denominations: £10/£25/£50/etc). Gift cards are digital/emailed —
 // they should never trigger a shipping charge or count toward the

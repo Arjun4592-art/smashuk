@@ -1822,7 +1822,7 @@ export default function AddProductPage() {
                       </div>
                     )}
                     {crossSellResults.length > 0 && (
-                      <div className='absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#E1E3E5] rounded-lg shadow-lg overflow-hidden'>
+                      <div className='absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#E1E3E5] rounded-lg shadow-lg max-h-64 overflow-y-auto'>
                         {crossSellResults.map((p) => (
                           <button
                             key={p.id}

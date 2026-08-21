@@ -61,6 +61,15 @@ export interface CartDisplayItem {
   sku: string
   stock: number
   category: string
+  // Variant option value shown under the item name on the receipt, e.g.
+  // "medium" for a size variant. Undefined for single-variant products.
+  variantTitle?: string
+  // Pre-discount unit price — when set and higher than `price`, the
+  // receipt shows it struck through (e.g. a product on sale).
+  originalPrice?: number
+  // Per-item discount amount (currently unused by the POS UI — nothing
+  // sets it yet — but rendered on the receipt if a future feature does).
+  discount?: number
 }
 
 // ─── Raw Medusa product (as it comes from the Medusa API) ──────────────────────
@@ -147,7 +156,11 @@ export interface Product {
   // another product id plus the discount % to apply when both are bought
   // together. Resolved to full Product objects for display in
   // app/(website)/shop/[slug]/page.tsx via getProductsByIds().
-  crossSells?: { productId: string; productTitle: string; discountPct: number }[]
+  crossSells?: {
+    productId: string
+    productTitle: string
+    discountPct: number
+  }[]
 }
 
 // A cross-sell product resolved to its full Product data (see

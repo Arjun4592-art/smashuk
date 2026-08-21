@@ -313,8 +313,17 @@ export default function CartPage() {
                           </p>
                         )
                       )}
-                      {item.product.originalPrice &&
-                      item.product.originalPrice > item.product.price ? (
+                      {item.discount ? (
+                        <p className='text-sm font-lato mt-1.5'>
+                          <span className='text-[#E8553A] font-bold'>
+                            {formatCurrency(item.product.price - item.discount)}
+                          </span>{' '}
+                          <span className='text-gray-400 line-through'>
+                            {formatCurrency(item.product.price)}
+                          </span>
+                        </p>
+                      ) : item.product.originalPrice &&
+                        item.product.originalPrice > item.product.price ? (
                         <p className='text-sm font-lato mt-1.5'>
                           <span className='text-[#E8553A] font-bold'>
                             {formatCurrency(item.product.price)}
@@ -375,7 +384,10 @@ export default function CartPage() {
                   {/* Line total */}
                   <div className='sm:w-24 sm:text-right'>
                     <span className='font-montserrat font-black text-[#0A1F44] text-base'>
-                      {formatCurrency(item.product.price * item.quantity)}
+                      {formatCurrency(
+                        (item.product.price - (item.discount ?? 0)) *
+                          item.quantity,
+                      )}
                     </span>
                   </div>
                 </div>

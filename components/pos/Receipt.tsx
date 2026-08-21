@@ -1,5 +1,25 @@
-import { CURRENCY_SYMBOL, SITE_NAME } from '@/lib/constants'
+import {
+  CURRENCY_SYMBOL,
+  STORE_DISPLAY_NAME,
+  STORE_ADDRESS_LINE1,
+  STORE_ADDRESS_LINE2,
+  CONTACT_PHONE,
+  SITE_URL,
+  VAT_RATE,
+} from '@/lib/constants'
 import type { CartDisplayItem } from '@/types'
+
+interface ShippingAddress {
+  first_name: string
+  last_name: string
+  address_1: string
+  address_2: string
+  city: string
+  province: string
+  postal_code: string
+  country_code: string
+  phone: string
+}
 
 interface Props {
   orderId: string
@@ -11,19 +31,37 @@ interface Props {
   payMethod: string
   splitPayments?: { method: string; amount: number }[] | null
   cashier: string
+  // Order-level discount source — lets the receipt label the discount row
+  // with the coupon name (e.g. "sale") instead of a generic "Discount".
+  couponCode?: string | null
+  // Gift card redeemed against this sale (a tender, not a subtotal
+  // discount — shown in the payment section with a masked code).
+  giftCardCode?: string | null
+  giftCardAmount?: number
+  fulfillmentType?: 'pickup' | 'ship'
+  shippingAddress?: ShippingAddress | null
+  orderNote?: string
   onNewSale: () => void
   onPrint: () => void
   onEmail: () => void
 }
 
 const fmt = (n: number) =>
-  CURRENCY_SYMBOL + Math.round(n).toLocaleString('en-GB')
+  CURRENCY_SYMBOL + (Math.round(n * 100) / 100).toFixed(2)
 
 const PAY_LABELS: Record<string, string> = {
   cash: 'Cash',
   card: 'Card',
   upi: 'UPI',
   split: 'Split payment',
+}
+
+// Cash sales are collected rounded up to the nearest whole pound (no 1p/2p
+// coins handled at the till) — the few pence difference is "cash rounding",
+// refunded as part of the change. Card/split aren't rounded since the exact
+// amount is charged electronically.
+function cashRounding(total: number) {
+  return Math.ceil(total) - total
 }
 
 export default function Receipt({
@@ -36,6 +74,12 @@ export default function Receipt({
   payMethod,
   splitPayments,
   cashier,
+  couponCode,
+  giftCardCode,
+  giftCardAmount = 0,
+  fulfillmentType,
+  shippingAddress,
+  orderNote,
   onNewSale,
   onPrint,
   onEmail,
@@ -50,7 +94,9 @@ export default function Receipt({
     hour: '2-digit',
     minute: '2-digit',
   })
-  const change = payMethod === 'cash' ? Math.ceil(total) - total : 0
+  const rounding = payMethod === 'cash' ? cashRounding(total) : 0
+  const adjustedTotal = total + rounding
+  const change = payMethod === 'cash' ? rounding : 0
 
   return (
     <div
@@ -133,8 +179,17 @@ export default function Receipt({
             payMethod={payMethod}
             splitPayments={splitPayments}
             cashier={cashier}
+            couponCode={couponCode}
+            giftCardCode={giftCardCode}
+            giftCardAmount={giftCardAmount}
+            fulfillmentType={fulfillmentType}
+            shippingAddress={shippingAddress}
+            orderNote={orderNote}
             dateStr={dateStr}
             timeStr={timeStr}
+            rounding={rounding}
+            adjustedTotal={adjustedTotal}
+            change={change}
           />
         </div>
 
@@ -207,8 +262,17 @@ export default function Receipt({
           payMethod={payMethod}
           splitPayments={splitPayments}
           cashier={cashier}
+          couponCode={couponCode}
+          giftCardCode={giftCardCode}
+          giftCardAmount={giftCardAmount}
+          fulfillmentType={fulfillmentType}
+          shippingAddress={shippingAddress}
+          orderNote={orderNote}
           dateStr={dateStr}
           timeStr={timeStr}
+          rounding={rounding}
+          adjustedTotal={adjustedTotal}
+          change={change}
           printMode
         />
       </div>
@@ -256,8 +320,17 @@ function ReceiptBody({
   payMethod,
   splitPayments,
   cashier,
+  couponCode,
+  giftCardCode,
+  giftCardAmount = 0,
+  fulfillmentType,
+  shippingAddress,
+  orderNote,
   dateStr,
   timeStr,
+  rounding,
+  adjustedTotal,
+  change,
   printMode = false,
 }: {
   orderId: string
@@ -269,17 +342,36 @@ function ReceiptBody({
   payMethod: string
   splitPayments?: { method: string; amount: number }[] | null
   cashier: string
+  couponCode?: string | null
+  giftCardCode?: string | null
+  giftCardAmount?: number
+  fulfillmentType?: 'pickup' | 'ship'
+  shippingAddress?: ShippingAddress | null
+  orderNote?: string
   dateStr: string
   timeStr: string
+  rounding: number
+  adjustedTotal: number
+  change: number
   printMode?: boolean
 }) {
+  const discountLabel = couponCode ? couponCode : 'Discount'
+  const taxable = Math.max(0, subtotal - discountAmount)
+  const vatPct = Math.round(VAT_RATE * 100)
+  const maskedGiftCard = giftCardCode
+    ? `**** **** ${giftCardCode.slice(-4)}`
+    : ''
+  const showShipTo = fulfillmentType === 'ship' && !!shippingAddress?.address_1
+  const trackingUrl = `${SITE_URL}/orders/${encodeURIComponent(orderId)}`
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=0&data=${encodeURIComponent(trackingUrl)}`
+
   if (printMode) {
-    // ── Thermal receipt layout: monospace, dashed separators, 80mm ──────────
+    // ── Thermal receipt layout: 80mm, matches the reference design ──────
     return (
       <div
         style={{
-          fontFamily: "'Courier New', Courier, monospace",
-          fontSize: '12px',
+          fontFamily: "'Helvetica Neue', Arial, sans-serif",
+          fontSize: '11px',
           color: '#000',
           width: '80mm',
           padding: '4mm',
@@ -287,58 +379,89 @@ function ReceiptBody({
         }}
       >
         {/* Store header */}
-        <div style={{ textAlign: 'center', marginBottom: '3mm' }}>
+        <div style={{ textAlign: 'center', marginBottom: '2mm' }}>
           <div
-            style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '1px' }}
+            style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '1px' }}
           >
-            {SITE_NAME}
+            {STORE_DISPLAY_NAME}
           </div>
-          <div style={{ fontSize: '10px', marginTop: '1mm' }}>Tax Invoice</div>
-          <div style={{ fontSize: '10px', marginTop: '1mm' }}>
-            {dateStr} &nbsp;·&nbsp; {timeStr}
-          </div>
-          <div style={{ fontSize: '10px' }}>
-            Order: {orderId} &nbsp;·&nbsp; Staff: {cashier}
+          <div style={{ fontSize: '10px', marginTop: '2mm', lineHeight: 1.5 }}>
+            <div>{STORE_ADDRESS_LINE1}</div>
+            <div>{STORE_ADDRESS_LINE2}</div>
+            <div style={{ marginTop: '1mm' }}>{CONTACT_PHONE}</div>
           </div>
         </div>
 
-        <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
-
-        {/* Items header */}
         <div
           style={{
-            display: 'flex',
-            fontSize: '10px',
+            textAlign: 'center',
+            fontSize: '12px',
             fontWeight: 700,
-            marginBottom: '1mm',
+            letterSpacing: '2px',
+            margin: '3mm 0 2mm',
           }}
         >
-          <span style={{ flex: 1 }}>ITEM</span>
-          <span style={{ width: '20mm', textAlign: 'center' }}>QTY</span>
-          <span style={{ width: '22mm', textAlign: 'right' }}>AMOUNT</span>
+          SALE
         </div>
 
-        <div style={{ borderTop: '1px dashed #000', marginBottom: '1mm' }} />
+        <div style={{ borderTop: '1px solid #000', margin: '2mm 0' }} />
 
         {/* Items */}
-        {items.map((item) => (
-          <div key={item.id} style={{ marginBottom: '1.5mm' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600 }}>{item.name}</div>
-            <div style={{ display: 'flex', fontSize: '11px' }}>
-              <span style={{ flex: 1, color: '#555' }}>
-                {fmt(item.price)} x {item.quantity}
-              </span>
-              <span style={{ width: '20mm', textAlign: 'center' }}>
-                {item.quantity}
-              </span>
-              <span
-                style={{ width: '22mm', textAlign: 'right', fontWeight: 600 }}
+        {items.map((item) => {
+          const hasCompareAt =
+            !!item.originalPrice && item.originalPrice > item.price
+          return (
+            <div key={item.id} style={{ marginBottom: '2.5mm' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: 700, fontSize: '11px' }}>
+                  {item.name}
+                </span>
+                <span style={{ fontWeight: 700, fontSize: '11px' }}>
+                  {fmt(item.price * item.quantity - (item.discount ?? 0))}
+                </span>
+              </div>
+              {item.variantTitle && (
+                <div style={{ fontSize: '10px', color: '#555' }}>
+                  {item.variantTitle}
+                </div>
+              )}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: '10px',
+                  color: '#555',
+                }}
               >
-                {fmt(item.price * item.quantity)}
-              </span>
+                <span>
+                  {item.quantity} x {fmt(item.price)}
+                  {hasCompareAt && (
+                    <span
+                      style={{
+                        textDecoration: 'line-through',
+                        marginLeft: '2mm',
+                        color: '#999',
+                      }}
+                    >
+                      {fmt(item.originalPrice!)}
+                    </span>
+                  )}
+                </span>
+              </div>
+              {!!item.discount && item.discount > 0 && (
+                <div
+                  style={{
+                    fontSize: '10px',
+                    color: '#555',
+                    fontStyle: 'italic',
+                  }}
+                >
+                  Discount (-{fmt(item.discount)})
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          )
+        })}
 
         <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
 
@@ -346,34 +469,68 @@ function ReceiptBody({
         <div style={{ fontSize: '11px' }}>
           <Row label='Subtotal' value={fmt(subtotal)} />
           {discountAmount > 0 && (
-            // BUG FIX: `discount` here is `customDiscount`, a currency
-            // AMOUNT (which may also combine a coupon), not a percentage —
-            // labelling it "(X%)" was misleading. Keep the receipt to the
-            // one unambiguous number: the £ amount actually taken off.
-            <Row label='Discount' value={`-${fmt(discountAmount)}`} />
+            <Row
+              label={discountLabel}
+              value={`-${fmt(discountAmount)}`}
+              green
+            />
           )}
-          <Row label='VAT (20%)' value={fmt(gst)} />
         </div>
 
         <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
 
-        {/* Grand total */}
+        {/* Tax table */}
+        <div style={{ fontSize: '9.5px' }}>
+          <div
+            style={{ display: 'flex', fontWeight: 700, marginBottom: '1mm' }}
+          >
+            <span style={{ flex: 1.4 }}>Tax</span>
+            <span style={{ flex: 1, textAlign: 'right' }}>Base</span>
+            <span style={{ flex: 1, textAlign: 'right' }}>Amount</span>
+            <span style={{ flex: 1, textAlign: 'right' }}>Total</span>
+          </div>
+          <div style={{ display: 'flex' }}>
+            <span style={{ flex: 1.4 }}>VAT ({vatPct}%)</span>
+            <span style={{ flex: 1, textAlign: 'right' }}>{fmt(taxable)}</span>
+            <span style={{ flex: 1, textAlign: 'right' }}>{fmt(gst)}</span>
+            <span style={{ flex: 1, textAlign: 'right' }}>{fmt(total)}</span>
+          </div>
+        </div>
+
+        <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
+
+        {/* Order total — boxed */}
         <div
           style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            fontSize: '14px',
-            fontWeight: 700,
-            marginBottom: '2mm',
+            border: '1px solid #000',
+            borderRadius: '2mm',
+            padding: '2mm 3mm',
+            textAlign: 'center',
+            margin: '2mm 0 3mm',
           }}
         >
-          <span>TOTAL</span>
-          <span>{fmt(total)}</span>
+          <div style={{ fontSize: '9px', letterSpacing: '1px' }}>
+            ORDER TOTAL
+          </div>
+          <div style={{ fontSize: '17px', fontWeight: 800 }}>{fmt(total)}</div>
         </div>
 
-        {/* Payment method / split breakdown */}
-        <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
+        {/* Payment */}
         <div style={{ fontSize: '11px' }}>
+          {giftCardAmount > 0 && (
+            <Row
+              label={`Gift card (${maskedGiftCard})`}
+              value={`-${fmt(giftCardAmount)}`}
+              green
+            />
+          )}
+          {payMethod === 'cash' && rounding > 0 && (
+            <>
+              <Row label='Cash rounding' value={fmt(rounding)} />
+              <Row label='Adjusted total' value={fmt(adjustedTotal)} />
+            </>
+          )}
+          <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
           {payMethod === 'split' &&
           splitPayments &&
           splitPayments.length > 0 ? (
@@ -389,6 +546,13 @@ function ReceiptBody({
                 />
               ))}
             </>
+          ) : payMethod === 'cash' ? (
+            <>
+              <div style={{ fontWeight: 700 }}>
+                <Row label='Cash · PAID' value={fmt(adjustedTotal)} />
+              </div>
+              {change > 0 && <Row label='Change due' value={fmt(change)} />}
+            </>
           ) : (
             <Row
               label='Payment mode'
@@ -397,20 +561,83 @@ function ReceiptBody({
           )}
         </div>
 
-        <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
+        {/* Ship to */}
+        {showShipTo && shippingAddress && (
+          <>
+            <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
+            <div style={{ fontSize: '11px' }}>
+              <div style={{ fontWeight: 700, marginBottom: '1mm' }}>
+                Ship to:
+              </div>
+              <div style={{ lineHeight: 1.6 }}>
+                <div>
+                  {shippingAddress.first_name} {shippingAddress.last_name}
+                </div>
+                <div>{shippingAddress.address_1}</div>
+                {shippingAddress.address_2 && (
+                  <div>{shippingAddress.address_2}</div>
+                )}
+                <div>
+                  {shippingAddress.city}
+                  {shippingAddress.province
+                    ? `, ${shippingAddress.province}`
+                    : ''}{' '}
+                  {shippingAddress.postal_code}
+                </div>
+                <div>{shippingAddress.country_code?.toUpperCase()}</div>
+                {shippingAddress.phone && <div>{shippingAddress.phone}</div>}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Order note */}
+        {orderNote && (
+          <>
+            <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
+            <div style={{ fontSize: '11px' }}>
+              <div style={{ fontWeight: 700, marginBottom: '1mm' }}>
+                Order Note:
+              </div>
+              <div>{orderNote}</div>
+            </div>
+          </>
+        )}
+
+        <div
+          style={{
+            borderTop: '1px dashed #000',
+            margin: '3mm 0 2mm',
+          }}
+        />
 
         {/* Footer */}
         <div
           style={{
             textAlign: 'center',
             fontSize: '10px',
-            marginTop: '3mm',
-            lineHeight: 1.6,
+            lineHeight: 1.7,
           }}
         >
-          <div>Thank you for shopping with us!</div>
-          <div>Goods once sold will not be taken back</div>
-          <div style={{ marginTop: '2mm' }}>* * *</div>
+          <div>
+            {dateStr}, {timeStr}
+          </div>
+          <div>Receipt: {orderId}</div>
+          <div style={{ marginTop: '1mm' }}>Staff: {cashier}</div>
+          <div style={{ marginTop: '2mm', fontWeight: 600 }}>
+            Thank you for shopping with us!
+          </div>
+
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={qrSrc}
+            alt='Order tracking QR code'
+            width={90}
+            height={90}
+            style={{ margin: '3mm auto 1mm', display: 'block' }}
+          />
+          <div>Track Your Order & Join Our</div>
+          <div>Loyalty Programme Here</div>
         </div>
       </div>
     )
@@ -425,7 +652,7 @@ function ReceiptBody({
         style={{ borderBottom: '1px dashed #E1E3E5' }}
       >
         <p className='text-sm font-semibold' style={{ color: '#202223' }}>
-          {SITE_NAME}
+          {STORE_DISPLAY_NAME}
         </p>
         <p className='text-xs mt-0.5' style={{ color: '#8C9196' }}>
           {dateStr} · {timeStr}
@@ -441,18 +668,21 @@ function ReceiptBody({
         style={{ borderBottom: '1px dashed #E1E3E5' }}
       >
         {items.map((item) => (
-          <div
-            key={item.id}
-            className='flex justify-between text-xs'
-            style={{ color: '#6D7175' }}
-          >
-            <span className='flex-1 truncate pr-2'>
-              {item.name}{' '}
-              <span style={{ color: '#8C9196' }}>×{item.quantity}</span>
-            </span>
-            <span className='flex-shrink-0'>
-              {fmt(item.price * item.quantity)}
-            </span>
+          <div key={item.id} className='text-xs' style={{ color: '#6D7175' }}>
+            <div className='flex justify-between'>
+              <span className='flex-1 truncate pr-2'>
+                {item.name}{' '}
+                <span style={{ color: '#8C9196' }}>×{item.quantity}</span>
+              </span>
+              <span className='flex-shrink-0'>
+                {fmt(item.price * item.quantity - (item.discount ?? 0))}
+              </span>
+            </div>
+            {item.variantTitle && (
+              <div className='text-[11px]' style={{ color: '#8C9196' }}>
+                {item.variantTitle}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -471,17 +701,24 @@ function ReceiptBody({
             className='flex justify-between text-xs'
             style={{ color: '#008060' }}
           >
-            {/* BUG FIX: same issue as the printable receipt above —
-                `discount` is a currency amount, not a percentage. */}
-            <span>Discount</span>
+            <span>{discountLabel}</span>
             <span>-{fmt(discountAmount)}</span>
+          </div>
+        )}
+        {giftCardAmount > 0 && (
+          <div
+            className='flex justify-between text-xs'
+            style={{ color: '#008060' }}
+          >
+            <span>Gift card ({maskedGiftCard})</span>
+            <span>-{fmt(giftCardAmount)}</span>
           </div>
         )}
         <div
           className='flex justify-between text-xs'
           style={{ color: '#6D7175' }}
         >
-          <span>VAT (20%)</span>
+          <span>VAT ({vatPct}%)</span>
           <span>{fmt(gst)}</span>
         </div>
         <div
@@ -495,23 +732,71 @@ function ReceiptBody({
             {fmt(total)}
           </span>
         </div>
+        {payMethod === 'cash' && rounding > 0 && (
+          <div
+            className='flex justify-between text-xs'
+            style={{ color: '#8C9196' }}
+          >
+            <span>Cash rounding</span>
+            <span>{fmt(rounding)}</span>
+          </div>
+        )}
       </div>
 
+      {showShipTo && shippingAddress && (
+        <div
+          className='mt-3 pt-3 text-xs'
+          style={{ borderTop: '1px dashed #E1E3E5', color: '#6D7175' }}
+        >
+          <p className='font-semibold mb-1' style={{ color: '#202223' }}>
+            Ship to
+          </p>
+          <p>
+            {shippingAddress.first_name} {shippingAddress.last_name}
+          </p>
+          <p>{shippingAddress.address_1}</p>
+          <p>
+            {shippingAddress.city} {shippingAddress.postal_code}
+          </p>
+        </div>
+      )}
+
+      {orderNote && (
+        <div
+          className='mt-3 pt-3 text-xs'
+          style={{ borderTop: '1px dashed #E1E3E5', color: '#6D7175' }}
+        >
+          <p className='font-semibold mb-1' style={{ color: '#202223' }}>
+            Order note
+          </p>
+          <p>{orderNote}</p>
+        </div>
+      )}
+
       <p className='text-center text-xs mt-4' style={{ color: '#8C9196' }}>
-        Thank you for shopping at {SITE_NAME}!
+        Thank you for shopping with {STORE_DISPLAY_NAME}!
       </p>
     </>
   )
 }
 
 // Small helper for print rows
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  value,
+  green = false,
+}: {
+  label: string
+  value: string
+  green?: boolean
+}) {
   return (
     <div
       style={{
         display: 'flex',
         justifyContent: 'space-between',
         marginBottom: '1mm',
+        color: green ? '#008060' : undefined,
       }}
     >
       <span>{label}</span>

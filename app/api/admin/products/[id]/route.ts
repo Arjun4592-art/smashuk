@@ -38,8 +38,13 @@ export async function GET(
     // options with no id, which Medusa treats as "create a new option" —
     // failing with an already-exists error since one with that title was
     // already on the product.
+    // Also added `+variants.metadata` explicitly — per-variant image
+    // picks are stored there (variant_images, see the images BUG FIX
+    // below) since Medusa's variant DTO here rejects a real `images`
+    // array, and without this the field isn't guaranteed to come back on
+    // every fetch.
     const res = await fetch(
-      `${MEDUSA_URL}/admin/products/${id}?fields=+metadata,*variants,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels,*variants.options,*variants.options.option,*variants.images,*categories,*images,*options,*options.values,*sales_channels`,
+      `${MEDUSA_URL}/admin/products/${id}?fields=+metadata,*variants,+variants.metadata,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels,*variants.options,*variants.options.option,*variants.images,*categories,*images,*options,*options.values,*sales_channels`,
       {
         headers: { Authorization: authorization },
       },

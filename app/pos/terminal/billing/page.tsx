@@ -250,6 +250,9 @@ export default function BillingPage() {
     sku: i.product.sku ?? '',
     stock: i.product.stock ?? 0,
     category: i.product.categoryId ?? '',
+    variantTitle: i.variant?.title || undefined,
+    originalPrice: i.product.originalPrice,
+    discount: i.discount,
   }))
 
   const handleIncrease = useCallback(
@@ -460,6 +463,12 @@ export default function BillingPage() {
           payMethod={paymentMethod}
           splitPayments={splitPayments}
           cashier={user?.name || 'Staff'}
+          couponCode={couponCode}
+          giftCardCode={giftCardCode}
+          giftCardAmount={giftCardAmount}
+          fulfillmentType={fulfillmentType}
+          shippingAddress={shippingAddress}
+          orderNote={orderNote}
           onNewSale={handleNewSale}
           onPrint={() => window.print()}
           onEmail={() => setShowEmailReceipt(true)}
