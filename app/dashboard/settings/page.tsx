@@ -634,14 +634,14 @@ export default function SettingsPage() {
                   label='Store Name'
                   value={store.name}
                   onChange={(v) => setStore((s) => ({ ...s, name: v }))}
-                  placeholder='Smash Pro'
+                  placeholder='Smash Racket Pro'
                 />
                 <InputField
                   label='Store Email'
                   value={store.email}
                   onChange={(v) => setStore((s) => ({ ...s, email: v }))}
                   type='email'
-                  placeholder='admin@smashpro.co.uk'
+                  placeholder='Sales@smashuk.co'
                   icon={Icons.mail}
                 />
               </div>

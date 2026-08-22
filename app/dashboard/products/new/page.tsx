@@ -51,7 +51,7 @@ function buildAutoMetaDescription(
     `Buy ${name}`,
     brand ? `by ${brand}` : '',
     sport ? `for ${sport}` : '',
-    'online at SmashUK. Fast UK delivery, genuine products, easy returns.',
+    'online at Smash Racket Pro. Fast UK delivery, genuine products, easy returns.',
   ].filter(Boolean)
   const fallback = bits.join(' ')
   return fallback.length <= 155

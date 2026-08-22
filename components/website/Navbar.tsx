@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useCartStore } from '@/store/cartStore'
 import {
   SITE_NAME,
+  SITE_LOGO,
   FREE_SHIPPING_THRESHOLD,
   CONTACT_PHONE,
   CONTACT_EMAIL,
@@ -203,20 +204,13 @@ export default function Navbar() {
         <nav className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
           <div className='flex items-center justify-between h-16'>
             {/* Logo */}
-            <Link href='/' className='flex items-center gap-2.5 shrink-0 group'>
-              <div className='w-9 h-9 bg-[#E8553A] rounded-xl flex items-center justify-center shadow-md group-hover:scale-105 transition-transform'>
-                <span className='text-white font-montserrat font-black text-base'>
-                  S
-                </span>
-              </div>
-              <div className='flex flex-col leading-none'>
-                <span className='font-montserrat font-black text-xl text-[#0A1F44] tracking-tight'>
-                  {SITE_NAME}
-                </span>
-                <span className='text-[10px] text-[#E8553A] font-lato font-medium tracking-widest uppercase'>
-                  Racket Sports Store
-                </span>
-              </div>
+            <Link href='/' className='flex items-center gap-2 shrink-0 group'>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={SITE_LOGO}
+                alt={SITE_NAME}
+                className='h-9 w-auto group-hover:scale-105 transition-transform'
+              />
             </Link>
 
             {/* Desktop Nav + Actions — grouped together on the right side.

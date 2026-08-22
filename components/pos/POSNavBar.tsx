@@ -14,6 +14,7 @@ import {
   BoltIcon,
 } from '@/components/ui/Icons'
 import POSProfileModal from '@/components/pos/POSProfileModal'
+import { SITE_LOGO, SITE_NAME } from '@/lib/constants'
 
 type Tab =
   | 'billing'
@@ -279,21 +280,13 @@ export default function POSNavBar({
         <div className='flex items-center gap-3 h-full'>
           {/* Logo */}
           <div className='flex items-center gap-2 shrink-0'>
-            <svg width='22' height='22' viewBox='0 0 28 28' fill='none'>
-              <rect width='28' height='28' rx='6' fill='#008060' />
-              <path
-                d='M8 14.5L12 18.5L20 10'
-                stroke='white'
-                strokeWidth='2.5'
-                strokeLinecap='round'
-                strokeLinejoin='round'
-              />
-            </svg>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={SITE_LOGO} alt={SITE_NAME} className='h-5 w-auto' />
             <span
               className='text-sm font-semibold hidden sm:block'
               style={{ color: '#202223' }}
             >
-              SmashUK POS
+              POS
             </span>
           </div>
 

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSidebar } from '../../context/SidebarContext'
 import { useAuthStore } from '@/store/authStore'
+import { SITE_NAME, SITE_LOGO, SITE_ICON } from '@/lib/constants'
 
 interface NavChild {
   label: string
@@ -615,19 +616,17 @@ export default function Sidebar() {
         <>
           <Link
             href='/dashboard'
-            className='flex items-center gap-2.5 no-underline min-w-0'
+            className='flex items-center gap-2 no-underline min-w-0'
           >
-            <div className='w-8 h-8 bg-[#008060] rounded-lg flex items-center justify-center text-white text-[11px] font-bold tracking-wider shrink-0'>
-              AS
-            </div>
-            <div className='flex flex-col leading-none min-w-0'>
-              <span className='font-sora text-[13px] font-semibold text-[#202223] truncate'>
-                Smash Pro
-              </span>
-              <span className='text-[10px] text-[#8C9196] mt-0.5 capitalize'>
-                {user?.role ?? 'Admin'} Panel
-              </span>
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={SITE_LOGO}
+              alt={SITE_NAME}
+              className='h-7 w-auto shrink-0'
+            />
+            <span className='text-[10px] text-[#8C9196] mt-0.5 capitalize truncate'>
+              {user?.role ?? 'Admin'} Panel
+            </span>
           </Link>
           <button
             onClick={() => setCollapsed(true)}
@@ -639,9 +638,8 @@ export default function Sidebar() {
       ) : (
         <div className='flex flex-col items-center w-full gap-1'>
           <Link href='/dashboard' className='no-underline'>
-            <div className='w-8 h-8 bg-[#008060] rounded-lg flex items-center justify-center text-white text-[11px] font-bold'>
-              AS
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={SITE_ICON} alt={SITE_NAME} className='w-8 h-8' />
           </Link>
           <button
             onClick={() => setCollapsed(false)}
@@ -705,20 +703,14 @@ export default function Sidebar() {
         <div className='flex items-center justify-between px-4 py-3 border-b border-[#E1E3E5] h-14 shrink-0'>
           <Link
             href='/dashboard'
-            className='flex items-center gap-2.5 no-underline'
+            className='flex items-center gap-2 no-underline'
             onClick={closeMobileSidebar}
           >
-            <div className='w-8 h-8 bg-[#008060] rounded-lg flex items-center justify-center text-white text-[11px] font-bold'>
-              AS
-            </div>
-            <div className='flex flex-col leading-none'>
-              <span className='font-sora text-[13px] font-semibold text-[#202223]'>
-                Smash Pro
-              </span>
-              <span className='text-[10px] text-[#8C9196] mt-0.5'>
-                Admin Panel
-              </span>
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={SITE_LOGO} alt={SITE_NAME} className='h-7 w-auto' />
+            <span className='text-[10px] text-[#8C9196] mt-0.5'>
+              Admin Panel
+            </span>
           </Link>
           <button
             onClick={closeMobileSidebar}

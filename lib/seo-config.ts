@@ -20,43 +20,46 @@ import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 
 export const DEFAULT_SEO: Record<string, any> = {
   home: {
-    metaTitle: 'Smash Pro — Premium Sports Equipment UK',
+    metaTitle: 'Smash Racket Pro — Premium Sports Equipment UK',
     metaDescription:
       'Shop premium sports equipment for badminton, squash, tennis, padel and more. Free UK delivery over £50.',
     metaKeywords:
-      'sports equipment uk, badminton rackets, squash rackets, sports shop uk, smash pro',
+      'sports equipment uk, badminton rackets, squash rackets, sports shop uk, smash racket pro',
     ogImage: '',
     canonical: 'https://smashpro.co.uk',
     noIndex: false,
   },
   shop: {
-    metaTitle: 'Buy Sports Equipment Online — Smash Pro UK',
+    metaTitle: 'Buy Sports Equipment Online — Smash Racket Pro UK',
     metaDescription:
       'Browse premium sports products across all categories. Best prices with free delivery over £50.',
-    metaKeywords: 'buy sports online uk, sports equipment shop, smash pro',
+    metaKeywords:
+      'buy sports online uk, sports equipment shop, smash racket pro',
     ogImage: '',
     canonical: 'https://smashpro.co.uk/shop',
     noIndex: false,
   },
   about: {
-    metaTitle: 'About Us — Smash Pro UK',
+    metaTitle: 'About Us — Smash Racket Pro UK',
     metaDescription:
-      'Smash Pro is your trusted UK sports equipment store. We stock premium gear for all racket sports.',
-    metaKeywords: 'smash pro about, uk sports store',
+      'Smash Racket Pro is your trusted UK sports equipment store. We stock premium gear for all racket sports.',
+    metaKeywords: 'smash racket pro about, uk sports store',
     ogImage: '',
     canonical: 'https://smashpro.co.uk/about',
     noIndex: false,
   },
   contact: {
-    metaTitle: 'Contact Us — Smash Pro UK',
-    metaDescription: 'Get in touch with Smash Pro for orders, returns, and enquiries.',
-    metaKeywords: 'smash pro contact, sports equipment enquiry',
+    metaTitle: 'Contact Us — Smash Racket Pro UK',
+    metaDescription:
+      'Get in touch with Smash Racket Pro for orders, returns, and enquiries.',
+    metaKeywords: 'smash racket pro contact, sports equipment enquiry',
     ogImage: '',
     canonical: 'https://smashpro.co.uk/contact',
     noIndex: false,
   },
   'local-store': {
-    metaTitle: 'Manchester Racket Store — Restringing, Demo & Advice | Smash Pro',
+    metaTitle:
+      'Manchester Racket Store — Restringing, Demo & Advice | Smash Racket Pro',
     metaDescription:
       'Visit our Manchester racket specialist store for badminton, tennis, squash and padel. Same/next-day racket restringing, free expert advice from club-level players, and a racket demo service so you can try before you buy.',
     metaKeywords:
@@ -77,7 +80,9 @@ export async function readSeoConfig(): Promise<Record<string, any>> {
     return cached
   }
   try {
-    const res = await medusaServiceFetch('/admin/stores?limit=1&fields=id,metadata')
+    const res = await medusaServiceFetch(
+      '/admin/stores?limit=1&fields=id,metadata',
+    )
     if (!res.ok) throw new Error(`Medusa stores error: ${res.status}`)
     const { stores } = await res.json()
     const config = stores?.[0]?.metadata?.seoConfig ?? DEFAULT_SEO

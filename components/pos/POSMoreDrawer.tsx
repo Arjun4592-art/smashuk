@@ -230,7 +230,7 @@ export default function POSMoreDrawer({
                 {user?.name || 'Staff'}
               </p>
               <p className='text-sm mt-0.5' style={{ color: '#8C9196' }}>
-                SmashUK · SmashUK Store
+                Smash Racket Pro Store
               </p>
               <span
                 className='inline-block mt-2 text-xs font-semibold px-2.5 py-0.5 rounded-full'
@@ -267,24 +267,25 @@ export default function POSMoreDrawer({
         >
           {MORE_ITEMS.filter((item) => !item.hidden).map(
             ({ id, label, Icon, action }, i, arr) => (
-            <button
-              key={id}
-              onClick={action}
-              className='w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-[#F6F6F7] transition-colors active:bg-[#EFEFF4]'
-              style={{
-                borderBottom:
-                  i < arr.length - 1 ? '0.5px solid #E5E5EA' : 'none',
-              }}
-            >
-              <span style={{ color: '#000' }}>
-                <Icon />
-              </span>
-              <span className='flex-1 text-base' style={{ color: '#000' }}>
-                {label}
-              </span>
-              <ChevronRightIcon size={16} className='text-[#C7C7CC]' />
-            </button>
-          ))}
+              <button
+                key={id}
+                onClick={action}
+                className='w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-[#F6F6F7] transition-colors active:bg-[#EFEFF4]'
+                style={{
+                  borderBottom:
+                    i < arr.length - 1 ? '0.5px solid #E5E5EA' : 'none',
+                }}
+              >
+                <span style={{ color: '#000' }}>
+                  <Icon />
+                </span>
+                <span className='flex-1 text-base' style={{ color: '#000' }}>
+                  {label}
+                </span>
+                <ChevronRightIcon size={16} className='text-[#C7C7CC]' />
+              </button>
+            ),
+          )}
         </div>
 
         {/* Sign out */}

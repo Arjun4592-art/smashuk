@@ -14,7 +14,12 @@ import {
   HeadphonesIcon,
   ArrowRightIcon,
 } from '@/components/ui/Icons'
-import { SITE_NAME, SPORTS, FREE_SHIPPING_THRESHOLD } from '@/lib/constants'
+import {
+  SITE_NAME,
+  SITE_LOGO,
+  SPORTS,
+  FREE_SHIPPING_THRESHOLD,
+} from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
 import { getPublicStoreContact } from '@/lib/store-contact'
 import { PAYMENT_METHODS } from '@/components/website/PaymentIcons'
@@ -159,18 +164,9 @@ export default async function Footer() {
               href='/'
               className='flex items-center gap-2.5 mb-5 group w-fit'
             >
-              <div className='w-9 h-9 bg-[#E8553A] rounded-xl flex items-center justify-center shadow-md group-hover:scale-105 transition-transform'>
-                <span className='text-white font-montserrat font-black text-base'>
-                  S
-                </span>
-              </div>
-              <div className='flex flex-col leading-none'>
-                <span className='font-montserrat font-black text-xl text-white tracking-tight'>
-                  {SITE_NAME}
-                </span>
-                <span className='text-[10px] text-[#E8553A] font-lato font-medium tracking-widest uppercase mt-0.5'>
-                  Racket Sports Store
-                </span>
+              <div className='bg-white rounded-lg px-2.5 py-1.5 shadow-md group-hover:scale-105 transition-transform'>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={SITE_LOGO} alt={SITE_NAME} className='h-7 w-auto' />
               </div>
             </Link>
 

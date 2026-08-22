@@ -126,7 +126,9 @@ export default function SettingsPage() {
         if (!res.ok) throw new Error(data.error ?? 'Failed to load staff')
         setStaffList(data.staff ?? [])
       } catch (err: unknown) {
-        setStaffError(err instanceof Error ? err.message : 'Could not load staff')
+        setStaffError(
+          err instanceof Error ? err.message : 'Could not load staff',
+        )
       } finally {
         setStaffLoading(false)
       }
@@ -165,36 +167,33 @@ export default function SettingsPage() {
         <div className='space-y-4'>
           {/* POS Preferences */}
           <SectionCard title='POS Preferences'>
-            {(
-              Object.entries(settings) as [
-                TerminalSettingKey,
-                boolean,
-              ][]
-            ).map(([key, val], i, arr) => (
-              <div
-                key={key}
-                className='flex items-center justify-between px-5 py-3.5'
-                style={{
-                  borderBottom:
-                    i < arr.length - 1 ? '1px solid #F3F4F6' : 'none',
-                }}
-              >
-                <div className='flex items-center gap-3 min-w-0'>
-                  <span className='text-lg shrink-0'>
-                    {SETTING_LABELS[key].icon}
-                  </span>
-                  <div className='min-w-0'>
-                    <p className='text-sm font-medium text-gray-800'>
-                      {SETTING_LABELS[key].label}
-                    </p>
-                    <p className='text-xs text-gray-500 mt-0.5'>
-                      {SETTING_LABELS[key].desc}
-                    </p>
+            {(Object.entries(settings) as [TerminalSettingKey, boolean][]).map(
+              ([key, val], i, arr) => (
+                <div
+                  key={key}
+                  className='flex items-center justify-between px-5 py-3.5'
+                  style={{
+                    borderBottom:
+                      i < arr.length - 1 ? '1px solid #F3F4F6' : 'none',
+                  }}
+                >
+                  <div className='flex items-center gap-3 min-w-0'>
+                    <span className='text-lg shrink-0'>
+                      {SETTING_LABELS[key].icon}
+                    </span>
+                    <div className='min-w-0'>
+                      <p className='text-sm font-medium text-gray-800'>
+                        {SETTING_LABELS[key].label}
+                      </p>
+                      <p className='text-xs text-gray-500 mt-0.5'>
+                        {SETTING_LABELS[key].desc}
+                      </p>
+                    </div>
                   </div>
+                  <Toggle value={val} onChange={() => toggle(key)} />
                 </div>
-                <Toggle value={val} onChange={() => toggle(key)} />
-              </div>
-            ))}
+              ),
+            )}
           </SectionCard>
 
           {/* Local Sales Data */}
@@ -258,7 +257,7 @@ export default function SettingsPage() {
           <SectionCard title='Store information'>
             <div className='p-5 grid grid-cols-2 gap-4'>
               {[
-                { label: 'Store name', value: 'SmashUK' },
+                { label: 'Store name', value: 'Smash Racket Pro' },
                 { label: 'VAT rate', value: `${Math.round(taxRatePercent)}%` },
                 {
                   label: 'Currency',
@@ -342,7 +341,7 @@ export default function SettingsPage() {
           <SectionCard title='About'>
             <div className='px-5 py-4 space-y-3'>
               {[
-                { label: 'Application', value: 'SmashUK POS' },
+                { label: 'Application', value: 'Smash Racket Pro POS' },
                 { label: 'Version', value: '1.0.0' },
                 { label: 'Platform', value: 'Next.js + Medusa v2' },
               ].map(({ label, value }) => (

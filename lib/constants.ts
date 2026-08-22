@@ -1,17 +1,18 @@
 // ─── Site Info ──────────────────────────────────────────────────
-export const SITE_NAME = 'Smash Pro'
+export const SITE_NAME = 'Smash Racket Pro'
 export const SITE_DESCRIPTION =
   'Premium sports equipment for every athlete. Shop football, cricket, basketball, tennis gear and more.'
 export const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? 'https://smash-pro.netlify.app'
 export const SITE_LOGO = '/icons/logo.png'
+export const SITE_ICON = '/icons/icon-192.png'
 export const SITE_OG_IMAGE = '/icons/og-image.jpg'
-export const CONTACT_EMAIL = 'smashracketpro@gmail.com'
+export const CONTACT_EMAIL = 'Sales@smashuk.co'
 export const CONTACT_PHONE = '0161 536 3594'
 
 // Short brand wordmark used on the POS receipt header — deliberately
-// separate from SITE_NAME ('Smash Pro'), which is the fuller site/legal
-// name used everywhere else (page titles, SEO, emails).
+// separate from SITE_NAME ('Smash Racket Pro'), which is the fuller
+// site/legal name used everywhere else (page titles, SEO, emails).
 export const STORE_DISPLAY_NAME = 'SMASH'
 export const STORE_ADDRESS_LINE1 = '112A Hulme High Street'
 export const STORE_ADDRESS_LINE2 = 'Manchester, England M15 5JP'
@@ -194,7 +195,7 @@ export const DEFAULT_SEO = {
     'running shoes',
     'sports shop uk',
     'racket sports store uk',
-    'smash pro',
+    'smash racket pro',
   ],
   ogImage: SITE_OG_IMAGE,
 }

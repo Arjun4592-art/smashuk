@@ -5,6 +5,7 @@ import {
   STORE_ADDRESS_LINE2,
   CONTACT_PHONE,
   SITE_URL,
+  SITE_LOGO,
   VAT_RATE,
 } from '@/lib/constants'
 import type { CartDisplayItem } from '@/types'
@@ -380,11 +381,12 @@ function ReceiptBody({
       >
         {/* Store header */}
         <div style={{ textAlign: 'center', marginBottom: '2mm' }}>
-          <div
-            style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '1px' }}
-          >
-            {STORE_DISPLAY_NAME}
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={SITE_LOGO}
+            alt={STORE_DISPLAY_NAME}
+            style={{ height: '9mm', width: 'auto', margin: '0 auto' }}
+          />
           <div style={{ fontSize: '10px', marginTop: '2mm', lineHeight: 1.5 }}>
             <div>{STORE_ADDRESS_LINE1}</div>
             <div>{STORE_ADDRESS_LINE2}</div>
@@ -651,10 +653,13 @@ function ReceiptBody({
         className='text-center pb-3 mb-3'
         style={{ borderBottom: '1px dashed #E1E3E5' }}
       >
-        <p className='text-sm font-semibold' style={{ color: '#202223' }}>
-          {STORE_DISPLAY_NAME}
-        </p>
-        <p className='text-xs mt-0.5' style={{ color: '#8C9196' }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={SITE_LOGO}
+          alt={STORE_DISPLAY_NAME}
+          className='h-6 w-auto mx-auto'
+        />
+        <p className='text-xs mt-1.5' style={{ color: '#8C9196' }}>
           {dateStr} · {timeStr}
         </p>
         <p className='text-xs mt-0.5' style={{ color: '#8C9196' }}>

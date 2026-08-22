@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
       const clean = (body.description ?? '').replace(/\s+/g, ' ').trim()
       const fallback =
         clean ||
-        `Buy ${body.title ?? 'this product'} online at SmashUK. Fast UK delivery, genuine products, easy returns.`
+        `Buy ${body.title ?? 'this product'} online at Smash Racket Pro. Fast UK delivery, genuine products, easy returns.`
       body.metadata.metaDescription =
         fallback.length <= 155
           ? fallback

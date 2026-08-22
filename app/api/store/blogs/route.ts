@@ -1,5 +1,5 @@
 // app/api/store/blogs/route.ts
-//
+export const dynamic = 'force-dynamic'
 // Public, unauthenticated proxy so the website /blog pages can show real
 // posts written in the dashboard instead of the old hardcoded
 // lib/blog-posts.ts array. Mirrors the pattern used in

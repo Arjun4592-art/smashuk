@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { signIn, useSession } from 'next-auth/react'
 import Link from 'next/link'
 import { Eye, EyeOff } from 'lucide-react'
-import { SITE_NAME } from '@/lib/constants'
+import { SITE_NAME, SITE_LOGO } from '@/lib/constants'
 import { useAuthStore } from '@/store/authStore'
 import { registerCustomer } from '@/lib/api/auth'
 
@@ -74,11 +74,7 @@ export default function RegisterPage() {
     setLoading(true)
 
     try {
-      const user = await registerCustomer(
-        form.name,
-        form.email,
-        form.password,
-      )
+      const user = await registerCustomer(form.name, form.email, form.password)
       login(user)
       router.push('/profile')
     } catch (err: any) {
@@ -125,14 +121,8 @@ export default function RegisterPage() {
         {/* Logo */}
         <div className='text-center mb-8'>
           <Link href='/' className='inline-flex items-center gap-2 mb-4'>
-            <div className='w-10 h-10 bg-[#E8553A] rounded-xl flex items-center justify-center shadow-md'>
-              <span className='text-white font-montserrat font-black text-lg'>
-                S
-              </span>
-            </div>
-            <span className='font-montserrat font-black text-2xl text-[#0A1F44]'>
-              {SITE_NAME}
-            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={SITE_LOGO} alt={SITE_NAME} className='h-10 w-auto' />
           </Link>
           <h1 className='font-montserrat font-black text-2xl text-[#0A1F44]'>
             Create an account
@@ -199,8 +189,8 @@ export default function RegisterPage() {
                         isConfirm
                           ? 'new-password'
                           : isPasswordField
-                          ? 'new-password'
-                          : undefined
+                            ? 'new-password'
+                            : undefined
                       }
                     />
                     {isPasswordField && (

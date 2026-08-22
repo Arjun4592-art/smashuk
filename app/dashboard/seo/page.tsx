@@ -445,7 +445,7 @@ export default function DashboardSEOPage() {
   const [search, setSearch] = useState('')
 
   const [globalSettings, setGlobalSettings] = useState({
-    siteName: 'SmashUK',
+    siteName: 'Smash Racket Pro',
     siteDescription: 'Premium sports equipment for every athlete',
     defaultOgImage: '',
     googleVerification: '',
@@ -1057,7 +1057,7 @@ export default function DashboardSEOPage() {
                     smashpro.co.uk
                   </p>
                   <p className='text-[13px] font-semibold text-[#202223] mt-0.5'>
-                    Smash Pro — Premium Racket Sports Equipment UK
+                    Smash Racket Pro — Premium Racket Sports Equipment UK
                   </p>
                   <p className='text-[12px] text-[#6D7175] mt-0.5 line-clamp-2'>
                     Shop premium badminton, tennis, padel and squash equipment
@@ -1178,12 +1178,12 @@ export default function DashboardSEOPage() {
               {
                 title: 'Organization Schema',
                 desc: 'Applied to all pages — identifies your business to Google',
-                code: `{\n  "@context": "https://schema.org",\n  "@type": "Organization",\n  "name": "SmashUK",\n  "url": "https://smashuk.co.uk",\n  "logo": "https://smashuk.co.uk/icons/logo.png"\n}`,
+                code: `{\n  "@context": "https://schema.org",\n  "@type": "Organization",\n  "name": "Smash Racket Pro",\n  "url": "https://smashuk.co.uk",\n  "logo": "https://smashuk.co.uk/icons/logo.png"\n}`,
               },
               {
                 title: 'WebSite Schema',
                 desc: 'Enables Google Sitelinks Searchbox in search results',
-                code: `{\n  "@context": "https://schema.org",\n  "@type": "WebSite",\n  "name": "SmashUK",\n  "url": "https://smashuk.co.uk",\n  "potentialAction": {\n    "@type": "SearchAction",\n    "target": "https://smashuk.co.uk/shop?q={search_term_string}"\n  }\n}`,
+                code: `{\n  "@context": "https://schema.org",\n  "@type": "WebSite",\n  "name": "Smash Racket Pro",\n  "url": "https://smashuk.co.uk",\n  "potentialAction": {\n    "@type": "SearchAction",\n    "target": "https://smashuk.co.uk/shop?q={search_term_string}"\n  }\n}`,
               },
               {
                 title: 'Product Schema',

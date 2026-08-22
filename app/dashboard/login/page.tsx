@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/authStore'
 import { loginAdminUser } from '@/lib/api/auth'
+import { SITE_NAME, SITE_LOGO } from '@/lib/constants'
 import { toast } from 'sonner'
 
 export default function DashboardLoginPage() {
@@ -45,12 +46,8 @@ export default function DashboardLoginPage() {
       {/* Top bar */}
       <div className='flex items-center justify-between px-8 py-4'>
         <Link href='/' className='flex items-center gap-2.5 no-underline'>
-          <div className='w-8 h-8 bg-[#008060] rounded-md flex items-center justify-center text-white text-[11px] font-bold tracking-wider'>
-            SU
-          </div>
-          <span className='font-sora text-[15px] font-semibold text-[#202223]'>
-            SmashUK
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={SITE_LOGO} alt={SITE_NAME} className='h-6 w-auto' />
         </Link>
         <Link
           href='/'
@@ -249,7 +246,7 @@ export default function DashboardLoginPage() {
       {/* Footer */}
       <div className='px-8 py-4 border-t border-[#E1E3E5] flex items-center justify-between'>
         <p className='text-[11.5px] text-[#8C9196]'>
-          © {new Date().getFullYear()} SmashUK. All rights reserved.
+          © {new Date().getFullYear()} {SITE_NAME}. All rights reserved.
         </p>
         <div className='flex items-center gap-4'>
           <Link

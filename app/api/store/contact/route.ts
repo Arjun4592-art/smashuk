@@ -8,7 +8,10 @@ export async function POST(req: NextRequest) {
     const { name, email, subject, message } = await req.json()
 
     if (!name?.trim() || !email?.trim() || !message?.trim()) {
-      return NextResponse.json({ error: 'Name, email and message are required' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Name, email and message are required' },
+        { status: 400 },
+      )
     }
 
     const result = await sendMail({
@@ -26,14 +29,27 @@ export async function POST(req: NextRequest) {
     })
 
     if (!result.sent) {
+      // BUG FIX: this used to always return the same "not configured"
+      // message even when SMTP *was* configured but the send itself
+      // failed (blocked/slow port, wrong password, DNS issue, etc.) —
+      // which sent everyone chasing a .env problem that didn't exist.
+      // Now it only claims "not configured" when that's actually true.
+      const notConfigured = result.error === 'SMTP not configured'
       return NextResponse.json(
-        { error: 'Email is not configured on the server yet — set SMTP_USER/SMTP_PASS in .env.local' },
+        {
+          error: notConfigured
+            ? 'Email is not configured on the server yet — set SMTP_USER/SMTP_PASS in .env.local'
+            : `Could not send the email (${result.error ?? 'unknown error'})`,
+        },
         { status: 500 },
       )
     }
 
     return NextResponse.json({ success: true })
   } catch (err: any) {
-    return NextResponse.json({ error: err.message ?? 'Failed to send message' }, { status: 500 })
+    return NextResponse.json(
+      { error: err.message ?? 'Failed to send message' },
+      { status: 500 },
+    )
   }
 }
