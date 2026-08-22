@@ -36,7 +36,7 @@ const STATIC_SLIDES = [
     secondaryCta: { label: 'View All', href: '/shop' },
     sport: 'badminton',
     image:
-      'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=1200&q=80',
+      'https://images.unsplash.com/flagged/photo-1572987337807-6174e06ba9d0?w=1920&q=80',
     statSlots: ['products', 'brands', 'rating'] as StatSlot[],
   },
   {
@@ -49,7 +49,7 @@ const STATIC_SLIDES = [
     secondaryCta: { label: 'View All', href: '/shop' },
     sport: 'tennis',
     image:
-      'https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?w=1200&q=80',
+      'https://images.unsplash.com/photo-1758040252389-47b48246fecb?w=1920&q=80',
     statSlots: ['products', 'brands', 'delivery'] as StatSlot[],
   },
   {
@@ -62,7 +62,7 @@ const STATIC_SLIDES = [
     secondaryCta: { label: 'View All', href: '/shop' },
     sport: 'padel',
     image:
-      'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=1200&q=80',
+      'https://images.unsplash.com/photo-1761644541691-2a746c638881?w=1920&q=80',
     statSlots: ['products', 'brands', 'authentic'] as StatSlot[],
   },
   {
@@ -75,7 +75,7 @@ const STATIC_SLIDES = [
     secondaryCta: { label: 'View All', href: '/shop' },
     sport: 'squash',
     image:
-      'https://images.unsplash.com/photo-1547347298-4074fc3086f0?w=1200&q=80',
+      'https://images.unsplash.com/photo-1694723844104-a1495e30c7b0?w=1920&q=80',
     statSlots: ['products', 'brands', 'returns'] as StatSlot[],
   },
 ]
@@ -96,18 +96,24 @@ function buildStats(
     | Record<string, { productCount: number; brandCount: number }>
     | undefined,
   avgRating: number | null | undefined,
+  totalProductCount?: number,
+  totalBrandCount?: number,
 ) {
+  // Try sport-specific stats first, fallback to total catalog counts
   const sportStats = bySport?.[sport]
+  const productCount = sportStats?.productCount || totalProductCount
+  const brandCount = sportStats?.brandCount || totalBrandCount
+
   return slots.map((s) => {
     if (s === 'products') {
       return {
-        value: sportStats?.productCount ? `${sportStats.productCount}+` : '—',
+        value: productCount ? `${productCount}+` : '—',
         label: `${sport.charAt(0).toUpperCase() + sport.slice(1)} Products`,
       }
     }
     if (s === 'brands') {
       return {
-        value: sportStats?.brandCount ? `${sportStats.brandCount}+` : '—',
+        value: brandCount ? `${brandCount}+` : '—',
         label: 'Top Brands',
       }
     }
@@ -134,6 +140,8 @@ export default function Hero() {
           s.sport,
           brandStats?.bySport,
           brandStats?.avgRating,
+          brandStats?.productCount,
+          brandStats?.brandCount,
         ),
       })),
     [brandStats],

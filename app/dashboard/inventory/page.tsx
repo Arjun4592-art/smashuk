@@ -43,7 +43,12 @@ function StockBar({ stock, threshold }: { stock: number; threshold: number }) {
 }
 
 function formatCurrency(n: number) {
-  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+  return new Intl.NumberFormat('en-GB', {
+    style: 'currency',
+    currency: 'GBP',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n)
 }
 
 const STOCK_FILTERS = ['All', 'In Stock', 'Low Stock', 'Out of Stock']
@@ -377,7 +382,22 @@ export default function InventoryPage() {
   const [page, setPage] = useState(1)
   const pageSize = 10
 
-  const { data: inventory, loading, error } = useInventory({ limit: 100 })
+  const {
+    data: inventory,
+    loading,
+    error,
+  } = useInventory({
+    limit: 100,
+    // BUG FIX: search used to only filter the 100 products already
+    // loaded into `items`, so anything outside that batch (like a
+    // recently created "Another Demo") could never be found even though
+    // it exists — Medusa's own admin searches the whole catalog, this
+    // didn't. Passing `search` straight through to Medusa's own `q`
+    // filter (same approach the Products list page already uses — see
+    // app/dashboard/products/page.tsx) makes search cover every product
+    // in the store, not just whatever page happened to load first.
+    q: search || undefined,
+  })
   const [items, setItems] = useState<InventoryItem[]>([])
 
   // ── Bulk adjust ──────────────────────────────────────────────────────────
@@ -394,16 +414,18 @@ export default function InventoryPage() {
   }, [inventory])
 
   const filtered = items.filter((item) => {
-    const matchSearch =
-      item.name.toLowerCase().includes(search.toLowerCase()) ||
-      item.sku.toLowerCase().includes(search.toLowerCase())
+    // BUG FIX: search is now server-side (Medusa's own `q` filter, see
+    // useInventory above), so re-filtering by exact name/sku substring
+    // here again was redundant AND could wrongly hide correct results —
+    // Medusa's `q` can match a product on fields (description, etc.)
+    // that don't literally contain the typed text in `name` or `sku`.
     const status = getStockStatus(item.stock, item.lowStockThreshold)
     const matchStock =
       stockFilter === 'All' ||
       (stockFilter === 'In Stock' && status === 'ok') ||
       (stockFilter === 'Low Stock' && status === 'low') ||
       (stockFilter === 'Out of Stock' && status === 'out')
-    return matchSearch && matchStock
+    return matchStock
   })
 
   const totalPages = Math.ceil(filtered.length / pageSize)
@@ -542,9 +564,13 @@ export default function InventoryPage() {
     setBulkQty('')
 
     if (failCount === 0) {
-      toast.success(`Updated stock for ${successCount} item${successCount !== 1 ? 's' : ''}`)
+      toast.success(
+        `Updated stock for ${successCount} item${successCount !== 1 ? 's' : ''}`,
+      )
     } else {
-      toast.error(`${successCount} updated, ${failCount} failed — check those items individually`)
+      toast.error(
+        `${successCount} updated, ${failCount} failed — check those items individually`,
+      )
     }
   }
 
@@ -576,7 +602,9 @@ export default function InventoryPage() {
     }
     const csv = [
       headers.join(','),
-      ...rows.map((row) => headers.map((h) => escapeCsv((row as any)[h])).join(',')),
+      ...rows.map((row) =>
+        headers.map((h) => escapeCsv((row as any)[h])).join(','),
+      ),
     ].join('\n')
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -615,7 +643,8 @@ export default function InventoryPage() {
             disabled={selectedIds.size === 0}
             className='inline-flex items-center gap-2 px-4 py-2 bg-[#008060] hover:bg-[#006e52] active:bg-[#005c45] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-medium rounded-lg transition-all duration-150 border-none cursor-pointer shadow-sm shadow-[#008060]/20'
           >
-            <BulkIcon /> Bulk Adjust{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+            <BulkIcon /> Bulk Adjust
+            {selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
           </button>
         </div>
       </div>
@@ -1254,7 +1283,9 @@ export default function InventoryPage() {
                 className='inline-flex items-center gap-2 px-5 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-all duration-150 disabled:opacity-50 cursor-pointer border-none shadow-sm shadow-[#008060]/20'
               >
                 {bulkSaving ? <SpinnerIcon /> : null}
-                {bulkSaving ? 'Applying...' : `Apply to ${selectedIds.size} items`}
+                {bulkSaving
+                  ? 'Applying...'
+                  : `Apply to ${selectedIds.size} items`}
               </button>
             </div>
           </div>

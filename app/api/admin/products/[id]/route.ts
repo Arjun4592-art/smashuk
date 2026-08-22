@@ -43,8 +43,14 @@ export async function GET(
     // below) since Medusa's variant DTO here rejects a real `images`
     // array, and without this the field isn't guaranteed to come back on
     // every fetch.
+    // BUG FIX (tags typed on the dashboard never showing on the storefront):
+    // `*tags` was missing here, so the edit page never learned this
+    // product's real Medusa product-tag links (the storefront reads those
+    // directly — see `*tags` in lib/api/store.ts — not metadata). Without
+    // it, the Tags field only ever round-tripped a metadata string that
+    // nothing on the storefront actually looks at.
     const res = await fetch(
-      `${MEDUSA_URL}/admin/products/${id}?fields=+metadata,*variants,+variants.metadata,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels,*variants.options,*variants.options.option,*variants.images,*categories,*images,*options,*options.values,*sales_channels`,
+      `${MEDUSA_URL}/admin/products/${id}?fields=+metadata,*variants,+variants.metadata,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels,*variants.options,*variants.options.option,*variants.images,*categories,*images,*options,*options.values,*sales_channels,*tags`,
       {
         headers: { Authorization: authorization },
       },

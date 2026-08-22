@@ -162,6 +162,21 @@ const Icons = {
       <path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' />
     </svg>
   ),
+  blog: (
+    <svg
+      width='16'
+      height='16'
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='2'
+      strokeLinecap='round'
+      strokeLinejoin='round'
+    >
+      <path d='M4 19.5A2.5 2.5 0 016.5 17H20' />
+      <path d='M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z' />
+    </svg>
+  ),
   giftCard: (
     <svg
       width='16'
@@ -299,6 +314,7 @@ const NAV_ITEMS: NavItem[] = [
       { label: 'All Products', href: '/dashboard/products' },
       { label: 'Add Product', href: '/dashboard/products/new' },
       { label: 'Categories', href: '/dashboard/categories' },
+      { label: 'Options', href: '/dashboard/product-options' },
       { label: 'Inventory', href: '/dashboard/inventory' },
     ],
   },
@@ -339,6 +355,15 @@ const NAV_ITEMS: NavItem[] = [
   },
   { label: 'SEO', href: '/dashboard/seo', icon: Icons.seo },
   { label: 'Reviews', href: '/dashboard/reviews', icon: Icons.reviews },
+  {
+    label: 'Blogs',
+    icon: Icons.blog,
+    children: [
+      { label: 'All Posts', href: '/dashboard/blogs' },
+      { label: 'Add Post', href: '/dashboard/blogs/new' },
+      { label: 'Categories', href: '/dashboard/blog-categories' },
+    ],
+  },
   { label: 'Gift Cards', href: '/dashboard/gift-cards', icon: Icons.giftCard },
   {
     label: 'Settings',

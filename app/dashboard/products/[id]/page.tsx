@@ -8,6 +8,7 @@ import {
   upsertOptionValues,
   linkOptionsToProduct,
   deleteProductVariant,
+  upsertProductTags,
 } from '@/lib/api/dashboard'
 import { inferSellingChannel } from '@/lib/api/selling-channels-client'
 import { toast } from 'sonner'
@@ -107,6 +108,56 @@ export default function EditProductPage({
 
   const [categories, setCategories] = useState<MedusaCategory[]>([])
   const [categoriesLoading, setCategoriesLoading] = useState(true)
+
+  // Real GLOBAL options (Size, Color, Grips, etc.) fetched from Medusa —
+  // restricts the Variants tab's "Option name" field to a dropdown of
+  // options that already exist, instead of free text (see new/page.tsx
+  // for the full rationale — same fix applied here for edits).
+  const [globalOptions, setGlobalOptions] = useState<
+    { id: string; title: string; values: string[] }[]
+  >([])
+
+  useEffect(() => {
+    // BUG FIX — same as new/page.tsx (see the note there): the LIST
+    // endpoint truncates each option's nested `values`, so this dropdown
+    // could silently miss values past Medusa's default page size (e.g.
+    // "2.5" under "Size (UK)", which has 21 values). Resolve id/title from
+    // the list, then fetch each option's FULL values via the
+    // single-resource endpoint (uncapped).
+    fetch('/api/admin/product-options?limit=200&fields=id,title')
+      .then((res) => res.json())
+      .then(async (data) => {
+        const list = (data.product_options ?? []) as {
+          id: string
+          title: string
+        }[]
+        setGlobalOptions(list.map((o) => ({ ...o, values: [] })))
+
+        const withValues = await Promise.all(
+          list.map(async (o) => {
+            try {
+              const res = await fetch(
+                `/api/admin/product-options/${o.id}?fields=id,title,values.id,values.value`,
+              )
+              const single = await res.json()
+              const values = (single.product_option?.values ?? []).map(
+                (v: any) => v.value,
+              )
+              return { id: o.id, title: o.title, values }
+            } catch (err) {
+              console.error('Failed to load option values:', o.title, err)
+              return { id: o.id, title: o.title, values: [] as string[] }
+            }
+          }),
+        )
+        setGlobalOptions(withValues)
+      })
+      .catch((err) => console.error('Failed to load global options:', err))
+  }, [])
+
+  // Tracks which option rows are in "type a brand new value" mode — see
+  // the Value <select>'s "+ Add new value..." entry in the JSX below.
+  const [customValueRows, setCustomValueRows] = useState<Set<string>>(new Set())
 
   const [form, setForm] = useState({
     name: '',
@@ -225,6 +276,8 @@ export default function EditProductPage({
   // in handleSave AFTER updateProduct succeeds, once no variant
   // references them any more.
   const staleOptionIdsRef = useRef<string[]>([])
+  // Guards handleSave against concurrent execution — see handleSave for why.
+  const isSavingRef = useRef(false)
   // BUG FIX (leftover variants in Medusa after clicking "Remove" on an
   // already-saved variant row): removeVariant() only dropped the row from
   // local state — buildPayload only sends variants still present in
@@ -282,7 +335,20 @@ export default function EditProductPage({
           stock: String(firstVariant?.inventory_quantity ?? ''),
           lowStockAlert: String(p.metadata?.low_stock_alert ?? '5'),
           weight: firstVariant?.weight ? String(firstVariant.weight) : '',
-          tags: p.metadata?.tags ?? '',
+          // BUG FIX: read the real Medusa product-tag relation (`p.tags`,
+          // now fetched via `*tags` — see app/api/admin/products/[id]/
+          // route.ts) instead of the metadata string this used to fall
+          // back to. metadata.tags was never actually linked to real
+          // product_tag records, so it never matched what the storefront
+          // reads (see `*tags` in lib/api/store.ts) — the Tags field
+          // looked saved in the dashboard but silently did nothing.
+          // Still falls back to the legacy metadata string for older
+          // products saved before this fix, so their typed tags don't
+          // just vanish from the field.
+          tags:
+            Array.isArray(p.tags) && p.tags.length > 0
+              ? p.tags.map((t: any) => t.value).join(', ')
+              : (p.metadata?.tags ?? ''),
           metaTitle: '',
           metaDescription: '',
           metaKeywords: '',
@@ -462,13 +528,55 @@ export default function EditProductPage({
         }
 
         if (Array.isArray(p.options)) {
-          setExistingOptions(
-            p.options.map((o: any) => ({
-              id: o.id,
-              title: o.title,
-              values: (o.values ?? []).map((v: any) => v.value),
-            })),
-          )
+          // BUG FIX (same truncation class as findGlobalOption in
+          // lib/api/dashboard.ts — see the note there): `p.options.values`
+          // here comes from a NESTED relation on the product GET
+          // (`*options.values`), which Medusa caps at its default page
+          // size just like the list endpoint does. For a large option
+          // like "Size (UK)" (21 values) that means `existingOptions`
+          // state could start out already missing values — and
+          // syncOptionsForVariants' "union" (existing linked values +
+          // this save's requested values) is only as complete as this
+          // state, so a hole here could still let it narrow away a value
+          // some OTHER, untouched variant relies on. Re-fetch each
+          // option's FULL value list via the single-resource endpoint
+          // (uncapped — only one parent, no truncation) right after load
+          // so `existingOptions` always reflects the true linked set.
+          const rawOptions = p.options.map((o: any) => ({
+            id: o.id,
+            title: o.title,
+            values: (o.values ?? []).map((v: any) => v.value),
+          }))
+          setExistingOptions(rawOptions)
+          Promise.all(
+            rawOptions.map(async (o: { id: string; title: string }) => {
+              try {
+                const res = await fetch(
+                  `/api/admin/product-options/${o.id}?fields=id,title,values.id,values.value`,
+                )
+                const data = await res.json()
+                const values = (data.product_option?.values ?? []).map(
+                  (v: any) => v.value,
+                )
+                return values.length > 0 ? { id: o.id, values } : null
+              } catch (err) {
+                console.error('Failed to load full option values:', err)
+                return null
+              }
+            }),
+          ).then((results) => {
+            const full = results.filter(Boolean) as {
+              id: string
+              values: string[]
+            }[]
+            if (full.length === 0) return
+            setExistingOptions((prev) =>
+              prev.map((o) => {
+                const match = full.find((f) => f.id === o.id)
+                return match ? { ...o, values: match.values } : o
+              }),
+            )
+          })
         }
 
         if (p.images && p.images.length > 0) {
@@ -808,6 +916,13 @@ export default function EditProductPage({
       thumbnail: uploadedImages[0]?.url ?? undefined,
       images: uploadedImages.length > 0 ? uploadedImages : undefined,
       categories: form.category ? [{ id: form.category }] : [],
+      // BUG FIX (tags typed here never reaching the storefront): Medusa's
+      // product-update endpoint only accepts `tags` as [{ id }] against
+      // EXISTING product-tag records, same as the Add Product page (see
+      // upsertProductTags in lib/api/dashboard.ts). Real ids are resolved
+      // in handleSaveInner, BEFORE this payload is built, and merged into
+      // it there — this is just a placeholder so the field always exists.
+      tags: undefined as { id: string }[] | undefined,
       // No `options` field here at all — Medusa v2.17 removed it from this
       // payload entirely. Options are linked to the product separately,
       // BEFORE this payload is sent — see syncOptionsForVariants() in
@@ -823,7 +938,6 @@ export default function EditProductPage({
           ? form.stringingSport || undefined
           : undefined,
         specs: specs.filter((s) => s.label.trim() && s.value.trim()),
-        tags: form.tags || undefined,
         compare_at_price: form.comparePrice
           ? parseFloat(form.comparePrice)
           : undefined,
@@ -1125,6 +1239,30 @@ export default function EditProductPage({
 
   // ── Save handler ───────────────────────────────────────────────────────────
   const handleSave = async (saveStatus: 'published' | 'draft') => {
+    // BUG FIX (duplicate "Color"/etc. options being created, causing
+    // "Product has 2 option values but there were 1 provided..."):
+    // there are two Save buttons on this page (a sticky top one and a
+    // bottom one), both disabled via the `saving` state — but that state
+    // update isn't visible synchronously, so clicking both (or double-
+    // clicking one) fast enough fires handleSave twice before either
+    // button visually disables. Two concurrent syncOptionsForVariants()
+    // calls then race: each does its own "does a 'Color' option already
+    // exist?" check before either has finished creating one, so both
+    // conclude "no" and each creates its own "Color" option — leaving two
+    // options with the same title linked to the product, which is
+    // exactly the state Medusa rejects every save from then on. Guard
+    // with a ref (checked synchronously, unlike state) so a second
+    // concurrent call always no-ops instead of racing.
+    if (isSavingRef.current) return
+    isSavingRef.current = true
+    try {
+      await handleSaveInner(saveStatus)
+    } finally {
+      isSavingRef.current = false
+    }
+  }
+
+  const handleSaveInner = async (saveStatus: 'published' | 'draft') => {
     if (!form.name.trim()) {
       setActiveTab('general')
       setSaveError('Product name is required.')
@@ -1150,7 +1288,15 @@ export default function EditProductPage({
       // below can reference their values — see syncOptionsForVariants().
       const hadExtraVariants = variants.some((v) => filledOptions(v).length > 0)
       await syncOptionsForVariants()
+      // BUG FIX (tags typed here never reaching the storefront): resolve
+      // the Tags field's free text into real product-tag ids before
+      // saving — see upsertProductTags() and the `tags` note on
+      // buildPayload's productPayload above.
+      const tagIds = form.tags
+        ? await upsertProductTags(form.tags.split(','))
+        : []
       const payload = buildPayload(saveStatus)
+      payload.tags = tagIds.length > 0 ? tagIds : []
       const updateResult = await updateProduct(id, payload)
 
       // BUG FIX (unnecessary re-link of an already-narrowed-away old
@@ -1196,7 +1342,6 @@ export default function EditProductPage({
       // leaves a harmless unused option linked rather than losing data.
       if (staleOptionIdsRef.current.length > 0) {
         const toRemove = staleOptionIdsRef.current
-        staleOptionIdsRef.current = []
         try {
           await linkOptionsToProduct(
             id,
@@ -1204,6 +1349,16 @@ export default function EditProductPage({
             new Set(existingOptions.map((o) => o.id)),
             toRemove,
           )
+          // BUG FIX ("Product has N option values but there were M
+          // provided..." never going away even after fixing the variants):
+          // this ref used to get cleared BEFORE the removal call above,
+          // so if that call failed for any reason the stale option was
+          // never retried on a later save — it stayed linked to the
+          // product forever and every future save kept failing with the
+          // count-mismatch error. Only clear it once the removal has
+          // actually succeeded, so a failed cleanup gets retried on the
+          // next Save instead of getting silently lost.
+          staleOptionIdsRef.current = []
           setExistingOptions((prev) => {
             const removedSet = new Set(toRemove)
             return prev.filter((o) => !removedSet.has(o.id))
@@ -2240,12 +2395,12 @@ export default function EditProductPage({
                             </button>
                           )}
                         </div>
-                        {/* Free-text option rows — the admin types BOTH
-                            the option name ("Size", "Weight", "Grip
-                            Size"...) and its value for this variant,
-                            instead of the form only offering Size/Color.
-                            Different product types (rackets, clothing,
-                            strings) can each use whatever options fit. */}
+                        {/* Option name is now a dropdown of real GLOBAL
+                            options only (Size, Color, Grips, etc.) — no
+                            free typing. Same fix as the create page: this
+                            is what stops a typo or slightly different name
+                            from silently creating a duplicate global
+                            option when editing a product. */}
                         <div className='space-y-2'>
                           <div className='flex items-center justify-between'>
                             <label className='block text-[11.5px] text-[#6D7175]'>
@@ -2259,53 +2414,129 @@ export default function EditProductPage({
                               + Add Option
                             </button>
                           </div>
-                          {variant.options.map((opt) => (
-                            <div
-                              key={opt.id}
-                              className='flex items-center gap-1.5'
-                            >
-                              <input
-                                type='text'
-                                value={opt.name}
-                                onChange={(e) =>
-                                  updateOptionRow(
-                                    variant.id,
-                                    opt.id,
-                                    'name',
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder='Option name (e.g. Size, Weight)'
-                                className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
-                              />
-                              <input
-                                type='text'
-                                value={opt.value}
-                                onChange={(e) =>
-                                  updateOptionRow(
-                                    variant.id,
-                                    opt.id,
-                                    'value',
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder='Value (e.g. L, 88g)'
-                                className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
-                              />
-                              {variant.options.length > 1 && (
-                                <button
-                                  type='button'
-                                  onClick={() =>
-                                    removeOptionRow(variant.id, opt.id)
-                                  }
-                                  title='Remove option'
-                                  className='px-2 py-2 text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer shrink-0'
+                          {variant.options.map((opt) => {
+                            const selectedGlobalOption = globalOptions.find(
+                              (g) => g.title === opt.name,
+                            )
+                            const isCustomValue = customValueRows.has(opt.id)
+                            return (
+                              <div
+                                key={opt.id}
+                                className='flex items-center gap-1.5'
+                              >
+                                <select
+                                  value={opt.name}
+                                  onChange={(e) => {
+                                    updateOptionRow(
+                                      variant.id,
+                                      opt.id,
+                                      'name',
+                                      e.target.value,
+                                    )
+                                    updateOptionRow(
+                                      variant.id,
+                                      opt.id,
+                                      'value',
+                                      '',
+                                    )
+                                    setCustomValueRows((prev) => {
+                                      const next = new Set(prev)
+                                      next.delete(opt.id)
+                                      return next
+                                    })
+                                  }}
+                                  className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all bg-white'
                                 >
-                                  ✕
-                                </button>
-                              )}
-                            </div>
-                          ))}
+                                  <option value=''>Select option...</option>
+                                  {globalOptions.map((g) => (
+                                    <option key={g.id} value={g.title}>
+                                      {g.title}
+                                    </option>
+                                  ))}
+                                </select>
+                                {isCustomValue ? (
+                                  <input
+                                    type='text'
+                                    autoFocus
+                                    value={opt.value}
+                                    onChange={(e) =>
+                                      updateOptionRow(
+                                        variant.id,
+                                        opt.id,
+                                        'value',
+                                        e.target.value,
+                                      )
+                                    }
+                                    onBlur={() => {
+                                      if (!opt.value.trim()) {
+                                        setCustomValueRows((prev) => {
+                                          const next = new Set(prev)
+                                          next.delete(opt.id)
+                                          return next
+                                        })
+                                      }
+                                    }}
+                                    placeholder='New value (e.g. 12, Navy)'
+                                    className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
+                                  />
+                                ) : (
+                                  <select
+                                    value={opt.value}
+                                    disabled={!selectedGlobalOption}
+                                    onChange={(e) => {
+                                      if (e.target.value === '__custom__') {
+                                        updateOptionRow(
+                                          variant.id,
+                                          opt.id,
+                                          'value',
+                                          '',
+                                        )
+                                        setCustomValueRows((prev) =>
+                                          new Set(prev).add(opt.id),
+                                        )
+                                      } else {
+                                        updateOptionRow(
+                                          variant.id,
+                                          opt.id,
+                                          'value',
+                                          e.target.value,
+                                        )
+                                      }
+                                    }}
+                                    className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all bg-white disabled:bg-[#F6F6F7] disabled:text-[#8C9196]'
+                                  >
+                                    <option value=''>
+                                      {selectedGlobalOption
+                                        ? 'Select value...'
+                                        : 'Pick an option first'}
+                                    </option>
+                                    {selectedGlobalOption?.values.map((v) => (
+                                      <option key={v} value={v}>
+                                        {v}
+                                      </option>
+                                    ))}
+                                    {selectedGlobalOption && (
+                                      <option value='__custom__'>
+                                        + Add new value...
+                                      </option>
+                                    )}
+                                  </select>
+                                )}
+                                {variant.options.length > 1 && (
+                                  <button
+                                    type='button'
+                                    onClick={() =>
+                                      removeOptionRow(variant.id, opt.id)
+                                    }
+                                    title='Remove option'
+                                    className='px-2 py-2 text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer shrink-0'
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })}
                           {/* Optional colour swatch — independent of the
                               option name typed above; if any option here
                               represents a colour, pick the hex that should

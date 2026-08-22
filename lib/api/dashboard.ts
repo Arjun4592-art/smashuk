@@ -350,17 +350,47 @@ async function findGlobalOption(
   title: string,
   preferredId?: string,
 ): Promise<{ id: string; values: { id: string; value: string }[] } | null> {
-  const data = await api<any>('/api/admin/product-options', {
-    limit: 200,
+  // BUG FIX ("Option value 2.5 does not exist for option Size (UK)" even
+  // though 2.5 is a completely normal, already-existing value): the LIST
+  // endpoint (`/admin/product-options`) truncates each option's nested
+  // `values` relation to Medusa's default page size — confirmed by this
+  // consistently reproducing on "Size (UK)" (21 values), "Color" (48) and
+  // "Size" (66), all options comfortably past that default limit, and
+  // never on small option sets. Whichever values fall past that cutoff
+  // (alphabetically/creation-order — "2.5" sorts early but ids aren't
+  // guaranteed to) look "missing" to upsertOptionValues even though they
+  // already exist, so it tries to (re)create them — landing a duplicate
+  // value or a value_id the variant payload doesn't actually match,
+  // which is exactly the 400 Medusa returns.
+  //
+  // The list endpoint applies this truncation because it's returning many
+  // parent records at once and caps every nested collection to keep the
+  // payload bounded. Retrieving a SINGLE option by id doesn't have that
+  // "many parents" problem, so its nested `values` comes back complete.
+  // Fix: use the list endpoint only to resolve title -> id (cheap, and we
+  // don't need `values` from it at all), then always follow up with a
+  // single-resource fetch by id to get the FULL, untruncated value list.
+  let id = preferredId
+
+  if (!id) {
+    const data = await api<any>('/api/admin/product-options', {
+      limit: 200,
+      fields: 'id,title',
+    })
+    const matches = (data.product_options ?? []).filter(
+      (o: any) => o.title.toLowerCase() === title.toLowerCase(),
+    )
+    id = matches[0]?.id
+  }
+
+  if (!id) return null
+
+  const single = await api<any>(`/api/admin/product-options/${id}`, {
     fields: 'id,title,values.id,values.value',
   })
-  const matches = (data.product_options ?? []).filter(
-    (o: any) => o.title.toLowerCase() === title.toLowerCase(),
-  )
-  const found =
-    (preferredId && matches.find((o: any) => o.id === preferredId)) ||
-    matches[0]
-  return found ? { id: found.id, values: found.values ?? [] } : null
+  const opt = single.product_option
+  if (!opt) return null
+  return { id: opt.id, values: opt.values ?? [] }
 }
 
 // Ensures a global option with this title exists and has (at least) the
@@ -429,33 +459,40 @@ export async function upsertOptionValues(
 
   const resolved = values.map((v) => byValue.get(v.toLowerCase()))
 
-  // BUG FIX ("Option value N does not exist for option Size (UK)"):
-  // The previous approach returned ALL value ids from the global option
-  // (e.g. ALL sizes ever used across every product). When linkOptionsToProduct
-  // sent those to Medusa's options/batch `update`, Medusa linked ALL those
-  // values to THIS product — but this product's variants only reference a
-  // subset of them. Medusa then rejected the variant save because it found
-  // values linked to the product (e.g. size "3" from another product) that
-  // no variant on this product actually uses.
-  //
-  // The correct behaviour: only link value_ids that THIS product's current
-  // variants actually reference — i.e. exactly the `values` requested in
-  // this call. That's already what `resolved` contains: one entry per
-  // requested value, in the same order. No extras from the global option pool.
-  const requestedValueIds = resolved
-    .filter((v): v is { id: string; value: string } => !!v)
-    .map((v) => v.id)
+  // BUG FIX ("Option value 2 does not exist for option Size (UK)" / any
+  // wrong value being sent on save): this used to be
+  // `resolved.filter(Boolean).map(...)`. For options with lots of values
+  // (Size (UK) has 21, Color has 48, Size has 66), Medusa's list endpoint
+  // returns nested `values` truncated to its default page size, so
+  // `existing.values` above can be missing values that genuinely already
+  // exist further down the list. When that happened, `resolved` ended up
+  // with an `undefined` hole for that entry — and `.filter()` silently
+  // DROPPED it, shifting every value after it one slot to the left.
+  // Callers (see syncOptionsForVariants in both product pages) index into
+  // `canonicalValues` positionally, matched against the same `values`
+  // array passed in here — so that shift meant a variant asking for e.g.
+  // "9.5" (position 5) was handed back whatever canonical value ended up
+  // at position 5 after the drop (e.g. "2"), which Medusa then rejected
+  // because that variant never actually requested "2". `canonicalValues`
+  // and `valueIds` MUST stay the same length and order as `values` — no
+  // filtering — or this positional mismatch reappears any time a value
+  // fails to resolve for any reason.
+  const missingAfterUpsert = values.filter((v, i) => !resolved[i])
+  if (missingAfterUpsert.length > 0) {
+    // Genuinely couldn't resolve some value even after creating it — fail
+    // loudly instead of silently shifting the rest of the array.
+    throw new Error(
+      `Failed to resolve option value(s) [${missingAfterUpsert.join(', ')}] for option "${title}" after upsert.`,
+    )
+  }
+
+  const resolvedSafe = resolved as { id: string; value: string }[]
 
   return {
     optionId: existing.id,
-    // Only return value ids for the values THIS product's variants actually
-    // use. Sending the full global set caused Medusa to find orphaned linked
-    // values (from other products) that no variant on this product covered,
-    // triggering "Option value X does not exist for option Y" on every save.
-    valueIds: requestedValueIds,
-    canonicalValues: resolved
-      .filter((v): v is { id: string; value: string } => !!v)
-      .map((v) => v.value),
+    // One id per requested value, same order — see note above.
+    valueIds: resolvedSafe.map((v) => v.id),
+    canonicalValues: resolvedSafe.map((v) => v.value),
   }
 }
 
@@ -495,6 +532,47 @@ export async function linkOptionsToProduct(
   })
 }
 
+// BUG FIX ("Invalid request: Field 'tags, 0, id' is required" on both Add
+// Product and Edit Product): resolves free-typed tag text (e.g. from the
+// comma-separated Tags field) into real Medusa product-tag ids — reusing
+// any tag that already exists (case-insensitive) and creating the rest —
+// so the product payload can send `tags: [{ id }]`, which is the only
+// shape Medusa's product create/update endpoints accept. Mirrors
+// upsertOptionValues()'s create-or-reuse pattern for global options.
+export async function upsertProductTags(
+  values: string[],
+): Promise<{ id: string }[]> {
+  const wanted = Array.from(
+    new Set(values.map((v) => v.trim()).filter(Boolean)),
+  )
+  if (wanted.length === 0) return []
+
+  const data = await api<any>('/api/admin/product-tags', {
+    limit: 1000,
+    fields: 'id,value',
+  })
+  const byValue = new Map<string, string>(
+    (data.product_tags ?? []).map((t: any) => [t.value.toLowerCase(), t.id]),
+  )
+
+  const ids: string[] = []
+  for (const value of wanted) {
+    const existingId = byValue.get(value.toLowerCase())
+    if (existingId) {
+      ids.push(existingId)
+      continue
+    }
+    const created = await mutate('/api/admin/product-tags', 'POST', { value })
+    const newId = created?.product_tag?.id
+    if (newId) {
+      ids.push(newId)
+      byValue.set(value.toLowerCase(), newId)
+    }
+  }
+
+  return ids.map((id) => ({ id }))
+}
+
 export async function deleteProductVariant(
   productId: string,
   variantId: string,
@@ -503,6 +581,19 @@ export async function deleteProductVariant(
     `/api/admin/products/${productId}/variants/${variantId}`,
     'DELETE',
   )
+}
+
+// Deletes a GLOBAL option outright (not a per-product unlink — see
+// linkOptionsToProduct's `remove` for that). Used by the product-create
+// flow's safety net (app/dashboard/products/new/page.tsx) to clean up an
+// accidental duplicate global option: if Medusa's create-product endpoint
+// ever creates a brand-new option instead of reusing the one resolved by
+// upsertOptionValues (despite being given its id), that stray option is
+// unlinked from the product and then deleted here so it never shows up
+// as a second "Size"/"Color" entry in the Options list. Best-effort —
+// callers should not let a failure here block a successful product save.
+export async function deleteGlobalOption(optionId: string) {
+  return mutate(`/api/admin/product-options/${optionId}`, 'DELETE')
 }
 
 export async function deleteProductOption(productId: string, optionId: string) {
@@ -665,10 +756,12 @@ export async function getCustomers(params?: {
 export async function getInventory(params?: {
   limit?: number
   offset?: number
+  q?: string
 }) {
   const data = await api<any>('/api/admin/inventory', {
     limit: params?.limit,
     offset: params?.offset,
+    q: params?.q,
   })
 
   return data.products.flatMap((p: any) =>

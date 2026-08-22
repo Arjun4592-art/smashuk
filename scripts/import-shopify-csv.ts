@@ -114,6 +114,20 @@ async function medusaPost(token: string, path: string, body: any) {
   return res.json()
 }
 
+async function medusaDelete(token: string, path: string) {
+  const res = await fetch(`${MEDUSA_URL}${path}`, {
+    method: 'DELETE',
+    headers: headers(token),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(
+      `DELETE ${path} failed (${res.status}): ${err.slice(0, 300)}`,
+    )
+  }
+  return res.json()
+}
+
 // ── Shopify CSV row shape (only the columns we use) ────────────────────────
 interface ShopifyRow {
   Handle: string
@@ -402,6 +416,208 @@ function parseMoney(v: string): number | undefined {
   return Number.isFinite(n) ? n : undefined
 }
 
+// ── Global Product Options (Medusa v2.17+) ──────────────────────────────
+// BUG FIX: this script used to build a plain local `{ title, values }`
+// options array per product and hand it straight to POST /admin/products.
+// With Medusa's Global Product Options, any option sent without an `id`
+// is treated as BRAND NEW — so every product this script imported got its
+// own private "Size"/"Colour" option instead of sharing one, and a batch
+// import of a few hundred products left a few hundred duplicate "Size"
+// entries in the global Options list (each linked to exactly one
+// product). scripts/consolidate-global-options.ts exists specifically to
+// clean up that mess after the fact — this fixes it at the source instead,
+// mirroring the exact resolve-before-create pattern
+// app/dashboard/products/new/page.tsx already uses successfully:
+//   1. Resolve (create-or-reuse) each option against the GLOBAL
+//      /admin/product-options table BEFORE building the product payload.
+//   2. Send the product create call WITH that option's real `id`, so
+//      Medusa attaches to the existing option instead of spawning a new
+//      one.
+//   3. Best-effort safety net after creation: Medusa's Global Product
+//      Options feature is an explicit PREVIEW release, and has been known
+//      to still create a stray duplicate despite the `id` — if that
+//      happens, remap the product's variants onto the real global option
+//      and delete the stray, so no product is ever left connected to two
+//      different option entities with the same title.
+//
+// In-run cache of title → optionId already resolved this run, so repeat
+// titles (e.g. "Size" used by 200 racket products) don't need a fresh GET
+// every time — upsertOptionValues still re-checks live state, this is
+// purely to hand it a `preferredId` shortcut.
+const resolvedOptionIdByTitle = new Map<string, string>()
+let optionsReusedCount = 0
+let optionsCreatedCount = 0
+let strayDuplicatesCleanedCount = 0
+
+async function findGlobalOption(
+  token: string,
+  title: string,
+  preferredId?: string,
+): Promise<{ id: string; values: { id: string; value: string }[] } | null> {
+  const data = await medusaGet(
+    token,
+    `/admin/product-options?limit=200&fields=id,title,values.id,values.value`,
+  )
+  const matches = (data.product_options ?? []).filter(
+    (o: any) => o.title.toLowerCase() === title.toLowerCase(),
+  )
+  const found =
+    (preferredId && matches.find((o: any) => o.id === preferredId)) ||
+    matches[0]
+  return found ? { id: found.id, values: found.values ?? [] } : null
+}
+
+// Ensures a global option with this title exists and has (at least) the
+// given values, returning its id + the value ids/canonical casing for
+// exactly the values requested (see lib/api/dashboard.ts's
+// upsertOptionValues, which this mirrors for direct Medusa API use).
+async function upsertOptionValues(
+  token: string,
+  title: string,
+  values: string[],
+): Promise<{
+  optionId: string
+  valueIds: string[]
+  canonicalValues: string[]
+}> {
+  const preferredId = resolvedOptionIdByTitle.get(title.toLowerCase())
+  const existing = await findGlobalOption(token, title, preferredId)
+
+  if (!existing) {
+    const created = await medusaPost(token, '/admin/product-options', {
+      title,
+      values,
+    })
+    const opt = created.product_option
+    optionsCreatedCount++
+    resolvedOptionIdByTitle.set(title.toLowerCase(), opt.id)
+    return {
+      optionId: opt.id,
+      valueIds: opt.values.map((v: any) => v.id),
+      canonicalValues: opt.values.map((v: any) => v.value),
+    }
+  }
+
+  optionsReusedCount++
+  resolvedOptionIdByTitle.set(title.toLowerCase(), existing.id)
+
+  const byValue = new Map<string, { id: string; value: string }>(
+    existing.values.map((v) => [v.value.toLowerCase(), v]),
+  )
+  const missing = values.filter((v) => !byValue.has(v.toLowerCase()))
+
+  if (missing.length > 0) {
+    // Medusa expects the FULL desired values list, not just the new
+    // ones — sending only `missing` would silently drop every value not
+    // included in this request.
+    const updated = await medusaPost(
+      token,
+      `/admin/product-options/${existing.id}`,
+      { title, values: [...existing.values.map((v) => v.value), ...missing] },
+    )
+    for (const v of updated.product_option.values as {
+      id: string
+      value: string
+    }[]) {
+      byValue.set(v.value.toLowerCase(), v)
+    }
+  }
+
+  const resolved = values.map((v) => byValue.get(v.toLowerCase()))
+  const requestedValueIds = resolved
+    .filter((v): v is { id: string; value: string } => !!v)
+    .map((v) => v.id)
+
+  return {
+    optionId: existing.id,
+    valueIds: requestedValueIds,
+    canonicalValues: resolved
+      .filter((v): v is { id: string; value: string } => !!v)
+      .map((v) => v.value),
+  }
+}
+
+// Links global options to a product via the batch endpoint — used only by
+// the post-create safety net below to remap a product off a stray
+// duplicate option and onto the real global one.
+async function linkOptionsToProduct(
+  token: string,
+  productId: string,
+  add: { id: string; value_ids: string[] }[],
+  removeOptionIds: string[],
+) {
+  if (add.length === 0 && removeOptionIds.length === 0) return
+  return medusaPost(token, `/admin/products/${productId}/options/batch`, {
+    add,
+    remove: removeOptionIds,
+    update: [],
+  })
+}
+
+// Best-effort: confirms the just-created product actually ended up linked
+// to the global option(s) we resolved, not a fresh duplicate Medusa may
+// have created despite the id we sent. If a stray duplicate slipped
+// through, remap this product's variants onto the real global option,
+// re-link the product to it, and delete the stray — so this product is
+// never left connected to two different options sharing the same title.
+async function cleanupStrayDuplicateOptions(
+  token: string,
+  productId: string,
+  resolvedOptions: Map<string, { optionId: string; valueIds: string[] }>,
+) {
+  try {
+    const { product: fresh } = await medusaGet(
+      token,
+      `/admin/products/${productId}?fields=id,*options,*options.values,*variants,*variants.options`,
+    )
+    const freshOptions: any[] = fresh?.options ?? []
+    const freshVariants: any[] = fresh?.variants ?? []
+
+    for (const [title, entry] of resolvedOptions) {
+      const linked = freshOptions.find(
+        (o) => o.title.toLowerCase() === title.toLowerCase(),
+      )
+      if (!linked || linked.id === entry.optionId) continue // reused correctly
+
+      console.warn(
+        `  ⚠️  "${title}" created a duplicate option (${linked.id}) instead of reusing the global one (${entry.optionId}) — remapping`,
+      )
+
+      const affectedVariants = freshVariants.filter((v) =>
+        (v.options ?? []).some((vo: any) => vo.option_id === linked.id),
+      )
+      const variantUpdates = affectedVariants.map((v) => {
+        const vo = v.options.find((o: any) => o.option_id === linked.id)
+        return { id: v.id, options: { [title]: vo.value } }
+      })
+      if (variantUpdates.length > 0) {
+        await medusaPost(token, `/admin/products/${productId}`, {
+          variants: variantUpdates,
+        })
+      }
+
+      await linkOptionsToProduct(
+        token,
+        productId,
+        [{ id: entry.optionId, value_ids: entry.valueIds }],
+        [linked.id],
+      )
+
+      try {
+        await medusaDelete(token, `/admin/product-options/${linked.id}`)
+      } catch (delErr) {
+        console.warn('  Could not delete stray duplicate option:', delErr)
+      }
+      strayDuplicatesCleanedCount++
+    }
+  } catch (safetyErr) {
+    console.warn(
+      `  Global-option safety check failed for product ${productId} (non-fatal):`,
+      safetyErr,
+    )
+  }
+}
+
 async function main() {
   const token = await getToken()
   console.log('✅ Authenticated as admin\n')
@@ -428,14 +644,49 @@ async function main() {
   // characters"): Shopify's own Handle column already exists per row, but
   // a few rows had one that wasn't URL-safe (e.g. containing ':'). Slugify
   // it properly instead of trusting the CSV value as-is.
+  //
+  // BUG FIX (silent duplicate-handle collision): a few real handles in
+  // this export are 200+ characters (e.g. the "DISCLAIMER: ..." POS
+  // line-item products, whose handle is the entire disclaimer sentence).
+  // Truncating each to 200 chars independently made TWO distinct
+  // disclaimer products collapse onto the exact identical slug (their
+  // difference only showed up past character 200), so the second one
+  // silently failed to import with a duplicate-handle error and nothing
+  // in the summary explained why. Track every handle already used this
+  // run and disambiguate with a numeric suffix instead of colliding.
+  const usedHandles = new Set<string>()
   function slugifyHandle(raw: string): string {
-    return (
+    // BUG FIX ("Invalid product handle '...-copy-copy-'. It must contain
+    // URL safe characters"): the old code trimmed leading/trailing hyphens
+    // BEFORE slicing to 200 chars. For the long "DISCLAIMER: ..." titles,
+    // cutting at char 200 very often lands right on top of a hyphen that
+    // used to be a space — so the trim (which already ran) never saw it,
+    // and the final handle ended in a bare "-". Trim again AFTER the
+    // slice so a hyphen exposed by truncation is always removed too.
+    const base =
       raw
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
-        .slice(0, 200) || 'product'
-    )
+        .slice(0, 200)
+        .replace(/^-+|-+$/g, '') || 'product'
+    if (!usedHandles.has(base)) {
+      usedHandles.add(base)
+      return base
+    }
+    let i = 2
+    let candidate: string
+    do {
+      const suffix = `-${i}`
+      // Same fix applied here: trim any hyphen the second slice exposes
+      // before appending the disambiguating suffix, so we never end up
+      // with "...word--2".
+      candidate =
+        base.slice(0, 200 - suffix.length).replace(/-+$/g, '') + suffix
+      i++
+    } while (usedHandles.has(candidate))
+    usedHandles.add(candidate)
+    return candidate
   }
 
   // Existing categories, for name-based matching
@@ -887,6 +1138,7 @@ async function main() {
   let compareAtCount = 0
   let seoCount = 0
   const uncategorized: string[] = []
+  const noPriceProducts: string[] = []
 
   for (const [handle, productRows] of grouped) {
     const first = productRows.find((r) => r.Title) ?? productRows[0]
@@ -955,6 +1207,68 @@ async function main() {
       } as any)
     }
 
+    // ── Resolve GLOBAL options for this product (create-or-reuse) ────────
+    // BUG FIX: this used to build a fresh LOCAL `{title, values}` option
+    // for every product (see the old `options:` line further down) — with
+    // Medusa's Global Product Options (v2.17+), an option sent without an
+    // `id` is always treated as brand new, so importing a few hundred
+    // products left a few hundred duplicate "Size"/"Colour" entries in
+    // the global Options list, each privately linked to just one product.
+    // Resolve against the shared /admin/product-options table BEFORE
+    // building the payload instead, so this product attaches to the SAME
+    // option every other product with that option name uses.
+    const effectiveOptionNames = optionNames.length ? optionNames : ['Type']
+    const resolvedOptions = new Map<
+      string,
+      { optionId: string; valueIds: string[]; canonicalValues: string[] }
+    >()
+    for (const name of effectiveOptionNames) {
+      const valuesUsed = [
+        ...new Set(
+          variants
+            .map((v: any) => v.options?.[name])
+            .filter((v: any): v is string => !!v),
+        ),
+      ]
+      const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
+        token,
+        name,
+        valuesUsed.length ? valuesUsed : ['Standard'],
+      )
+      resolvedOptions.set(name, { optionId, valueIds, canonicalValues })
+    }
+
+    // A variant's option values must match the global option's stored
+    // string EXACTLY (Medusa rejects a case mismatch with "Option value X
+    // does not exist for option Y") — remap every variant onto the
+    // resolved option's canonical casing, and fill in the Type/Standard
+    // fallback for products that had no CSV option columns at all.
+    const canonicalOptionValue = (name: string, typed: string): string => {
+      const entry = resolvedOptions.get(name)
+      if (!entry) return typed
+      const idx = entry.canonicalValues.findIndex(
+        (v) => v.toLowerCase() === typed.toLowerCase(),
+      )
+      return idx >= 0 ? entry.canonicalValues[idx] : typed
+    }
+    for (const v of variants as any[]) {
+      if (!v.options) {
+        v.options = {
+          [effectiveOptionNames[0]]: canonicalOptionValue(
+            effectiveOptionNames[0],
+            'Standard',
+          ),
+        }
+        continue
+      }
+      v.options = Object.fromEntries(
+        Object.entries(v.options).map(([name, val]) => [
+          name,
+          canonicalOptionValue(name, val as string),
+        ]),
+      )
+    }
+
     // Category (subtype) + sport — see resolveTaxonomy() above. Creates
     // the category in Medusa if nothing matches yet, instead of leaving
     // the product uncategorized. Same Rackets/Shoes/Bags/Grips/Balls/
@@ -974,6 +1288,8 @@ async function main() {
       first['Product Category'] || '',
     )
     if (!matchedCategoryId) uncategorized.push(first.Title)
+    if (!variants.some((v: any) => v.prices?.length))
+      noPriceProducts.push(first.Title)
 
     // Stringing add-on: only real racket products, and only for sports
     // where a racket is actually strung (badminton/tennis/squash — padel
@@ -1046,16 +1362,15 @@ async function main() {
         : undefined,
       sales_channels: resolveChannels(typeAndTags, hasImages, first.Published),
       ...(shippingProfileId ? { shipping_profile_id: shippingProfileId } : {}),
-      options: optionNames.length
-        ? optionNames.map((name) => ({
-            title: name,
-            values: [
-              ...new Set(
-                variants.map((v: any) => v.options?.[name]).filter(Boolean),
-              ),
-            ],
-          }))
-        : [{ title: 'Type', values: ['Standard'] }],
+      // Send each resolved GLOBAL option WITH its real `id` (same
+      // id-to-reuse pattern Medusa uses for `type`/`collection` on
+      // create) so this product attaches to the existing option instead
+      // of spawning a new one. See the resolvedOptions block above.
+      options: [...resolvedOptions.entries()].map(([title, entry]) => ({
+        id: entry.optionId,
+        title,
+        values: entry.canonicalValues,
+      })),
       variants: variants.map(({ _stock, _compareAt, ...v }: any) => v),
       metadata: {
         brand: first.Vendor || undefined,
@@ -1112,6 +1427,12 @@ async function main() {
           if (src) variantStocks.set(cv.id, Number(src._stock || 0))
         })
         await wireUpInventory(product.id, variantStocks)
+
+        // Best-effort: confirm this product actually ended up linked to
+        // the global option(s) resolved above, not a stray duplicate
+        // Medusa's preview Global Product Options feature created despite
+        // the id we sent. See cleanupStrayDuplicateOptions().
+        await cleanupStrayDuplicateOptions(token, product.id, resolvedOptions)
       }
     } catch (err: any) {
       failed++
@@ -1120,6 +1441,12 @@ async function main() {
   }
 
   console.log(`\n✅ Created ${created} products (${failed} failed)`)
+  console.log(
+    `🔗 Global options: ${optionsReusedCount} reused, ${optionsCreatedCount} newly created` +
+      (strayDuplicatesCleanedCount > 0
+        ? ` — ${strayDuplicatesCleanedCount} stray duplicate(s) auto-cleaned`
+        : ' — no product left double-linked'),
+  )
   console.log(
     `🧵 Stringing add-on enabled on ${stringingCount} racket products (badminton/tennis/squash only)`,
   )
@@ -1161,6 +1488,12 @@ async function main() {
     uncategorized.slice(0, 20).forEach((t) => console.log(`   - ${t}`))
     if (uncategorized.length > 20)
       console.log(`   ...and ${uncategorized.length - 20} more`)
+  }
+  if (noPriceProducts.length > 0) {
+    console.log(
+      `\n💷 ${noPriceProducts.length} product(s) imported with NO price on any variant (blank in the CSV — set manually):`,
+    )
+    noPriceProducts.forEach((t) => console.log(`   - ${t}`))
   }
   console.log(
     '\nStock quantities from the CSV\'s "Variant Inventory Qty" column were set',

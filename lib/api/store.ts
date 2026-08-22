@@ -173,6 +173,21 @@ const SYSTEM_METADATA_KEYS = new Set([
   'metaTitle',
   'metaDescription',
   'metaKeywords',
+  // BUG FIX ("random specs on every product's Specifications tab"): the
+  // dashboard's product create/edit save (app/dashboard/products/new &
+  // [id]/page.tsx) always writes these to metadata — ogImage is set from
+  // the first uploaded image, and metaTitle/Description/Keywords are
+  // auto-generated when the admin leaves the SEO tab blank — so unlike a
+  // genuinely-empty field, they're never undefined and always fell
+  // through to the fallback below, showing up as bogus spec rows like
+  // "OgImage" / "MetaTitle" on every product. tier_pricing/cross_sells/
+  // service_type/service_sport are internal fields written by the same
+  // save flow and were missing here for the same reason.
+  'ogImage',
+  'tier_pricing',
+  'cross_sells',
+  'service_type',
+  'service_sport',
   'posRole',
   'pin',
   'shift',

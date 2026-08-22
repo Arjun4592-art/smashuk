@@ -13,7 +13,7 @@ import Link from 'next/link'
 import { SITE_NAME } from '@/lib/constants'
 import { generateStaticMetadata } from '@/lib/seo'
 import { getPublicStoreContact } from '@/lib/store-contact'
-import { BLOG_POSTS } from '@/lib/blog-posts'
+import { getBlogPosts } from '@/lib/blog-posts'
 import BrandsBar from '@/components/website/BrandsBar'
 import ReviewsSlider from '@/components/website/ReviewsSlider'
 import LocalStoreNewArrivals from '@/components/website/LocalStoreNewArrivals'
@@ -150,6 +150,7 @@ function GridTexture() {
 
 export default async function LocalStorePage() {
   const contact = await getPublicStoreContact()
+  const blogPosts = await getBlogPosts()
   const fullAddress = [
     contact.address.line1,
     contact.address.line2,
@@ -536,7 +537,7 @@ export default async function LocalStorePage() {
             Written by players.
           </p>
           <div className='grid md:grid-cols-3 gap-4'>
-            {BLOG_POSTS.slice(0, 3).map((post) => (
+            {blogPosts.slice(0, 3).map((post) => (
               <Link
                 key={post.slug}
                 href={`/blog/${post.slug}`}

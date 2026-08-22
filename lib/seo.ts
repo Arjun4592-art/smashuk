@@ -151,7 +151,8 @@ export async function generateStaticMetadata(
       },
       shop: {
         title: `Buy Racket Sports Equipment Online — ${SITE_NAME}`,
-        description: 'Browse rackets, shoes and accessories for badminton, tennis, padel and squash. Best prices guaranteed.',
+        description:
+          'Browse rackets, shoes and accessories for badminton, tennis, padel and squash. Best prices guaranteed.',
         canonical: `${SITE_URL}/shop`,
       },
       'local-store': {
@@ -225,6 +226,47 @@ export function generateProductSchema(product: any) {
           },
         }
       : {}),
+  }
+}
+
+// BlogPosting schema for /blog/[slug] pages — fully auto-generated from
+// the post's own fields (title, excerpt/SEO description, cover image,
+// published date, category). No manual JSON entry needed in the
+// dashboard, so there's no way for a malformed schema to break the page.
+export function generateBlogPostSchema(post: {
+  title: string
+  excerpt: string
+  seoDescription?: string
+  coverImage: string
+  publishedAt: string
+  category: string
+  slug: string
+}) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: post.title,
+    description: post.seoDescription || post.excerpt,
+    image: post.coverImage ? [post.coverImage] : [],
+    datePublished: post.publishedAt,
+    dateModified: post.publishedAt,
+    author: {
+      '@type': 'Organization',
+      name: SITE_NAME,
+    },
+    publisher: {
+      '@type': 'Organization',
+      name: SITE_NAME,
+      logo: {
+        '@type': 'ImageObject',
+        url: `${SITE_URL}/favicon.ico`,
+      },
+    },
+    mainEntityOfPage: {
+      '@type': 'WebPage',
+      '@id': `${SITE_URL}/blog/${post.slug}`,
+    },
+    articleSection: post.category,
   }
 }
 

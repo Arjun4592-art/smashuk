@@ -184,8 +184,47 @@ async function main() {
   }
   console.log(`✅ Deleted ${catDeleted} categories`)
 
+  // 3) Delete all global product options (Size, Color, Grip Size, etc.)
+  // BUG FIX ("stale duplicate option still shows in Options list after
+  // clearing the catalog"): this script used to stop at products +
+  // categories, so every global option — including stray per-product
+  // duplicates left over from an earlier buggy import run (e.g. "Babolat
+  // Evo Drive Lite Women... (Grip Size)") — stayed behind even once every
+  // product referencing it was gone. A re-import then had nothing to
+  // clean those up, since the import script only ever reuses options by
+  // exact title match, never deletes unrelated ones. Wipe every option
+  // here too so re-running the importer starts from a genuinely clean
+  // slate and rebuilds only the real, correctly-shared options.
+  console.log('\n🗑️  Deleting product options...')
+  let optDeleted = 0
+  const failedOptions: string[] = []
+  while (true) {
+    const { product_options: options } = await medusaGet(
+      token,
+      '/admin/product-options?limit=100&fields=id',
+    )
+    if (!options || options.length === 0) break
+    let progressedThisPage = false
+    for (const o of options) {
+      try {
+        await medusaDelete(token, `/admin/product-options/${o.id}`)
+        optDeleted++
+        progressedThisPage = true
+      } catch (err: any) {
+        console.warn(`  ⚠️  Could not delete option ${o.id}: ${err.message}`)
+        failedOptions.push(o.id)
+      }
+    }
+    if (!progressedThisPage) break
+  }
+  console.log(`✅ Deleted ${optDeleted} product options`)
+  if (failedOptions.length > 0) {
+    console.log(`⚠️  ${failedOptions.length} options could not be deleted:`)
+    failedOptions.forEach((id) => console.log(`   - ${id}`))
+  }
+
   console.log(
-    '\n✨ Catalog cleared. Now run: npx ts-node --esm scripts/seed-smashuk.ts',
+    '\n✨ Catalog cleared (products, categories, and options). Now run your import script, e.g.: npx tsx scripts/import-shopify-csv.ts',
   )
 }
 

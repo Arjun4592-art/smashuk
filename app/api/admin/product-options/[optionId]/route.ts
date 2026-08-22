@@ -14,6 +14,42 @@ async function safeJson(res: Response) {
   }
 }
 
+// Fetches a single global option by id, with its FULL nested `values`
+// list. Deliberately separate from GET /admin/product-options (the list
+// endpoint) — see findGlobalOption() in lib/api/dashboard.ts for why:
+// the list endpoint truncates nested `values` per option to stay
+// bounded across many parents, which silently drops values on
+// large option sets (Size (UK), Color, Size). A single-resource fetch
+// has only one parent, so Medusa returns its values uncapped.
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ optionId: string }> },
+) {
+  try {
+    const { optionId } = await params
+    const authorization = (await getAdminAuthHeader(req)) ?? ''
+    if (!authorization) {
+      return NextResponse.json(
+        { error: 'Missing Authorization header' },
+        { status: 401 },
+      )
+    }
+
+    const { searchParams } = new URL(req.url)
+    const qs = searchParams.toString()
+    const res = await fetch(
+      `${MEDUSA_URL}/admin/product-options/${optionId}${qs ? `?${qs}` : ''}`,
+      { headers: { Authorization: authorization } },
+    )
+
+    const data = await safeJson(res)
+    return NextResponse.json(data, { status: res.status })
+  } catch (err: any) {
+    console.error('[GET product-options/:id]', err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
+}
+
 // Updates an existing GLOBAL option (e.g. adding "12" to Size's value
 // list). CONFIRMED via Medusa's own admin UI network traffic:
 // POST /admin/product-options/:id with { title, values, ranks }, where

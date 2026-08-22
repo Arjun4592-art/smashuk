@@ -92,8 +92,15 @@ export function useDashboardStats(range?: string) {
 
 // ── Inventory hook ────────────────────────────────────────────────────────────
 
-export function useInventory(params?: { limit?: number; offset?: number }) {
-  return useAsync(() => getInventory(params), [params?.limit, params?.offset])
+export function useInventory(params?: {
+  limit?: number
+  offset?: number
+  q?: string
+}) {
+  return useAsync(
+    () => getInventory(params),
+    [params?.limit, params?.offset, params?.q],
+  )
 }
 
 // ── Discounts hook ────────────────────────────────────────────────────────────

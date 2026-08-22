@@ -15,12 +15,25 @@ import {
 const NO_PREFERENCE = 'No preference — advise me in-store'
 const OWN_STRING = 'Bringing my own string'
 
-// Static racket types — always shown so the form itself never disappears.
-// Live Medusa products (fetched below) are matched against these to enable
-// real online pay-and-book; if the backend is unreachable or a sport has no
-// matching product yet, the form still renders and falls back to sending a
-// booking request by email instead of hiding entirely.
+// Static racket types — used ONLY as a fallback when the live Medusa
+// product fetch fails or comes back empty (backend unreachable / nothing
+// seeded yet), so the form still renders and can fall back to sending a
+// booking request by email instead of showing nothing.
 const SPORTS: Sport[] = ['badminton', 'tennis', 'squash']
+
+const SPORT_ICON: Record<string, string> = {
+  badminton: '🏸',
+  tennis: '🎾',
+  squash: '🏓',
+}
+
+function formatPrice(product: any): string | null {
+  const variant = product?.variants?.[0]
+  const amount =
+    variant?.calculated_price?.calculated_amount ?? variant?.prices?.[0]?.amount
+  if (typeof amount !== 'number') return null
+  return `£${amount.toFixed(amount % 1 === 0 ? 0 : 2)}`
+}
 
 // Store hours — Mon-Fri 11am-7pm, Sat 11am-5pm, Sun closed. Used to build
 // valid time-slot options for the day the customer picks.
@@ -73,6 +86,10 @@ export default function StringingBookingForm() {
   const [catalogStrings, setCatalogStrings] = useState<
     { sport: string; brand: string; name: string }[]
   >([])
+  // Tracks whether the /api/store/products fetch has finished (success OR
+  // failure) — used to decide when to show the "which stringing is
+  // available" cards vs. a loading placeholder vs. the static fallback.
+  const [servicesLoaded, setServicesLoaded] = useState(false)
 
   useEffect(() => {
     fetch('/api/store/products?q=Stringing')
@@ -82,15 +99,29 @@ export default function StringingBookingForm() {
           (p: any) => p.metadata?.service_type === 'stringing',
         )
         setServices(found)
-        if (found.length) setSport(found[0].metadata.service_sport)
       })
       .catch(() => {})
+      .finally(() => setServicesLoaded(true))
 
     fetch('/api/store/stringing-catalog')
       .then((res) => res.json())
       .then((data) => setCatalogStrings(data.items ?? []))
       .catch(() => {})
   }, [])
+
+  // What can actually be booked right now. When live "Stringing Service"
+  // products exist in Medusa (seeded via Settings → Services), only those
+  // sports are offered — this is the real, current availability. If the
+  // fetch failed or nothing has been seeded yet, fall back to the full
+  // static list so the form never renders with zero options.
+  const availableSports = useMemo(() => {
+    if (services.length) {
+      return services
+        .map((p: any) => p.metadata?.service_sport)
+        .filter((s: string): s is Sport => SPORTS.includes(s as Sport))
+    }
+    return servicesLoaded ? SPORTS : []
+  }, [services, servicesLoaded])
 
   const timeSlots = useMemo(() => slotsForDate(date), [date])
   // Match on the raw metadata field, then normalize just the matched
@@ -237,21 +268,60 @@ export default function StringingBookingForm() {
           <label className='block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-montserrat'>
             Racket Type
           </label>
-          <div className='grid grid-cols-3 gap-2'>
-            {SPORTS.map((s) => (
-              <button
-                key={s}
-                onClick={() => handleSportChange(s)}
-                className={`px-3 py-2.5 rounded-xl border-2 text-sm font-lato font-semibold capitalize transition-colors ${
-                  sport === s
-                    ? 'border-[#E8553A] bg-[#E8553A]/5 text-[#E8553A]'
-                    : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+
+          {!servicesLoaded ? (
+            // Fetch still in flight — three skeleton chips the same size as
+            // the real cards below, so the form doesn't jump on load.
+            <div className='grid grid-cols-3 gap-2'>
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className='h-[62px] rounded-xl border-2 border-gray-100 bg-gray-50 animate-pulse'
+                />
+              ))}
+            </div>
+          ) : (
+            <div className='grid grid-cols-3 gap-2'>
+              {availableSports.map((s) => {
+                const liveProduct = services.find(
+                  (p: any) => p.metadata?.service_sport === s,
+                )
+                const price = liveProduct ? formatPrice(liveProduct) : null
+                return (
+                  <button
+                    key={s}
+                    onClick={() => handleSportChange(s)}
+                    className={`px-3 py-2.5 rounded-xl border-2 text-sm font-lato font-semibold capitalize transition-colors flex flex-col items-center gap-0.5 ${
+                      sport === s
+                        ? 'border-[#E8553A] bg-[#E8553A]/5 text-[#E8553A]'
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <span className='text-lg leading-none'>
+                      {SPORT_ICON[s]}
+                    </span>
+                    <span>{s}</span>
+                    {price && (
+                      <span
+                        className={`text-[10.5px] font-mono font-normal normal-case ${
+                          sport === s ? 'text-[#E8553A]/70' : 'text-gray-400'
+                        }`}
+                      >
+                        from {price}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {servicesLoaded && !services.length && (
+            <p className='text-[11.5px] text-gray-400 font-lato mt-1.5'>
+              Live pricing is unavailable right now — pick your racket type and
+              we'll confirm the price when we message you back.
+            </p>
+          )}
         </div>
 
         <div className='grid grid-cols-2 gap-4'>

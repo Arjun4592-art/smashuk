@@ -3,10 +3,12 @@
 // Uses Tailwind utility classes + inline style where Tailwind can't reach.
 
 import StringingBookingForm from '@/components/website/StringingBookingForm'
+import StringingBookNowTrigger from '@/components/website/StringingBookNowTrigger'
 
 const PRICING = [
   {
     sport: 'Badminton',
+    sportKey: 'badminton' as const,
     icon: '🏸',
     from: '£16',
     note: 'Syn. gut to premium multifilament',
@@ -14,6 +16,7 @@ const PRICING = [
   },
   {
     sport: 'Tennis',
+    sportKey: 'tennis' as const,
     icon: '🎾',
     from: '£22',
     note: 'Poly, multifilament & natural gut',
@@ -21,6 +24,7 @@ const PRICING = [
   },
   {
     sport: 'Squash',
+    sportKey: 'squash' as const,
     icon: '🏓',
     from: '£22',
     note: 'Durable thin-gauge squash strings',
@@ -215,12 +219,9 @@ export default function StringingServicesPageRedesign() {
                 major tournaments.
               </p>
               <div className='flex flex-wrap gap-3'>
-                <a
-                  href='#book'
-                  className='bg-[#E8553A] hover:bg-[#D4441F] text-white px-7 py-3.5 rounded-full text-sm font-bold transition-colors font-montserrat'
-                >
-                  ⚡ Book 40-Min Express
-                </a>
+                <StringingBookNowTrigger className='bg-[#E8553A] hover:bg-[#D4441F] text-white px-7 py-3.5 rounded-full text-sm font-bold transition-colors font-montserrat'>
+                  📅 Book Your Stringing
+                </StringingBookNowTrigger>
                 <a
                   href='#pricing'
                   className='border border-white/20 hover:border-white/40 text-white/70 hover:text-white px-7 py-3.5 rounded-full text-sm transition-colors font-montserrat'
@@ -375,16 +376,50 @@ export default function StringingServicesPageRedesign() {
                   </li>
                 ))}
               </ul>
-              <a
-                href='#book'
-                className='mt-6 inline-block bg-white text-[#E8553A] font-bold text-sm px-6 py-3 rounded-full hover:bg-white/90 transition-colors font-montserrat'
-              >
-                Book Express Slot →
-              </a>
             </div>
+          </div>
+          {/* Book button — sits between/below both cards rather than
+              inside just the Express one, since either card can lead into
+              the same "Choose Your Service Option" modal. */}
+          <div className='flex justify-center mt-6'>
+            <StringingBookNowTrigger className='inline-block bg-white text-[#E8553A] font-bold text-sm px-8 py-3 rounded-full hover:bg-white/90 transition-colors font-montserrat'>
+              Book Express Slot →
+            </StringingBookNowTrigger>
           </div>
         </div>
         <StringDivider inverted />
+      </section>
+
+      {/* ── BOOKING ─────────────────────────────────────────────────────── */}
+      {/* White bg + top/bottom border so it's visually distinct from the
+          Process section right below it — both otherwise sit on the same
+          page background (#F5F3EF) and were blending into one block. */}
+      <section
+        id='book'
+        className='reveal bg-white border-y border-[#0A1F44]/8'
+      >
+        <div className='max-w-5xl mx-auto px-6 py-16 grid md:grid-cols-2 gap-12 items-start'>
+          <div>
+            <Eyebrow>Book Now</Eyebrow>
+            <h2 className='font-black text-[#0A1F44] text-3xl mb-4 font-montserrat'>
+              Reserve Your Stringing Slot
+            </h2>
+            <p className='text-gray-400 text-sm leading-relaxed mb-6'>
+              Use the form to book our 40-minute express service, or request a
+              standard 24-hour drop-off. We'll confirm your slot by message or
+              email.
+            </p>
+            <div className='space-y-3 text-sm text-gray-500'>
+              <p>📍 Manchester City Centre</p>
+              <p>🕐 Open Mon–Sat · 11am–7pm</p>
+              <p>📞 Can also book by phone or WhatsApp</p>
+            </div>
+          </div>
+          {/* StringingBookingForm already ships its own card styling
+              (bg/border/rounded/padding), so it's rendered directly here
+              without an extra wrapping card. */}
+          <StringingBookingForm />
+        </div>
       </section>
 
       {/* ── PROCESS ─────────────────────────────────────────────────────── */}
@@ -464,32 +499,6 @@ export default function StringingServicesPageRedesign() {
               </div>
             ))}
           </div>
-        </div>
-      </section>
-
-      {/* ── BOOKING ─────────────────────────────────────────────────────── */}
-      <section id='book' className='max-w-5xl mx-auto px-6 py-16'>
-        <div className='grid md:grid-cols-2 gap-12 items-start'>
-          <div>
-            <Eyebrow>Book Now</Eyebrow>
-            <h2 className='font-black text-[#0A1F44] text-3xl mb-4 font-montserrat'>
-              Reserve Your Stringing Slot
-            </h2>
-            <p className='text-gray-400 text-sm leading-relaxed mb-6'>
-              Use the form to book our 40-minute express service, or request a
-              standard 24-hour drop-off. We'll confirm your slot by message or
-              email.
-            </p>
-            <div className='space-y-3 text-sm text-gray-500'>
-              <p>📍 Manchester City Centre</p>
-              <p>🕐 Open Mon–Sat · 11am–7pm</p>
-              <p>📞 Can also book by phone or WhatsApp</p>
-            </div>
-          </div>
-          {/* StringingBookingForm already ships its own card styling
-              (bg/border/rounded/padding), so it's rendered directly here
-              without an extra wrapping card. */}
-          <StringingBookingForm />
         </div>
       </section>
 

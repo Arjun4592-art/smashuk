@@ -3,7 +3,14 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { createProduct } from '@/lib/api/dashboard'
+import {
+  createProduct,
+  updateProduct,
+  upsertOptionValues,
+  linkOptionsToProduct,
+  deleteGlobalOption,
+  upsertProductTags,
+} from '@/lib/api/dashboard'
 import { toast } from 'sonner'
 
 // BUG FIX: SPORTS/BRANDS used to be hardcoded here and drifted out of sync
@@ -143,6 +150,67 @@ export default function AddProductPage() {
   const [sportOptions, setSportOptions] = useState<string[]>([])
   const [addingBrand, setAddingBrand] = useState(false)
   const [addingSport, setAddingSport] = useState(false)
+
+  // Real GLOBAL options (Size, Color, Grips, etc.) fetched from Medusa —
+  // used to restrict the Variants tab's "Option name" field to a dropdown
+  // of options that already exist, instead of free text. Free text is what
+  // let every product create its own "Size"/"Color" copy in the first
+  // place; new option TITLES should only ever be created from the
+  // dedicated Product Options page, not typed ad hoc while adding a product.
+  const [globalOptions, setGlobalOptions] = useState<
+    { id: string; title: string; values: string[] }[]
+  >([])
+
+  useEffect(() => {
+    // BUG FIX (Size/Color values dropdown missing/incomplete values, e.g.
+    // "2.5" invisible under "Size (UK)"): the LIST endpoint
+    // (`/admin/product-options`) truncates each option's nested `values`
+    // to Medusa's default page size — same root cause as the
+    // "Option value X does not exist" save bug (see findGlobalOption in
+    // lib/api/dashboard.ts). "Size (UK)" has 21 values, "Color" 48,
+    // "Size" 66 — all past that cap, so the dropdown itself silently
+    // dropped values past the cutoff. Fix: use the list endpoint only to
+    // get each option's id/title (cheap, no `values` requested at all),
+    // then fetch each option's FULL value list via the single-resource
+    // endpoint, which has only one parent so nothing gets capped.
+    fetch('/api/admin/product-options?limit=200&fields=id,title')
+      .then((res) => res.json())
+      .then(async (data) => {
+        const list = (data.product_options ?? []) as {
+          id: string
+          title: string
+        }[]
+        setGlobalOptions(list.map((o) => ({ ...o, values: [] })))
+
+        const withValues = await Promise.all(
+          list.map(async (o) => {
+            try {
+              const res = await fetch(
+                `/api/admin/product-options/${o.id}?fields=id,title,values.id,values.value`,
+              )
+              const single = await res.json()
+              const values = (single.product_option?.values ?? []).map(
+                (v: any) => v.value,
+              )
+              return { id: o.id, title: o.title, values }
+            } catch (err) {
+              console.error('Failed to load option values:', o.title, err)
+              return { id: o.id, title: o.title, values: [] as string[] }
+            }
+          }),
+        )
+        setGlobalOptions(withValues)
+      })
+      .catch((err) => console.error('Failed to load global options:', err))
+  }, [])
+
+  // Tracks which option rows (by row id) are currently in "type a brand
+  // new value" mode — see the Value <select>'s "+ Add new value..." entry
+  // below. Everything else in that dropdown is an existing value on the
+  // chosen global option, so typos/duplicates are still possible here
+  // (new sizes genuinely do get added over time) but never invisibly —
+  // the admin has to deliberately choose to type one.
+  const [customValueRows, setCustomValueRows] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetch('/api/admin/products/field-options')
@@ -417,29 +485,91 @@ export default function AddProductPage() {
   const filledOptions = (v: Variant) =>
     v.options.filter((o) => o.name.trim() && o.value.trim())
 
-  const buildPayload = (saveStatus: 'active' | 'draft') => {
+  // Resolved GLOBAL option info per title (populated by resolveGlobalOptions()
+  // right before this product is created).
+  type ResolvedOption = {
+    optionId: string
+    valueIds: string[]
+    canonicalValues: string[]
+  }
+
+  // BUG FIX ("Size(IN)"/"Size"/"Color" duplicated as a fresh product-specific
+  // option on every single product create): this page used to build a plain
+  // local `{ title, values }` options array with no id and send it straight
+  // to Medusa's create-product endpoint. With Medusa's Global Product Options
+  // (v2.17+), any option sent without an id is treated as brand new — so
+  // every product created here got its OWN "Size"/"Color", even when a
+  // global option with that exact title already existed. Product edits
+  // don't have this problem (see [id]/page.tsx's syncOptionsForVariants,
+  // which always resolves the real global option via upsertOptionValues()
+  // first) — creation now does the same thing: resolve/create each needed
+  // GLOBAL option BEFORE building the create payload, and pass its real id
+  // + canonical values along (same id-to-reuse pattern Medusa uses for
+  // `type`/`collection` on create), so the product attaches to the existing
+  // global option instead of spawning a new one.
+  const resolveGlobalOptions = async (): Promise<
+    Map<string, ResolvedOption>
+  > => {
+    const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
+    const resolved = new Map<string, ResolvedOption>()
+
+    if (!hasExtraVariants) {
+      const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
+        'Default',
+        ['Default'],
+      )
+      resolved.set('Default', { optionId, valueIds, canonicalValues })
+      return resolved
+    }
+
+    const valuesByTitle = new Map<string, Set<string>>()
+    variants.forEach((v) => {
+      filledOptions(v).forEach((o) => {
+        const title = o.name.trim()
+        if (!valuesByTitle.has(title)) valuesByTitle.set(title, new Set())
+        valuesByTitle.get(title)!.add(o.value.trim())
+      })
+    })
+
+    for (const [title, valueSet] of valuesByTitle) {
+      const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
+        title,
+        Array.from(valueSet),
+      )
+      resolved.set(title, { optionId, valueIds, canonicalValues })
+    }
+
+    return resolved
+  }
+
+  const buildPayload = (
+    saveStatus: 'active' | 'draft',
+    resolvedOptions: Map<string, ResolvedOption>,
+  ) => {
     const medusaStatus = saveStatus === 'active' ? 'published' : 'draft'
     const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
 
-    // Options array — built from whatever free-text option names the admin
-    // typed (e.g. "Size", "Weight", "Grip Size"), not a hardcoded pair.
-    // Preserves the order option names were first typed in.
-    const options: { title: string; values: string[] }[] = []
-    if (hasExtraVariants) {
-      const valuesByTitle = new Map<string, Set<string>>()
-      variants.forEach((v) => {
-        filledOptions(v).forEach((o) => {
-          const title = o.name.trim()
-          if (!valuesByTitle.has(title)) valuesByTitle.set(title, new Set())
-          valuesByTitle.get(title)!.add(o.value.trim())
-        })
-      })
-      valuesByTitle.forEach((values, title) => {
-        options.push({ title, values: Array.from(values) })
-      })
-    } else {
-      options.push({ title: 'Default', values: ['Default'] })
+    // Same casing-mismatch guard as the edit page's canonicalValue() — a
+    // requested value can differ in case from what's actually stored on
+    // the global option (e.g. typed "black", stored "Black"), and variant
+    // options must send the exact stored string.
+    const canonicalValue = (title: string, typed: string): string => {
+      const entry = resolvedOptions.get(title)
+      if (!entry) return typed
+      const idx = entry.canonicalValues.findIndex(
+        (v) => v.toLowerCase() === typed.toLowerCase(),
+      )
+      return idx >= 0 ? entry.canonicalValues[idx] : typed
     }
+
+    // Options array — one entry per resolved GLOBAL option, WITH its real
+    // id so Medusa attaches to the existing option instead of creating a
+    // new one (mirrors the `type: { value, id }` reuse pattern Medusa uses
+    // elsewhere on product create).
+    const options: { id: string; title: string; values: string[] }[] = []
+    resolvedOptions.forEach((entry, title) => {
+      options.push({ id: entry.optionId, title, values: entry.canonicalValues })
+    })
 
     // Base variant
     const baseVariant = {
@@ -456,7 +586,7 @@ export default function AddProductPage() {
           ]
         : [],
       weight: form.weight ? Number(form.weight) : undefined,
-      options: { Default: 'Default' },
+      options: { Default: canonicalValue('Default', 'Default') },
     }
 
     // Extra variants
@@ -477,7 +607,10 @@ export default function AddProductPage() {
               ]
             : baseVariant.prices,
           options: Object.fromEntries(
-            filled.map((o) => [o.name.trim(), o.value.trim()]),
+            filled.map((o) => [
+              o.name.trim(),
+              canonicalValue(o.name.trim(), o.value.trim()),
+            ]),
           ),
           metadata: v.colorCode ? { color_code: v.colorCode } : undefined,
           // Scoped variant images (Medusa v2.11+) — must be a subset of the
@@ -508,18 +641,15 @@ export default function AddProductPage() {
       thumbnail: uploadedImages[0]?.url ?? undefined,
       images: uploadedImages.length > 0 ? uploadedImages : undefined,
       categories: form.category ? [{ id: form.category }] : [],
-      // BUG FIX: Medusa's admin product-create endpoint expects `tags` as an
-      // array of { value } objects, not a raw comma-separated string. Sending
-      // a string here fails schema validation and rejects the ENTIRE product
-      // create request with a 400 — which is why products never got created
-      // while categories (which don't send `tags`) always worked fine.
-      tags: form.tags
-        ? form.tags
-            .split(',')
-            .map((t) => t.trim())
-            .filter(Boolean)
-            .map((value) => ({ value }))
-        : undefined,
+      // BUG FIX ("Invalid request: Field 'tags, 0, id' is required"):
+      // Medusa's product-create endpoint only accepts `tags` as an array
+      // of { id } objects referencing EXISTING product-tag records — not
+      // { value } (that shape doesn't create tags inline, it just fails
+      // schema validation). Real ids are resolved via upsertProductTags()
+      // in handleSave, BEFORE this payload is built, and set onto
+      // payload.tags there — this is just a placeholder so the field
+      // always exists on the object.
+      tags: undefined as { id: string }[] | undefined,
       options,
       variants: allVariants,
       metadata: {
@@ -630,8 +760,88 @@ export default function AddProductPage() {
     setStatus(saveStatus)
 
     try {
-      const payload = buildPayload(saveStatus)
-      await createProduct(payload)
+      // Resolve (create-or-reuse) every needed option against the GLOBAL
+      // options table BEFORE the product exists — see resolveGlobalOptions()
+      // above. This is what makes a new product attach to the existing
+      // "Size(IN)"/"Color"/etc. global option instead of spawning its own.
+      const resolvedOptions = await resolveGlobalOptions()
+      // BUG FIX ("Invalid request: Field 'tags, 0, id' is required"):
+      // resolve the Tags field's free text into real product-tag ids
+      // BEFORE building the payload — Medusa's product-create endpoint
+      // only accepts `tags: [{ id }]`, never `{ value }`. See
+      // upsertProductTags() in lib/api/dashboard.ts.
+      const tagIds = form.tags
+        ? await upsertProductTags(form.tags.split(','))
+        : []
+      const payload = buildPayload(saveStatus, resolvedOptions)
+      payload.tags = tagIds.length > 0 ? tagIds : undefined
+      const created = await createProduct(payload)
+      const productId = created?.product?.id
+
+      // Best-effort safety net: confirm the product actually ended up
+      // linked to the GLOBAL option we resolved above, not a fresh
+      // duplicate Medusa may have created despite the id we sent. If a
+      // stray duplicate slipped through, remap this product's variants
+      // onto the real global option's values, re-link the product to it,
+      // and delete the stray so it never shows up as a second "Size"/
+      // "Color" entry in the Options list. A failure here never blocks
+      // the successful product save — it just leaves a duplicate to clean
+      // up later with scripts/consolidate-global-options.ts.
+      if (productId) {
+        try {
+          const res = await fetch(
+            `/api/admin/products/${productId}?fields=id,*options,*options.values,*variants,*variants.options`,
+          )
+          const freshData = await res.json()
+          const freshProduct = freshData.product
+          const freshOptions: any[] = freshProduct?.options ?? []
+          const freshVariants: any[] = freshProduct?.variants ?? []
+
+          for (const [title, entry] of resolvedOptions) {
+            const linked = freshOptions.find(
+              (o) => o.title.toLowerCase() === title.toLowerCase(),
+            )
+            if (!linked || linked.id === entry.optionId) continue // reused correctly, nothing to do
+
+            console.warn(
+              `[new product] "${title}" created a duplicate option (${linked.id}) instead of reusing the global one (${entry.optionId}) — remapping.`,
+            )
+
+            const affectedVariants = freshVariants.filter((v) =>
+              (v.options ?? []).some((vo: any) => vo.option_id === linked.id),
+            )
+            const variantUpdates = affectedVariants.map((v) => {
+              const vo = v.options.find((o: any) => o.option_id === linked.id)
+              return { id: v.id, options: { [title]: vo.value } }
+            })
+            if (variantUpdates.length > 0) {
+              await updateProduct(productId, { variants: variantUpdates })
+            }
+
+            await linkOptionsToProduct(
+              productId,
+              [{ id: entry.optionId, value_ids: entry.valueIds }],
+              new Set(freshOptions.map((o) => o.id)),
+              [linked.id],
+            )
+
+            try {
+              await deleteGlobalOption(linked.id)
+            } catch (delErr) {
+              console.warn(
+                '[new product] Could not delete stray duplicate option:',
+                delErr,
+              )
+            }
+          }
+        } catch (safetyErr) {
+          console.warn(
+            '[new product] Global-option safety check failed (non-fatal):',
+            safetyErr,
+          )
+        }
+      }
+
       toast.success('Product created successfully!')
       router.push('/dashboard/products')
     } catch (err: any) {
@@ -1579,12 +1789,15 @@ export default function AddProductPage() {
                             </button>
                           )}
                         </div>
-                        {/* Free-text option rows — the admin types BOTH
-                            the option name ("Size", "Weight", "Grip
-                            Size"...) and its value for this variant,
-                            instead of the form only offering Size/Color.
-                            Different product types (rackets, clothing,
-                            strings) can each use whatever options fit. */}
+                        {/* Option name is now a dropdown of real GLOBAL
+                            options only (Size, Color, Grips, etc.) — no
+                            free typing. This is what stops a typo or a
+                            slightly different name ("Colour" vs "Color")
+                            from silently creating a brand-new duplicate
+                            global option on every product. New value(s)
+                            are still fine — see the Value dropdown below —
+                            but a new OPTION TITLE has to be created from
+                            the dedicated Product Options page first. */}
                         <div className='space-y-2'>
                           <div className='flex items-center justify-between'>
                             <label className='block text-[11.5px] text-[#6D7175]'>
@@ -1598,53 +1811,131 @@ export default function AddProductPage() {
                               + Add Option
                             </button>
                           </div>
-                          {variant.options.map((opt) => (
-                            <div
-                              key={opt.id}
-                              className='flex items-center gap-1.5'
-                            >
-                              <input
-                                type='text'
-                                value={opt.name}
-                                onChange={(e) =>
-                                  updateOptionRow(
-                                    variant.id,
-                                    opt.id,
-                                    'name',
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder='Option name (e.g. Size, Weight)'
-                                className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
-                              />
-                              <input
-                                type='text'
-                                value={opt.value}
-                                onChange={(e) =>
-                                  updateOptionRow(
-                                    variant.id,
-                                    opt.id,
-                                    'value',
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder='Value (e.g. L, 88g)'
-                                className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
-                              />
-                              {variant.options.length > 1 && (
-                                <button
-                                  type='button'
-                                  onClick={() =>
-                                    removeOptionRow(variant.id, opt.id)
-                                  }
-                                  title='Remove option'
-                                  className='px-2 py-2 text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer shrink-0'
+                          {variant.options.map((opt) => {
+                            const selectedGlobalOption = globalOptions.find(
+                              (g) => g.title === opt.name,
+                            )
+                            const isCustomValue = customValueRows.has(opt.id)
+                            return (
+                              <div
+                                key={opt.id}
+                                className='flex items-center gap-1.5'
+                              >
+                                <select
+                                  value={opt.name}
+                                  onChange={(e) => {
+                                    updateOptionRow(
+                                      variant.id,
+                                      opt.id,
+                                      'name',
+                                      e.target.value,
+                                    )
+                                    // Switching option name invalidates
+                                    // whatever value was picked/typed.
+                                    updateOptionRow(
+                                      variant.id,
+                                      opt.id,
+                                      'value',
+                                      '',
+                                    )
+                                    setCustomValueRows((prev) => {
+                                      const next = new Set(prev)
+                                      next.delete(opt.id)
+                                      return next
+                                    })
+                                  }}
+                                  className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all bg-white'
                                 >
-                                  ✕
-                                </button>
-                              )}
-                            </div>
-                          ))}
+                                  <option value=''>Select option...</option>
+                                  {globalOptions.map((g) => (
+                                    <option key={g.id} value={g.title}>
+                                      {g.title}
+                                    </option>
+                                  ))}
+                                </select>
+                                {isCustomValue ? (
+                                  <input
+                                    type='text'
+                                    autoFocus
+                                    value={opt.value}
+                                    onChange={(e) =>
+                                      updateOptionRow(
+                                        variant.id,
+                                        opt.id,
+                                        'value',
+                                        e.target.value,
+                                      )
+                                    }
+                                    onBlur={() => {
+                                      if (!opt.value.trim()) {
+                                        setCustomValueRows((prev) => {
+                                          const next = new Set(prev)
+                                          next.delete(opt.id)
+                                          return next
+                                        })
+                                      }
+                                    }}
+                                    placeholder='New value (e.g. 12, Navy)'
+                                    className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
+                                  />
+                                ) : (
+                                  <select
+                                    value={opt.value}
+                                    disabled={!selectedGlobalOption}
+                                    onChange={(e) => {
+                                      if (e.target.value === '__custom__') {
+                                        updateOptionRow(
+                                          variant.id,
+                                          opt.id,
+                                          'value',
+                                          '',
+                                        )
+                                        setCustomValueRows((prev) =>
+                                          new Set(prev).add(opt.id),
+                                        )
+                                      } else {
+                                        updateOptionRow(
+                                          variant.id,
+                                          opt.id,
+                                          'value',
+                                          e.target.value,
+                                        )
+                                      }
+                                    }}
+                                    className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all bg-white disabled:bg-[#F6F6F7] disabled:text-[#8C9196]'
+                                  >
+                                    <option value=''>
+                                      {selectedGlobalOption
+                                        ? 'Select value...'
+                                        : 'Pick an option first'}
+                                    </option>
+                                    {selectedGlobalOption?.values.map((v) => (
+                                      <option key={v} value={v}>
+                                        {v}
+                                      </option>
+                                    ))}
+                                    {selectedGlobalOption && (
+                                      <option value='__custom__'>
+                                        + Add new value...
+                                      </option>
+                                    )}
+                                  </select>
+                                )}
+                                {variant.options.length > 1 && (
+                                  <button
+                                    type='button'
+                                    onClick={() =>
+                                      removeOptionRow(variant.id, opt.id)
+                                    }
+                                    title='Remove option'
+                                    className='px-2 py-2 text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer shrink-0'
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })}
                           {/* Optional colour swatch — independent of the
                               option name typed above; if any option here
                               represents a colour, pick the hex that should
