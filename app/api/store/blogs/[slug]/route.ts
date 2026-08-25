@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { safeJson } from '@/lib/api/safe-json';
 const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000';
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? '';
+export const dynamic = 'force-dynamic'
 export const revalidate = 120;
 export async function GET(req: NextRequest, {
   params
