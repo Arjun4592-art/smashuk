@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/authStore'
 import { toast } from 'sonner'
-
 const Icons = {
   bell: (
     <svg
@@ -174,18 +173,29 @@ const Icons = {
     </svg>
   ),
 }
-
 const SETTINGS_NAV = [
-  { label: 'General', href: '/dashboard/settings' },
-  { label: 'Billing', href: '/dashboard/settings/billing' },
-  { label: 'Shipping', href: '/dashboard/settings/shipping' },
+  {
+    label: 'General',
+    href: '/dashboard/settings',
+  },
+  {
+    label: 'Billing',
+    href: '/dashboard/settings/billing',
+  },
+  {
+    label: 'Shipping',
+    href: '/dashboard/settings/shipping',
+  },
   {
     label: 'Notifications',
     href: '/dashboard/settings/notifications',
     active: true,
   },
+  {
+    label: 'Marketing',
+    href: '/dashboard/settings/marketing',
+  },
 ]
-
 interface NotificationSetting {
   id: string
   label: string
@@ -195,7 +205,6 @@ interface NotificationSetting {
   push: boolean
   icon: React.ReactNode
 }
-
 const NOTIFICATION_GROUPS = [
   {
     group: 'Orders',
@@ -340,7 +349,6 @@ const NOTIFICATION_GROUPS = [
     ],
   },
 ]
-
 function Toggle({
   checked,
   onChange,
@@ -359,56 +367,67 @@ function Toggle({
     </button>
   )
 }
-
 export default function NotificationsPage() {
   const { user } = useAuthStore()
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [settings, setSettings] = useState<
-    Record<string, { email: boolean; sms: boolean; push: boolean }>
+    Record<
+      string,
+      {
+        email: boolean
+        sms: boolean
+        push: boolean
+      }
+    >
   >(() => {
     const initial: Record<
       string,
-      { email: boolean; sms: boolean; push: boolean }
+      {
+        email: boolean
+        sms: boolean
+        push: boolean
+      }
     > = {}
     NOTIFICATION_GROUPS.forEach((group) => {
       group.items.forEach((item) => {
-        initial[item.id] = { email: item.email, sms: item.sms, push: item.push }
+        initial[item.id] = {
+          email: item.email,
+          sms: item.sms,
+          push: item.push,
+        }
       })
     })
     return initial
   })
-
-  // BUG FIX: this used to be hardcoded to a fake 'admin@smashuk.co.uk' /
-  // '+91 98765 43210' that never matched whoever was actually logged in,
-  // and handleSave() below never persisted it anywhere — every toggle and
-  // contact detail reset on refresh. Now seeded from the logged-in admin's
-  // real account, then overwritten by whatever was actually saved before
-  // (see the load effect below).
   const [channels, setChannels] = useState({
     email: user?.email ?? '',
     smsPhone: user?.phone ?? '',
     pushEnabled: true,
   })
-
-  // ── Load previously saved settings from the backend ──────────────
   useEffect(() => {
     let cancelled = false
-    fetch('/api/admin/notification-settings', { credentials: 'include' })
+    fetch('/api/admin/notification-settings', {
+      credentials: 'include',
+    })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return
         if (data.settings && Object.keys(data.settings).length > 0) {
-          setSettings((prev) => ({ ...prev, ...data.settings }))
+          setSettings((prev) => ({
+            ...prev,
+            ...data.settings,
+          }))
         }
         if (data.channels && (data.channels.email || data.channels.smsPhone)) {
-          setChannels((prev) => ({ ...prev, ...data.channels }))
+          setChannels((prev) => ({
+            ...prev,
+            ...data.channels,
+          }))
         }
       })
-      .catch(() => {
-        /* fall back to defaults seeded above if this fails */
-      })
+      .catch(() => {})
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
@@ -416,32 +435,42 @@ export default function NotificationsPage() {
       cancelled = true
     }
   }, [])
-
   const toggle = (id: string, channel: 'email' | 'sms' | 'push') => {
     setSettings((prev) => ({
       ...prev,
-      [id]: { ...prev[id], [channel]: !prev[id][channel] },
+      [id]: {
+        ...prev[id],
+        [channel]: !prev[id][channel],
+      },
     }))
   }
-
   const toggleAll = (channel: 'email' | 'sms' | 'push', value: boolean) => {
     setSettings((prev) => {
-      const next = { ...prev }
+      const next = {
+        ...prev,
+      }
       Object.keys(next).forEach((id) => {
-        next[id] = { ...next[id], [channel]: value }
+        next[id] = {
+          ...next[id],
+          [channel]: value,
+        }
       })
       return next
     })
   }
-
   const handleSave = async () => {
     setSaving(true)
     try {
       const res = await fetch('/api/admin/notification-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
-        body: JSON.stringify({ settings, channels }),
+        body: JSON.stringify({
+          settings,
+          channels,
+        }),
       })
       if (!res.ok) throw new Error('Failed to save')
       setSaved(true)
@@ -453,7 +482,6 @@ export default function NotificationsPage() {
       setSaving(false)
     }
   }
-
   return (
     <div className='space-y-5'>
       <div className='flex items-center justify-between'>
@@ -476,7 +504,7 @@ export default function NotificationsPage() {
       </div>
 
       <div className='grid grid-cols-1 xl:grid-cols-[200px_1fr] gap-5'>
-        {/* Sidebar */}
+        {}
         <div className='bg-white border border-[#E1E3E5] rounded-xl p-2 h-fit'>
           {SETTINGS_NAV.map((item) => (
             <Link
@@ -490,7 +518,7 @@ export default function NotificationsPage() {
         </div>
 
         <div className='space-y-5'>
-          {/* Channel config */}
+          {}
           <div className='bg-white border border-[#E1E3E5] rounded-xl p-6 space-y-4'>
             <h2 className='font-sora text-[15px] font-semibold text-[#202223]'>
               Notification Channels
@@ -510,7 +538,10 @@ export default function NotificationsPage() {
                   type='email'
                   value={channels.email}
                   onChange={(e) =>
-                    setChannels((c) => ({ ...c, email: e.target.value }))
+                    setChannels((c) => ({
+                      ...c,
+                      email: e.target.value,
+                    }))
                   }
                   className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all'
                 />
@@ -529,7 +560,10 @@ export default function NotificationsPage() {
                   type='tel'
                   value={channels.smsPhone}
                   onChange={(e) =>
-                    setChannels((c) => ({ ...c, smsPhone: e.target.value }))
+                    setChannels((c) => ({
+                      ...c,
+                      smsPhone: e.target.value,
+                    }))
                   }
                   className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all'
                 />
@@ -559,9 +593,9 @@ export default function NotificationsPage() {
             </div>
           </div>
 
-          {/* Notification table */}
+          {}
           <div className='bg-white border border-[#E1E3E5] rounded-xl overflow-hidden'>
-            {/* Header */}
+            {}
             <div className='grid grid-cols-[1fr_80px_80px_80px] gap-4 px-6 py-3 border-b border-[#E1E3E5] bg-[#F6F6F7]/50'>
               <div className='text-[12px] font-semibold text-[#6D7175] uppercase tracking-wide'>
                 Notification
@@ -590,7 +624,7 @@ export default function NotificationsPage() {
               ))}
             </div>
 
-            {/* Groups */}
+            {}
             {NOTIFICATION_GROUPS.map((group) => (
               <div key={group.group}>
                 <div className='flex items-center gap-2 px-6 py-2.5 bg-[#F6F6F7] border-b border-[#E1E3E5]'>
@@ -628,7 +662,7 @@ export default function NotificationsPage() {
             ))}
           </div>
 
-          {/* Quiet hours */}
+          {}
           <div className='bg-white border border-[#E1E3E5] rounded-xl p-6 space-y-4'>
             <h2 className='font-sora text-[15px] font-semibold text-[#202223]'>
               Quiet Hours

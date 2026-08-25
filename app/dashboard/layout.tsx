@@ -1,24 +1,20 @@
-'use client'
+'use client';
 
-import { usePathname } from 'next/navigation'
-import Sidebar from '@/components/dashboard/Sidebar'
-import Topbar from '@/components/dashboard/Topbar'
-import { SidebarProvider } from '../../context/SidebarContext'
-import AuthProvider from '@/components/providers/AuthProvider'
-
+import { usePathname } from 'next/navigation';
+import Sidebar from '@/components/dashboard/Sidebar';
+import Topbar from '@/components/dashboard/Topbar';
+import { SidebarProvider } from '../../context/SidebarContext';
+import AuthProvider from '@/components/providers/AuthProvider';
 export default function DashboardLayout({
-  children,
+  children
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
-  const pathname = usePathname()
-
+  const pathname = usePathname();
   if (pathname === '/dashboard/login') {
-    return <>{children}</>
+    return <>{children}</>;
   }
-
-  return (
-    <AuthProvider surface='dashboard'>
+  return <AuthProvider surface='dashboard'>
       <SidebarProvider>
         <div className='flex h-screen bg-[#F6F6F7] overflow-hidden'>
           <Sidebar />
@@ -28,6 +24,5 @@ export default function DashboardLayout({
           </div>
         </div>
       </SidebarProvider>
-    </AuthProvider>
-  )
+    </AuthProvider>;
 }

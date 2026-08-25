@@ -1,11 +1,10 @@
-import LegalPage from '@/components/website/LegalPage'
-import { SITE_NAME, CONTACT_EMAIL } from '@/lib/constants'
-
-export const metadata = { title: `Returns Policy | ${SITE_NAME}` }
-
+import LegalPage from '@/components/website/LegalPage';
+import { SITE_NAME, CONTACT_EMAIL } from '@/lib/constants';
+export const metadata = {
+  title: `Returns Policy | ${SITE_NAME}`
+};
 export default function ReturnsPage() {
-  return (
-    <LegalPage title='Returns & Exchanges'>
+  return <LegalPage title='Returns & Exchanges'>
       <p>
         Not quite right? You can return most items within{' '}
         <strong>30 days</strong> of delivery for a refund or exchange.
@@ -45,6 +44,5 @@ export default function ReturnsPage() {
         delivery with photos and we'll sort a replacement or refund at no
         cost to you.
       </p>
-    </LegalPage>
-  )
+    </LegalPage>;
 }

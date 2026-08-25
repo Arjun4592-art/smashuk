@@ -1,11 +1,10 @@
-import LegalPage from '@/components/website/LegalPage'
-import { SITE_NAME, CONTACT_EMAIL } from '@/lib/constants'
-
-export const metadata = { title: `Terms & Conditions | ${SITE_NAME}` }
-
+import LegalPage from '@/components/website/LegalPage';
+import { SITE_NAME, CONTACT_EMAIL } from '@/lib/constants';
+export const metadata = {
+  title: `Terms & Conditions | ${SITE_NAME}`
+};
 export default function TermsPage() {
-  return (
-    <LegalPage title='Terms & Conditions'>
+  return <LegalPage title='Terms & Conditions'>
       <h2>Using our site</h2>
       <p>
         By placing an order with {SITE_NAME}, you agree to these terms.
@@ -47,6 +46,5 @@ export default function TermsPage() {
           {CONTACT_EMAIL}
         </a>.
       </p>
-    </LegalPage>
-  )
+    </LegalPage>;
 }

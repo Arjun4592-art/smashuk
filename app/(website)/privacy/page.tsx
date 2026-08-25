@@ -1,11 +1,10 @@
-import LegalPage from '@/components/website/LegalPage'
-import { SITE_NAME, CONTACT_EMAIL } from '@/lib/constants'
-
-export const metadata = { title: `Privacy Policy | ${SITE_NAME}` }
-
+import LegalPage from '@/components/website/LegalPage';
+import { SITE_NAME, CONTACT_EMAIL } from '@/lib/constants';
+export const metadata = {
+  title: `Privacy Policy | ${SITE_NAME}`
+};
 export default function PrivacyPage() {
-  return (
-    <LegalPage title='Privacy Policy'>
+  return <LegalPage title='Privacy Policy'>
       <p>
         We collect only what we need to process your orders and improve
         your experience with {SITE_NAME}.
@@ -41,6 +40,5 @@ export default function PrivacyPage() {
           {CONTACT_EMAIL}
         </a>.
       </p>
-    </LegalPage>
-  )
+    </LegalPage>;
 }

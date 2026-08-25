@@ -12,39 +12,65 @@ import {
   SortIcon,
 } from '@/components/ui/Icons'
 import { SPORTS } from '@/lib/constants'
-
+import { PRODUCT_GRID_COLS } from '@/lib/utils'
 interface ProductGridProps {
   products: Product[]
   title?: string
   showFilters?: boolean
   showSort?: boolean
   showViewToggle?: boolean
-  // Shopify-style "Display: 24/36/48 per page" + Prev/Next — off by default
-  // so existing call sites (e.g. homepage "New Arrivals" rails) keep
-  // rendering their short product lists in one shot with no behavior change.
   showPagination?: boolean
   columns?: 2 | 3 | 4
   isLoading?: boolean
 }
-
 const SORT_OPTIONS = [
-  { value: 'featured', label: 'Featured' },
-  { value: 'newest', label: 'Newest First' },
-  { value: 'price-asc', label: 'Price: Low to High' },
-  { value: 'price-desc', label: 'Price: High to Low' },
-  { value: 'rating', label: 'Top Rated' },
-  { value: 'discount', label: 'Biggest Discount' },
+  {
+    value: 'featured',
+    label: 'Featured',
+  },
+  {
+    value: 'newest',
+    label: 'Newest First',
+  },
+  {
+    value: 'price-asc',
+    label: 'Price: Low to High',
+  },
+  {
+    value: 'price-desc',
+    label: 'Price: High to Low',
+  },
+  {
+    value: 'rating',
+    label: 'Top Rated',
+  },
+  {
+    value: 'discount',
+    label: 'Biggest Discount',
+  },
 ]
-
 const BADGE_FILTERS = [
-  { value: 'ALL', label: 'All' },
-  { value: 'NEW', label: '🆕 New' },
-  { value: 'SALE', label: '🔥 Sale' },
-  { value: 'BESTSELLER', label: '⭐ Bestseller' },
-  { value: 'LIMITED', label: '⚡ Limited' },
+  {
+    value: 'ALL',
+    label: 'All',
+  },
+  {
+    value: 'NEW',
+    label: '🆕 New',
+  },
+  {
+    value: 'SALE',
+    label: '🔥 Sale',
+  },
+  {
+    value: 'BESTSELLER',
+    label: '⭐ Bestseller',
+  },
+  {
+    value: 'LIMITED',
+    label: '⚡ Limited',
+  },
 ]
-
-// ── Skeleton card ─────────────────────────────────────────────────────────────
 function SkeletonCard({ view }: { view: 'grid' | 'list' }) {
   if (view === 'list') {
     return (
@@ -71,7 +97,6 @@ function SkeletonCard({ view }: { view: 'grid' | 'list' }) {
     </div>
   )
 }
-
 export default function ProductGrid({
   products,
   title,
@@ -88,9 +113,8 @@ export default function ProductGrid({
   const [activeSport, setActiveSport] = useState('ALL')
   const [activeBadge, setActiveBadge] = useState('ALL')
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [perPage, setPerPage] = useState(24)
+  const [perPage, setPerPage] = useState(12)
   const [page, setPage] = useState(1)
-
   const filtered = useMemo(() => {
     let result = [...products]
     if (activeSport !== 'ALL')
@@ -128,40 +152,20 @@ export default function ProductGrid({
     }
     return result
   }, [products, activeSport, activeBadge, sort])
-
-  // Sort happens above on the FULL result set — pagination only decides
-  // what's currently visible, so ordering stays correct across page
-  // boundaries (page 2 always continues where page 1 left off).
   useEffect(() => {
     setPage(1)
   }, [products, activeSport, activeBadge, sort, perPage])
-
   const pageCount = Math.max(1, Math.ceil(filtered.length / perPage))
   const paged = showPagination
     ? filtered.slice((page - 1) * perPage, page * perPage)
     : filtered
-
   const currentSort = SORT_OPTIONS.find((o) => o.value === sort)
   const activeFilterCount =
     (activeSport !== 'ALL' ? 1 : 0) + (activeBadge !== 'ALL' ? 1 : 0)
-
-  // BUG FIX: mobile (below `sm`) used to render `grid-cols-1` — a single
-  // product per row — regardless of the `columns` prop. Nainit wants 2
-  // products per row on mobile, so the base (no-breakpoint) class is now
-  // `grid-cols-2` for every column count, and larger breakpoints scale up
-  // from there.
-  // BUG FIX 2: `columns={4}` only reached 4-per-row at `xl` (≥1280px) —
-  // on a normal laptop/desktop viewport (`lg`, ≥1024px) it still showed
-  // just 3. Nainit wants 4 on desktop, so that now kicks in at `lg`.
-  const gridCols = {
-    2: 'grid-cols-2',
-    3: 'grid-cols-2 lg:grid-cols-3',
-    4: 'grid-cols-2 lg:grid-cols-4',
-  }[columns]
-
+  const gridCols = PRODUCT_GRID_COLS[columns]
   return (
     <div>
-      {/* ── Header ── */}
+      {}
       {(title || showSort || showViewToggle) && (
         <div className='flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6'>
           {title && (
@@ -176,15 +180,11 @@ export default function ProductGrid({
           )}
 
           <div className='flex items-center gap-2.5 ml-auto'>
-            {/* Mobile filter toggle */}
+            {}
             {showFilters && (
               <button
                 onClick={() => setFiltersOpen(!filtersOpen)}
-                className={`sm:hidden flex items-center gap-2 px-3.5 py-2 rounded-xl text-[13px] font-semibold font-lato border transition-all ${
-                  filtersOpen || activeFilterCount > 0
-                    ? 'bg-[#0A1F44] text-white border-[#0A1F44]'
-                    : 'bg-white text-[#0A1F44] border-[#E5E7EB] hover:border-[#0A1F44]/30'
-                }`}
+                className={`sm:hidden flex items-center gap-2 px-3.5 py-2 rounded-xl text-[13px] font-semibold font-lato border transition-all ${filtersOpen || activeFilterCount > 0 ? 'bg-[#0A1F44] text-white border-[#0A1F44]' : 'bg-white text-[#0A1F44] border-[#E5E7EB] hover:border-[#0A1F44]/30'}`}
               >
                 <FilterIcon size={15} />
                 Filters
@@ -196,7 +196,7 @@ export default function ProductGrid({
               </button>
             )}
 
-            {/* Sort Dropdown */}
+            {}
             {showSort && (
               <div className='relative'>
                 <button
@@ -227,11 +227,7 @@ export default function ProductGrid({
                             setSort(option.value)
                             setSortOpen(false)
                           }}
-                          className={`w-full text-left px-4 py-2.5 text-[13px] font-lato transition-colors flex items-center justify-between ${
-                            sort === option.value
-                              ? 'bg-[#E8553A]/6 text-[#E8553A] font-semibold'
-                              : 'text-[#4B5563] hover:bg-[#F2F4F7]'
-                          }`}
+                          className={`w-full text-left px-4 py-2.5 text-[13px] font-lato transition-colors flex items-center justify-between ${sort === option.value ? 'bg-[#E8553A]/6 text-[#E8553A] font-semibold' : 'text-[#4B5563] hover:bg-[#F2F4F7]'}`}
                         >
                           {option.label}
                           {sort === option.value && (
@@ -245,28 +241,20 @@ export default function ProductGrid({
               </div>
             )}
 
-            {/* View Toggle */}
+            {}
             {showViewToggle && (
               <div className='flex items-center bg-[#F2F4F7] rounded-xl p-1 gap-0.5'>
                 <button
                   onClick={() => setView('grid')}
                   aria-label='Grid view'
-                  className={`p-2 rounded-lg transition-all ${
-                    view === 'grid'
-                      ? 'bg-white text-[#0A1F44] shadow-sm'
-                      : 'text-[#9CA3AF] hover:text-[#0A1F44]'
-                  }`}
+                  className={`p-2 rounded-lg transition-all ${view === 'grid' ? 'bg-white text-[#0A1F44] shadow-sm' : 'text-[#9CA3AF] hover:text-[#0A1F44]'}`}
                 >
                   <GridIcon size={15} />
                 </button>
                 <button
                   onClick={() => setView('list')}
                   aria-label='List view'
-                  className={`p-2 rounded-lg transition-all ${
-                    view === 'list'
-                      ? 'bg-white text-[#0A1F44] shadow-sm'
-                      : 'text-[#9CA3AF] hover:text-[#0A1F44]'
-                  }`}
+                  className={`p-2 rounded-lg transition-all ${view === 'list' ? 'bg-white text-[#0A1F44] shadow-sm' : 'text-[#9CA3AF] hover:text-[#0A1F44]'}`}
                 >
                   <ListIcon size={15} />
                 </button>
@@ -276,11 +264,11 @@ export default function ProductGrid({
         </div>
       )}
 
-      {/* ── Filters ── */}
+      {}
       {showFilters && (
         <div className={`mb-6 ${filtersOpen ? 'block' : 'hidden sm:block'}`}>
           <div className='bg-white border border-[#E5E7EB] rounded-2xl p-4 space-y-4'>
-            {/* Sport filter */}
+            {}
             <div>
               <p className='text-[10px] font-black text-[#9CA3AF] uppercase tracking-[0.15em] mb-2.5 font-montserrat'>
                 Sport
@@ -288,11 +276,7 @@ export default function ProductGrid({
               <div className='flex flex-wrap gap-2'>
                 <button
                   onClick={() => setActiveSport('ALL')}
-                  className={`px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-all font-lato border ${
-                    activeSport === 'ALL'
-                      ? 'bg-[#0A1F44] text-white border-[#0A1F44] shadow-sm'
-                      : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#0A1F44]/20 hover:text-[#0A1F44]'
-                  }`}
+                  className={`px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-all font-lato border ${activeSport === 'ALL' ? 'bg-[#0A1F44] text-white border-[#0A1F44] shadow-sm' : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#0A1F44]/20 hover:text-[#0A1F44]'}`}
                 >
                   All Sports
                 </button>
@@ -300,11 +284,7 @@ export default function ProductGrid({
                   <button
                     key={sport.slug}
                     onClick={() => setActiveSport(sport.slug)}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-all font-lato border ${
-                      activeSport === sport.slug
-                        ? 'bg-[#E8553A] text-white border-[#E8553A] shadow-sm'
-                        : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#E8553A]/20 hover:text-[#E8553A]'
-                    }`}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-all font-lato border ${activeSport === sport.slug ? 'bg-[#E8553A] text-white border-[#E8553A] shadow-sm' : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#E8553A]/20 hover:text-[#E8553A]'}`}
                   >
                     <span>{sport.icon}</span>
                     <span>{sport.label}</span>
@@ -313,7 +293,7 @@ export default function ProductGrid({
               </div>
             </div>
 
-            {/* Badge filter */}
+            {}
             <div className='border-t border-[#F2F4F7] pt-4'>
               <p className='text-[10px] font-black text-[#9CA3AF] uppercase tracking-[0.15em] mb-2.5 font-montserrat'>
                 Filter By
@@ -323,11 +303,7 @@ export default function ProductGrid({
                   <button
                     key={badge.value}
                     onClick={() => setActiveBadge(badge.value)}
-                    className={`px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-all font-lato border ${
-                      activeBadge === badge.value
-                        ? 'bg-[#0A1F44] text-white border-[#0A1F44] shadow-sm'
-                        : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#0A1F44]/20 hover:text-[#0A1F44]'
-                    }`}
+                    className={`px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-all font-lato border ${activeBadge === badge.value ? 'bg-[#0A1F44] text-white border-[#0A1F44] shadow-sm' : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#0A1F44]/20 hover:text-[#0A1F44]'}`}
                   >
                     {badge.label}
                   </button>
@@ -338,7 +314,7 @@ export default function ProductGrid({
         </div>
       )}
 
-      {/* ── Active Filters Strip ── */}
+      {}
       {activeFilterCount > 0 && (
         <div className='flex items-center gap-2 mb-5 flex-wrap'>
           <span className='text-[11px] text-[#9CA3AF] font-lato'>Active:</span>
@@ -377,23 +353,26 @@ export default function ProductGrid({
         </div>
       )}
 
-      {/* ── Loading Skeleton ── */}
+      {}
       {isLoading ? (
         view === 'list' ? (
           <div className='space-y-3'>
-            {Array.from({ length: 6 }).map((_, i) => (
+            {Array.from({
+              length: 6,
+            }).map((_, i) => (
               <SkeletonCard key={i} view='list' />
             ))}
           </div>
         ) : (
           <div className={`grid ${gridCols} gap-4 sm:gap-5`}>
-            {Array.from({ length: columns * 2 }).map((_, i) => (
+            {Array.from({
+              length: columns * 2,
+            }).map((_, i) => (
               <SkeletonCard key={i} view='grid' />
             ))}
           </div>
         )
-      ) : /* ── Products ── */
-      filtered.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div className='text-center py-24'>
           <div className='w-20 h-20 bg-[#F2F4F7] rounded-2xl flex items-center justify-center mx-auto mb-5 text-4xl'>
             🔍
@@ -428,8 +407,7 @@ export default function ProductGrid({
         </div>
       )}
 
-      {/* ── Pagination ── Shopify-style "Display: 24/36/48 per page" +
-          Prev/Next. Only rendered when there's something to page through. */}
+      {}
       {showPagination && !isLoading && filtered.length > 0 && (
         <div className='flex flex-col sm:flex-row items-center justify-between gap-4 mt-8 pt-6 border-t border-[#F2F4F7]'>
           <div className='flex items-center gap-2 text-xs font-lato text-gray-500'>

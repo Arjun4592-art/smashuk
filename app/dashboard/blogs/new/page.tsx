@@ -1,7 +1,6 @@
-'use client'
+'use client';
 
-import BlogPostForm from '@/components/dashboard/BlogPostForm'
-
+import BlogPostForm from '@/components/dashboard/BlogPostForm';
 export default function NewBlogPostPage() {
-  return <BlogPostForm />
+  return <BlogPostForm />;
 }

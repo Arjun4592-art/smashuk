@@ -5,53 +5,11 @@ import { useMemo, useState, useCallback, useEffect } from 'react'
 import { useAllStoreProducts as useStoreProducts } from '@/hooks/useProducts'
 import { normalizeProduct, matchesBadgeFilter } from '@/lib/api/store'
 import ProductGrid from '@/components/website/ProductGrid'
-import { SPORTS } from '@/lib/constants'
-import Link from 'next/link'
 import ShopFilterSidebar, {
   DEFAULT_FILTERS,
   type FilterState,
 } from '@/components/website/ShopFilterSidebar'
 import { ProductGridSkeleton } from '@/components/ui/Skeleton'
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// Same subtle diagonal grid-line texture used across every local-store
-// hero/header (see the local GridTexture() in e.g. app/(website)/local-store/
-// stringing/badminton/page.tsx) — added here so the shop header carries the
-// same "strip" treatment as the rest of the site instead of being plain navy.
-function GridTexture() {
-  return (
-    <svg
-      className='absolute inset-0 w-full h-full opacity-[0.06] pointer-events-none'
-      preserveAspectRatio='none'
-      xmlns='http://www.w3.org/2000/svg'
-    >
-      {Array.from({ length: 20 }).map((_, i) => (
-        <line
-          key={'v' + i}
-          x1={`${i * 5.5}%`}
-          y1='0'
-          x2={`${i * 5.5 + 3}%`}
-          y2='100%'
-          stroke='white'
-          strokeWidth='1'
-        />
-      ))}
-      {Array.from({ length: 12 }).map((_, i) => (
-        <line
-          key={'h' + i}
-          x1='0'
-          y1={`${i * 9}%`}
-          x2='100%'
-          y2={`${i * 9 + 2}%`}
-          stroke='white'
-          strokeWidth='1'
-        />
-      ))}
-    </svg>
-  )
-}
-
 function countActiveFilters(f: FilterState): number {
   let n = 0
   if (f.brands.length) n += f.brands.length
@@ -66,83 +24,42 @@ function countActiveFilters(f: FilterState): number {
   n += Object.values(f.specs).reduce((sum, values) => sum + values.length, 0)
   return n
 }
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
 export default function ShopClient() {
   const searchParams = useSearchParams()
-
   const sport = searchParams.get('sport') ?? ''
   const badge = searchParams.get('badge') ?? ''
   const q = searchParams.get('q') ?? ''
-  // These came from the navbar mega-menu (e.g. "Beginner Rackets", "Racket
-  // Bags", "Men's Shoes") but were never actually read — clicking them
-  // changed the URL and silently filtered nothing.
   const category = searchParams.get('category') ?? ''
   const brandParam = searchParams.get('brand') ?? ''
   const gender = searchParams.get('gender') ?? ''
   const level = searchParams.get('level') ?? ''
   const style = searchParams.get('style') ?? ''
-
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
   const [mobileOpen, setMobileOpen] = useState(false)
-
-  // BUG FIX: the sidebar's Sport pills live in client state (`filters.sports`)
-  // and never got reset when the URL's `?sport=` param changed — so clicking
-  // "Badminton" in the navbar (setting filters.sports=['badminton']) then
-  // clicking "Sale 🔥" (which navigates to /shop?badge=SALE with NO sport
-  // param) left the stale 'badminton' selection in place, since the page
-  // component itself doesn't remount on a client-side search-param change.
-  // Result: Sale kept showing only the last-selected sport instead of all.
-  // Syncing filters.sports to the URL's sport param whenever it changes
-  // fixes this: navbar sport links narrow to that sport, and Sale (which has
-  // no sport param) clears the selection so all sports show.
   useEffect(() => {
-    setFilters((f) => ({ ...f, sports: sport ? [sport] : [] }))
+    setFilters((f) => ({
+      ...f,
+      sports: sport ? [sport] : [],
+    }))
   }, [sport])
-
-  // Same idea for Category: the navbar mega-menu's ?category= param (e.g.
-  // "rackets") drives the sidebar's Category selection, and gets cleared
-  // the same way when navigating somewhere that doesn't set it (e.g. Sale).
   useEffect(() => {
-    setFilters((f) => ({ ...f, categories: category ? [category] : [] }))
+    setFilters((f) => ({
+      ...f,
+      categories: category ? [category] : [],
+    }))
   }, [category])
-
-  // Fetch products from Medusa
-  // BUG FIX: was useStoreProducts({ limit: 100 }) — a single capped page
-  // against a 1,736-product catalog. See useAllStoreProducts() in
-  // hooks/useProducts.ts for why that hid entire categories from both the
-  // sidebar and the results. useAllStoreProducts() pages through the full
-  // catalog instead.
   const { data, isLoading, isError } = useStoreProducts()
-
   const products = useMemo(
     () => (data?.products ?? []).map(normalizeProduct),
     [data],
   )
-
-  // Filtering
   const filtered = useMemo(() => {
-    // Out-of-stock products are never shown in the shop listing.
     let result = products.filter((p) => p.inStock)
-
-    if (badge)
-      // BUG FIX: this used to require an explicit metadata.badge tag,
-      // which almost no product actually has set (the dashboard field is
-      // optional and usually left blank) — so /shop?badge=SALE and
-      // /shop?badge=NEW showed "0 products found" even though plenty of
-      // products are genuinely discounted or were added recently.
-      // matchesBadgeFilter() falls back to real data (discount, creation
-      // date, rating) for SALE / NEW / BESTSELLER so the links work even
-      // when no product has been manually tagged.
-      result = result.filter((p) => matchesBadgeFilter(p, badge))
+    if (badge) result = result.filter((p) => matchesBadgeFilter(p, badge))
     if (brandParam)
       result = result.filter(
         (p) => p.brand?.toLowerCase() === brandParam.toLowerCase(),
       )
-    // gender/level/style aren't dedicated product fields — they reuse the
-    // existing Tags field (already editable in the dashboard product
-    // form), e.g. tagging a product "womens", "beginner", "head-heavy".
     if (gender)
       result = result.filter((p) =>
         p.tags?.some((t) => t.toLowerCase() === gender.toLowerCase()),
@@ -164,23 +81,8 @@ export default function ShopClient() {
           p.brand.toLowerCase().includes(q.toLowerCase()) ||
           p.sport.toLowerCase().includes(q.toLowerCase()),
       )
-
-    // Sport filtering — `filters.sports` is now the single source of truth
-    // (kept in sync with the URL's ?sport= param by the effect above), so
-    // there's no separate/conflicting filter on the raw `sport` param here.
     if (filters.sports.length)
       result = result.filter((p) => filters.sports.includes(p.sport))
-    // Category filtering — `filters.categories` is the single source of
-    // truth (synced with the URL's ?category= param above). Substring
-    // match keeps it compatible with the navbar's short tokens ("rackets")
-    // as well as full handles picked from the sidebar ("badminton-rackets").
-    // BUG FIX: `c.includes(p.category ?? '')` was vacuously true whenever a
-    // product had no Medusa category set (p.category === '') — any string
-    // includes the empty string, so every uncategorized product matched
-    // every category filter, making category filters (and the "Clothing"
-    // navbar link, which has plenty of uncategorized products) silently
-    // show all products instead of narrowing. Only match when the product
-    // actually has a category set.
     if (filters.categories.length)
       result = result.filter(
         (p) =>
@@ -192,11 +94,6 @@ export default function ShopClient() {
     if (filters.brands.length)
       result = result.filter((p) => filters.brands.includes(p.brand))
     if (filters.badges.length)
-      // Same fallback as the `badge` query-param filter above — most
-      // products don't have an explicit metadata.badge tag, so "On Sale" /
-      // "New Arrivals" / "Bestseller" checkboxes fall back to real product
-      // data. Without this, ticking these in the sidebar always returned
-      // 0 products even though the corresponding nav link "worked".
       result = result.filter((p) =>
         filters.badges.some((b) => matchesBadgeFilter(p, b)),
       )
@@ -207,32 +104,21 @@ export default function ShopClient() {
       (p) =>
         p.price >= filters.priceRange[0] && p.price <= filters.priceRange[1],
     )
-
-    // Category-aware spec filters (Weight, Balance, Stiffness, Size, ...) —
-    // AND across different spec labels, OR within the same label's values.
-    // e.g. Weight:[4U] AND Balance:[Even, Head-Heavy] means "4U AND (Even OR
-    // Head-Heavy)".
+    const norm = (s: string) => s.trim().toLowerCase()
     const specEntries = Object.entries(filters.specs)
     if (specEntries.length > 0) {
       result = result.filter((p) =>
         specEntries.every(([label, values]) =>
           values.some((v) =>
-            p.specs?.some((s) => s.label === label && s.value === v),
+            p.specs?.some(
+              (s) => norm(s.label) === norm(label) && norm(s.value) === norm(v),
+            ),
           ),
         ),
       )
     }
-
     return result
   }, [products, sport, badge, brandParam, gender, level, style, q, filters])
-
-  // Same filtering as `filtered` above, but WITHOUT the specs filter AND
-  // without the sidebar's own brand selection — this is what the sidebar
-  // uses to compute per-option counts (Brand, Collection, Rating, spec
-  // values). Leaving `filters.brands` out here is deliberate: checking one
-  // brand shouldn't zero out every other brand's count in the same section
-  // (standard "OR within a facet" behavior — you're choosing among brands,
-  // not narrowing by all of them at once).
   const categoryScopedProducts = useMemo(() => {
     let result = products.filter((p) => p.inStock)
     if (badge) result = result.filter((p) => matchesBadgeFilter(p, badge))
@@ -252,45 +138,42 @@ export default function ShopClient() {
       )
     return result
   }, [products, badge, brandParam, filters.sports, filters.categories])
-
-  // Which sport(s) are currently narrowing the listing — the sidebar's own
-  // Sport pills take priority, falling back to the URL's ?sport= (e.g. from
-  // the navbar mega menu), so the Brand list reacts to either.
   const effectiveSports = filters.sports.length
     ? filters.sports
     : sport
       ? [sport]
       : []
-
-  const activeSport = SPORTS.find((s) => s.slug === sport)
   const activeCount = useMemo(() => countActiveFilters(filters), [filters])
-
-  const pageTitle = q
-    ? `Search: "${q}"`
-    : activeSport
-      ? `${activeSport.icon} ${activeSport.label}`
-      : badge
-        ? badge.charAt(0) + badge.slice(1).toLowerCase()
-        : 'All Products'
-
   const handleClear = useCallback(() => setFilters(DEFAULT_FILTERS), [])
-
-  const chips: { label: string; onRemove: () => void }[] = [
+  const chips: {
+    label: string
+    onRemove: () => void
+  }[] = [
     ...filters.brands.map((b) => ({
       label: b,
       onRemove: () =>
-        setFilters((f) => ({ ...f, brands: f.brands.filter((x) => x !== b) })),
+        setFilters((f) => ({
+          ...f,
+          brands: f.brands.filter((x) => x !== b),
+        })),
     })),
     ...filters.badges.map((b) => ({
       label: b,
       onRemove: () =>
-        setFilters((f) => ({ ...f, badges: f.badges.filter((x) => x !== b) })),
+        setFilters((f) => ({
+          ...f,
+          badges: f.badges.filter((x) => x !== b),
+        })),
     })),
     ...(filters.inStockOnly
       ? [
           {
             label: 'In Stock',
-            onRemove: () => setFilters((f) => ({ ...f, inStockOnly: false })),
+            onRemove: () =>
+              setFilters((f) => ({
+                ...f,
+                inStockOnly: false,
+              })),
           },
         ]
       : []),
@@ -298,7 +181,11 @@ export default function ShopClient() {
       ? [
           {
             label: `${filters.minRating}+ ★`,
-            onRemove: () => setFilters((f) => ({ ...f, minRating: null })),
+            onRemove: () =>
+              setFilters((f) => ({
+                ...f,
+                minRating: null,
+              })),
           },
         ]
       : []),
@@ -308,10 +195,15 @@ export default function ShopClient() {
         onRemove: () =>
           setFilters((f) => {
             const nextValues = (f.specs[label] ?? []).filter((x) => x !== v)
-            const nextSpecs = { ...f.specs }
+            const nextSpecs = {
+              ...f.specs,
+            }
             if (nextValues.length === 0) delete nextSpecs[label]
             else nextSpecs[label] = nextValues
-            return { ...f, specs: nextSpecs }
+            return {
+              ...f,
+              specs: nextSpecs,
+            }
           }),
       })),
     ),
@@ -329,53 +221,21 @@ export default function ShopClient() {
         ]
       : []),
   ]
-
   return (
-    <div className='min-h-screen bg-white'>
-      {/* Page Header — same navy + grid-texture strip as the local-store headers */}
-      <div className='relative bg-[#0A1F44] py-12 overflow-hidden'>
-        <GridTexture />
-        <div className='relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
-          <p className='text-white/40 text-xs font-mono tracking-widest uppercase mb-4'>
-            <Link href='/' className='hover:text-white/70 transition-colors'>
-              Home
-            </Link>
-            &nbsp;/&nbsp;
-            <Link
-              href='/shop'
-              className='hover:text-white/70 transition-colors'
-            >
-              Shop
-            </Link>
-            {(sport || badge || q) && (
-              <>
-                &nbsp;/&nbsp;
-                <span className='text-white/70'>{pageTitle}</span>
-              </>
-            )}
-          </p>
-          <h1 className='reveal font-montserrat font-black text-3xl sm:text-4xl text-white mb-2'>
-            {pageTitle}
-          </h1>
-          <p className='font-lato text-white/70'>
+    <div className='bg-white'>
+      {}
+      <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10'>
+        {}
+        <div className='flex items-center justify-between mb-6'>
+          <p className='text-sm font-lato text-gray-500'>
             {isLoading
               ? 'Loading products...'
               : `${filtered.length} product${filtered.length !== 1 ? 's' : ''} found`}
           </p>
-        </div>
-      </div>
-
-      {/* Main layout */}
-      <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10'>
-        {/* Mobile filter toggle */}
-        <div className='flex items-center justify-between mb-6 lg:hidden'>
-          <p className='text-sm font-lato text-gray-500'>
-            {filtered.length} products
-          </p>
           <button
             type='button'
             onClick={() => setMobileOpen(true)}
-            className='flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-gray-200 text-sm font-montserrat font-bold text-[#0A1F44] hover:border-[#E8553A] transition-colors'
+            className='lg:hidden flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-gray-200 text-sm font-montserrat font-bold text-[#0A1F44] hover:border-[#E8553A] transition-colors'
           >
             <svg
               width='16'
@@ -401,27 +261,21 @@ export default function ShopClient() {
         </div>
 
         <div className='flex gap-8'>
-          {/* Desktop Sidebar */}
+          {}
           <div className='hidden lg:block w-60 shrink-0'>
             <ShopFilterSidebar
               filters={filters}
               onChange={setFilters}
               onClear={handleClear}
               activeCount={activeCount}
-              // Lets the sidebar disable Brand checkboxes that have no
-              // products for the currently selected sport(s).
               allProducts={products}
               activeSports={effectiveSports}
               categoryProducts={categoryScopedProducts}
-              // On a dedicated sport page (navbar's ?sport=... link), hide
-              // the Sport pills — go straight into that sport's categories.
-              // Generic pages (plain /shop, or Sale which has no ?sport=)
-              // keep the Sport pills so all sports stay browsable.
               hideSportSection={!!sport}
             />
           </div>
 
-          {/* Mobile Sidebar Drawer */}
+          {}
           {mobileOpen && (
             <>
               <div
@@ -465,9 +319,9 @@ export default function ShopClient() {
             </>
           )}
 
-          {/* Products */}
+          {}
           <div className='flex-1 min-w-0'>
-            {/* Active filter chips */}
+            {}
             {chips.length > 0 && (
               <div className='flex flex-wrap items-center gap-2 mb-6'>
                 {chips.map((chip) => (
@@ -495,10 +349,10 @@ export default function ShopClient() {
               </div>
             )}
 
-            {/* Loading state */}
-            {isLoading && <ProductGridSkeleton count={12} />}
+            {}
+            {isLoading && <ProductGridSkeleton count={12} columns={3} />}
 
-            {/* Error state */}
+            {}
             {isError && (
               <div className='flex flex-col items-center justify-center py-24 text-center'>
                 <span className='text-5xl mb-4'>⚠️</span>
@@ -511,7 +365,7 @@ export default function ShopClient() {
               </div>
             )}
 
-            {/* Empty state */}
+            {}
             {!isLoading && !isError && filtered.length === 0 && (
               <div className='flex flex-col items-center justify-center py-24 text-center'>
                 <span className='text-5xl mb-4'>🔍</span>
@@ -531,7 +385,7 @@ export default function ShopClient() {
               </div>
             )}
 
-            {/* Products grid */}
+            {}
             {!isLoading && !isError && filtered.length > 0 && (
               <ProductGrid
                 products={filtered}
@@ -539,7 +393,7 @@ export default function ShopClient() {
                 showSort={true}
                 showViewToggle={true}
                 showPagination={true}
-                columns={4}
+                columns={3}
               />
             )}
           </div>

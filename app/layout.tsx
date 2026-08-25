@@ -3,33 +3,29 @@ import { Inter, Poppins, Sora } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 import { Toaster } from 'sonner'
-import { GoogleAnalytics } from '@/components/providers/GoogleAnalytics'
+import { MarketingPixels } from '@/components/providers/MarketingPixels'
 import {
   DEFAULT_SEO,
   SITE_NAME,
   SITE_URL,
   SITE_OG_IMAGE,
 } from '@/lib/constants'
-
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',
   display: 'swap',
 })
-
 const poppins = Poppins({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700', '800'],
   variable: '--font-poppins',
   display: 'swap',
 })
-
 const sora = Sora({
   subsets: ['latin'],
   variable: '--font-sora',
   display: 'swap',
 })
-
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
@@ -38,7 +34,11 @@ export const metadata: Metadata = {
   },
   description: DEFAULT_SEO.description,
   keywords: DEFAULT_SEO.keywords,
-  authors: [{ name: SITE_NAME }],
+  authors: [
+    {
+      name: SITE_NAME,
+    },
+  ],
   creator: SITE_NAME,
   openGraph: {
     type: 'website',
@@ -77,7 +77,6 @@ export const metadata: Metadata = {
     google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION ?? '',
   },
 }
-
 export default function RootLayout({
   children,
 }: {
@@ -90,7 +89,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className='font-inter antialiased' suppressHydrationWarning>
-        <GoogleAnalytics />
+        <MarketingPixels />
         <Providers>{children}</Providers>
         <Toaster position='top-right' richColors closeButton duration={3000} />
       </body>

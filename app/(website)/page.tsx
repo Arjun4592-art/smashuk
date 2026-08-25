@@ -1,55 +1,39 @@
-import { generateStaticMetadata } from '@/lib/seo'
-import Hero from '@/components/website/Hero'
-import BrandsBar from '@/components/website/BrandsBar'
-import CategoryFilter from '@/components/website/CategoryFilter'
-import HomepageProducts from '@/components/website/HomePageProducts'
-import NewsletterForm from '@/components/website/NewsletterForm'
-
-import {
-  TruckIcon,
-  ShieldIcon,
-  RefreshIcon,
-  HeartIcon,
-} from '@/components/ui/Icons'
-import { formatCurrency } from '@/lib/utils'
-import { FREE_SHIPPING_THRESHOLD } from '@/lib/constants'
-import Link from 'next/link'
-import ReviewsSlider from '@/components/website/ReviewsSlider'
-
-export const generateMetadata = () => generateStaticMetadata('home')
-
-const TRUST_FEATURES = [
-  {
-    icon: <TruckIcon size={24} />,
-    title: 'Free Shipping',
-    desc: `On orders above ${formatCurrency(FREE_SHIPPING_THRESHOLD)}`,
-  },
-  {
-    icon: <ShieldIcon size={24} />,
-    title: '100% Authentic',
-    desc: 'Genuine products guaranteed',
-  },
-  {
-    icon: <RefreshIcon size={24} />,
-    title: 'Easy Returns',
-    desc: '7-day hassle-free returns',
-  },
-  {
-    icon: <HeartIcon size={24} />,
-    title: 'Expert Support',
-    desc: 'By sports enthusiasts',
-  },
-]
-
+import { generateStaticMetadata } from '@/lib/seo';
+import Hero from '@/components/website/Hero';
+import BrandsBar from '@/components/website/BrandsBar';
+import CategoryFilter from '@/components/website/CategoryFilter';
+import HomepageProducts from '@/components/website/HomePageProducts';
+import NewsletterForm from '@/components/website/NewsletterForm';
+import { TruckIcon, ShieldIcon, RefreshIcon, HeartIcon } from '@/components/ui/Icons';
+import { formatCurrency } from '@/lib/utils';
+import { FREE_SHIPPING_THRESHOLD } from '@/lib/constants';
+import Link from 'next/link';
+import ReviewsSlider from '@/components/website/ReviewsSlider';
+export const generateMetadata = () => generateStaticMetadata('home');
+const TRUST_FEATURES = [{
+  icon: <TruckIcon size={24} />,
+  title: 'Free Shipping',
+  desc: `On orders above ${formatCurrency(FREE_SHIPPING_THRESHOLD)}`
+}, {
+  icon: <ShieldIcon size={24} />,
+  title: '100% Authentic',
+  desc: 'Genuine products guaranteed'
+}, {
+  icon: <RefreshIcon size={24} />,
+  title: 'Easy Returns',
+  desc: '7-day hassle-free returns'
+}, {
+  icon: <HeartIcon size={24} />,
+  title: 'Expert Support',
+  desc: 'By sports enthusiasts'
+}];
 export default function HomePage() {
-  return (
-    <>
+  return <>
       <Hero />
       <section className='bg-[#0A1F44] py-6'>
         <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
           <div className='grid grid-cols-2 lg:grid-cols-4 gap-6'>
-            {TRUST_FEATURES.map((f) => (
-              <div key={f.title} className='flex items-center gap-3'>
+            {TRUST_FEATURES.map(f => <div key={f.title} className='flex items-center gap-3'>
                 <div className='text-[#E8553A] shrink-0'>{f.icon}</div>
                 <div>
                   <p className='font-montserrat font-bold text-white text-sm'>
@@ -59,18 +43,17 @@ export default function HomePage() {
                     {f.desc}
                   </p>
                 </div>
-              </div>
-            ))}
+              </div>)}
           </div>
         </div>
       </section>
 
       <CategoryFilter />
 
-      {/* Products — Medusa se */}
+      {}
       <HomepageProducts />
 
-      {/* Sale Banner */}
+      {}
       <section className='py-12 bg-[#E8553A] relative overflow-hidden'>
         <div className='absolute inset-0 opacity-10'>
           <div className='absolute top-4 left-8 text-8xl'>⚽</div>
@@ -98,10 +81,7 @@ export default function HomePage() {
                   Smash10
                 </span>
               </div>
-              <Link
-                href='/shop?badge=SALE'
-                className='bg-white text-[#E8553A] font-montserrat font-black px-8 py-3.5 rounded-full hover:bg-gray-100 transition-colors shadow-lg text-lg'
-              >
+              <Link href='/shop?badge=SALE' className='bg-white text-[#E8553A] font-montserrat font-black px-8 py-3.5 rounded-full hover:bg-gray-100 transition-colors shadow-lg text-lg'>
                 Shop Sale Now →
               </Link>
             </div>
@@ -112,7 +92,7 @@ export default function HomePage() {
       <BrandsBar />
       <ReviewsSlider />
 
-      {/* Newsletter */}
+      {}
       <section className='py-16 bg-[#F2F4F7]'>
         <div className='max-w-2xl mx-auto px-4 text-center'>
           <p className='text-xs font-semibold text-[#E8553A] uppercase tracking-widest font-montserrat mb-2'>
@@ -127,6 +107,5 @@ export default function HomePage() {
           <NewsletterForm variant='light' />
         </div>
       </section>
-    </>
-  )
+    </>;
 }

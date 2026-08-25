@@ -3,10 +3,6 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { TrashIcon, PlusIcon } from '@/components/ui/Icons'
-import type { StringCatalogItem } from '@/lib/stringing-catalog-types'
-
-// ─── SVG Icons ───────────────────────────────────────────────────
 const Icons = {
   store: (
     <svg
@@ -222,14 +218,29 @@ const Icons = {
     </svg>
   ),
 }
-
 const SETTINGS_NAV = [
-  { label: 'General', href: '/dashboard/settings', active: true },
-  { label: 'Billing', href: '/dashboard/settings/billing' },
-  { label: 'Shipping', href: '/dashboard/settings/shipping' },
-  { label: 'Notifications', href: '/dashboard/settings/notifications' },
+  {
+    label: 'General',
+    href: '/dashboard/settings',
+    active: true,
+  },
+  {
+    label: 'Billing',
+    href: '/dashboard/settings/billing',
+  },
+  {
+    label: 'Shipping',
+    href: '/dashboard/settings/shipping',
+  },
+  {
+    label: 'Notifications',
+    href: '/dashboard/settings/notifications',
+  },
+  {
+    label: 'Marketing',
+    href: '/dashboard/settings/marketing',
+  },
 ]
-
 function SettingSection({
   title,
   description,
@@ -255,7 +266,6 @@ function SettingSection({
     </div>
   )
 }
-
 function InputField({
   label,
   value,
@@ -307,14 +317,12 @@ function InputField({
     </div>
   )
 }
-
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
-
   const [storeId, setStoreId] = useState<string | null>(null)
   const [store, setStore] = useState({
     name: '',
@@ -327,7 +335,6 @@ export default function SettingsPage() {
     weightUnit: 'kg',
     language: 'en',
   })
-
   const [address, setAddress] = useState({
     line1: '',
     line2: '',
@@ -336,7 +343,6 @@ export default function SettingsPage() {
     pincode: '',
     country: '',
   })
-
   const [accountId, setAccountId] = useState<string | null>(null)
   const [account, setAccount] = useState({
     name: '',
@@ -346,152 +352,43 @@ export default function SettingsPage() {
     confirmPassword: '',
   })
   const [savingAccount, setSavingAccount] = useState(false)
-  const [seedingStringing, setSeedingStringing] = useState(false)
-
-  // ── Stringing string catalog (which companies/strings are available) ──
-  const [stringCatalog, setStringCatalog] = useState<StringCatalogItem[]>([])
-  const [stringCatalogLoading, setStringCatalogLoading] = useState(true)
-  const [savingStringCatalog, setSavingStringCatalog] = useState(false)
-  const [stringCatalogSport, setStringCatalogSport] = useState<
-    'badminton' | 'tennis' | 'squash'
-  >('badminton')
-  const [newString, setNewString] = useState({ brand: '', name: '' })
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch('/api/admin/stringing-catalog', {
-          credentials: 'include',
-        })
-        const data = await res.json()
-        if (!cancelled && res.ok) setStringCatalog(data.items ?? [])
-      } catch {
-        // Leave list empty — the "Add String" form still works and the
-        // next successful save will populate everything from scratch.
-      } finally {
-        if (!cancelled) setStringCatalogLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const saveStringCatalog = async (next: StringCatalogItem[]) => {
-    setStringCatalog(next)
-    setSavingStringCatalog(true)
-    try {
-      const res = await fetch('/api/admin/stringing-catalog', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: next }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? 'Failed to save')
-      setStringCatalog(data.items ?? next)
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to save string catalog')
-    } finally {
-      setSavingStringCatalog(false)
-    }
-  }
-
-  const handleAddString = () => {
-    const brand = newString.brand.trim()
-    const name = newString.name.trim()
-    if (!brand || !name) {
-      toast.error('Enter both a company/brand and a string name.')
-      return
-    }
-    const duplicate = stringCatalog.some(
-      (s) =>
-        s.sport === stringCatalogSport &&
-        s.brand.toLowerCase() === brand.toLowerCase() &&
-        s.name.toLowerCase() === name.toLowerCase(),
-    )
-    if (duplicate) {
-      toast.error('That string is already in the catalog for this sport.')
-      return
-    }
-    const item: StringCatalogItem = {
-      id: `${stringCatalogSport}-${Date.now()}`,
-      sport: stringCatalogSport,
-      brand,
-      name,
-      available: true,
-    }
-    saveStringCatalog([...stringCatalog, item])
-    setNewString({ brand: '', name: '' })
-    toast.success(`Added "${brand} — ${name}" to the catalog.`)
-  }
-
-  const handleToggleString = (id: string) => {
-    saveStringCatalog(
-      stringCatalog.map((s) =>
-        s.id === id ? { ...s, available: !s.available } : s,
-      ),
-    )
-  }
-
-  const handleDeleteString = (id: string) => {
-    saveStringCatalog(stringCatalog.filter((s) => s.id !== id))
-  }
-
-  const handleSeedStringing = async () => {
-    setSeedingStringing(true)
-    try {
-      const res = await fetch('/api/admin/services/seed-stringing', {
-        method: 'POST',
-        credentials: 'include',
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? 'Setup failed')
-
-      const parts = []
-      if (data.created?.length)
-        parts.push(`Created: ${data.created.join(', ')}`)
-      if (data.skipped?.length)
-        parts.push(`Already set up: ${data.skipped.join(', ')}`)
-      toast.success(parts.join(' · ') || 'Stringing services are set up.')
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to set up stringing services')
-    } finally {
-      setSeedingStringing(false)
-    }
-  }
-
-  // ── Load real data from Medusa ────────────────────────────────
-  // BUG FIX: this page used to seed `store`/`address`/`account` with
-  // hardcoded fake values and never fetched anything. Now it loads the
-  // actual store (name + metadata) and the logged-in admin's own user
-  // record on mount.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
         const [settingsRes, accountRes] = await Promise.all([
-          fetch('/api/admin/general-settings', { credentials: 'include' }),
-          fetch('/api/admin/account', { credentials: 'include' }),
+          fetch('/api/admin/general-settings', {
+            credentials: 'include',
+          }),
+          fetch('/api/admin/account', {
+            credentials: 'include',
+          }),
         ])
-
         if (settingsRes.ok) {
           const data = await settingsRes.json()
           if (!cancelled) {
             setStoreId(data.storeId)
-            setStore((s) => ({ ...s, ...data.store }))
-            setAddress((a) => ({ ...a, ...data.address }))
+            setStore((s) => ({
+              ...s,
+              ...data.store,
+            }))
+            setAddress((a) => ({
+              ...a,
+              ...data.address,
+            }))
           }
         } else {
           toast.error('Failed to load store settings')
         }
-
         if (accountRes.ok) {
           const data = await accountRes.json()
           if (!cancelled) {
             setAccountId(data.id)
-            setAccount((a) => ({ ...a, name: data.name, email: data.email }))
+            setAccount((a) => ({
+              ...a,
+              name: data.name,
+              email: data.email,
+            }))
           }
         }
       } catch (err: any) {
@@ -504,7 +401,6 @@ export default function SettingsPage() {
       cancelled = true
     }
   }, [])
-
   const handleSave = async () => {
     if (!storeId) {
       toast.error('Store not loaded yet')
@@ -514,9 +410,15 @@ export default function SettingsPage() {
     try {
       const res = await fetch('/api/admin/general-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
-        body: JSON.stringify({ storeId, store, address }),
+        body: JSON.stringify({
+          storeId,
+          store,
+          address,
+        }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -531,14 +433,15 @@ export default function SettingsPage() {
       setSaving(false)
     }
   }
-
   const handleSaveAccount = async () => {
     if (!accountId) return
     setSavingAccount(true)
     try {
       const res = await fetch('/api/admin/account', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
         body: JSON.stringify({
           id: accountId,
@@ -557,10 +460,9 @@ export default function SettingsPage() {
       setSavingAccount(false)
     }
   }
-
   return (
     <div className='space-y-5'>
-      {/* Header */}
+      {}
       <div className='flex items-center justify-between'>
         <div>
           <h1 className='font-sora text-[22px] font-semibold text-[#202223]'>
@@ -597,26 +499,22 @@ export default function SettingsPage() {
       )}
 
       <div className='grid grid-cols-1 xl:grid-cols-[200px_1fr] gap-5'>
-        {/* Sidebar nav */}
+        {}
         <div className='bg-white border border-[#E1E3E5] rounded-xl p-2 h-fit'>
           {SETTINGS_NAV.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center px-3 py-2 rounded-lg text-[13px] font-medium no-underline transition-colors ${
-                item.active
-                  ? 'bg-[#F2F7F5] text-[#008060]'
-                  : 'text-[#6D7175] hover:bg-[#F6F6F7] hover:text-[#202223]'
-              }`}
+              className={`flex items-center px-3 py-2 rounded-lg text-[13px] font-medium no-underline transition-colors ${item.active ? 'bg-[#F2F7F5] text-[#008060]' : 'text-[#6D7175] hover:bg-[#F6F6F7] hover:text-[#202223]'}`}
             >
               {item.label}
             </Link>
           ))}
         </div>
 
-        {/* Main content */}
+        {}
         <div className='space-y-5'>
-          {/* Store Details */}
+          {}
           <div className='bg-white border border-[#E1E3E5] rounded-xl px-6 py-2'>
             <div className='py-4 border-b border-[#E1E3E5]'>
               <h2 className='font-sora text-[16px] font-semibold text-[#202223] flex items-center gap-2'>
@@ -633,13 +531,23 @@ export default function SettingsPage() {
                 <InputField
                   label='Store Name'
                   value={store.name}
-                  onChange={(v) => setStore((s) => ({ ...s, name: v }))}
+                  onChange={(v) =>
+                    setStore((s) => ({
+                      ...s,
+                      name: v,
+                    }))
+                  }
                   placeholder='Smash Racket Pro'
                 />
                 <InputField
                   label='Store Email'
                   value={store.email}
-                  onChange={(v) => setStore((s) => ({ ...s, email: v }))}
+                  onChange={(v) =>
+                    setStore((s) => ({
+                      ...s,
+                      email: v,
+                    }))
+                  }
                   type='email'
                   placeholder='Sales@smashuk.co'
                   icon={Icons.mail}
@@ -649,14 +557,24 @@ export default function SettingsPage() {
                 <InputField
                   label='Phone Number'
                   value={store.phone}
-                  onChange={(v) => setStore((s) => ({ ...s, phone: v }))}
+                  onChange={(v) =>
+                    setStore((s) => ({
+                      ...s,
+                      phone: v,
+                    }))
+                  }
                   placeholder='+44 20 7946 0958'
                   icon={Icons.phone}
                 />
                 <InputField
                   label='Website URL'
                   value={store.website}
-                  onChange={(v) => setStore((s) => ({ ...s, website: v }))}
+                  onChange={(v) =>
+                    setStore((s) => ({
+                      ...s,
+                      website: v,
+                    }))
+                  }
                   placeholder='https://smashpro.co.uk'
                   icon={Icons.globe}
                 />
@@ -668,7 +586,10 @@ export default function SettingsPage() {
                 <textarea
                   value={store.description}
                   onChange={(e) =>
-                    setStore((s) => ({ ...s, description: e.target.value }))
+                    setStore((s) => ({
+                      ...s,
+                      description: e.target.value,
+                    }))
                   }
                   rows={3}
                   placeholder='Describe your store...'
@@ -684,27 +605,47 @@ export default function SettingsPage() {
               <InputField
                 label='Address Line 1'
                 value={address.line1}
-                onChange={(v) => setAddress((a) => ({ ...a, line1: v }))}
+                onChange={(v) =>
+                  setAddress((a) => ({
+                    ...a,
+                    line1: v,
+                  }))
+                }
                 placeholder='Street address'
                 icon={Icons.map}
               />
               <InputField
                 label='Address Line 2'
                 value={address.line2}
-                onChange={(v) => setAddress((a) => ({ ...a, line2: v }))}
+                onChange={(v) =>
+                  setAddress((a) => ({
+                    ...a,
+                    line2: v,
+                  }))
+                }
                 placeholder='Apartment, suite, etc.'
               />
               <div className='grid grid-cols-2 gap-4'>
                 <InputField
                   label='City'
                   value={address.city}
-                  onChange={(v) => setAddress((a) => ({ ...a, city: v }))}
+                  onChange={(v) =>
+                    setAddress((a) => ({
+                      ...a,
+                      city: v,
+                    }))
+                  }
                   placeholder='London'
                 />
                 <InputField
                   label='County'
                   value={address.state}
-                  onChange={(v) => setAddress((a) => ({ ...a, state: v }))}
+                  onChange={(v) =>
+                    setAddress((a) => ({
+                      ...a,
+                      state: v,
+                    }))
+                  }
                   placeholder='Greater London'
                 />
               </div>
@@ -712,13 +653,23 @@ export default function SettingsPage() {
                 <InputField
                   label='Postcode'
                   value={address.pincode}
-                  onChange={(v) => setAddress((a) => ({ ...a, pincode: v }))}
+                  onChange={(v) =>
+                    setAddress((a) => ({
+                      ...a,
+                      pincode: v,
+                    }))
+                  }
                   placeholder='SW1A 1AA'
                 />
                 <InputField
                   label='Country'
                   value={address.country}
-                  onChange={(v) => setAddress((a) => ({ ...a, country: v }))}
+                  onChange={(v) =>
+                    setAddress((a) => ({
+                      ...a,
+                      country: v,
+                    }))
+                  }
                   placeholder='United Kingdom'
                 />
               </div>
@@ -754,7 +705,10 @@ export default function SettingsPage() {
                   <select
                     value={store.timezone}
                     onChange={(e) =>
-                      setStore((s) => ({ ...s, timezone: e.target.value }))
+                      setStore((s) => ({
+                        ...s,
+                        timezone: e.target.value,
+                      }))
                     }
                     className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all cursor-pointer'
                   >
@@ -779,7 +733,10 @@ export default function SettingsPage() {
                   <select
                     value={store.weightUnit}
                     onChange={(e) =>
-                      setStore((s) => ({ ...s, weightUnit: e.target.value }))
+                      setStore((s) => ({
+                        ...s,
+                        weightUnit: e.target.value,
+                      }))
                     }
                     className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all cursor-pointer'
                   >
@@ -795,7 +752,10 @@ export default function SettingsPage() {
                   <select
                     value={store.language}
                     onChange={(e) =>
-                      setStore((s) => ({ ...s, language: e.target.value }))
+                      setStore((s) => ({
+                        ...s,
+                        language: e.target.value,
+                      }))
                     }
                     className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all cursor-pointer'
                   >
@@ -807,165 +767,7 @@ export default function SettingsPage() {
             </SettingSection>
           </div>
 
-          {/* Store Services */}
-          <div className='bg-white border border-[#E1E3E5] rounded-xl px-6 py-2'>
-            <div className='py-4 border-b border-[#E1E3E5]'>
-              <h2 className='font-sora text-[16px] font-semibold text-[#202223] flex items-center gap-2'>
-                <span className='text-[#6D7175]'>🛠️</span> Store Services
-              </h2>
-            </div>
-
-            <SettingSection
-              title='Stringing Booking Products'
-              description='Creates the 3 bookable stringing services (Badminton £16, Tennis £22, Squash £22) as real Medusa products, so the booking form at /local-store/stringing can add them to cart and take payment via Stripe. Safe to click more than once — existing ones are skipped.'
-            >
-              <button
-                onClick={handleSeedStringing}
-                disabled={seedingStringing}
-                className='flex items-center gap-2 px-4 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 border-none cursor-pointer'
-              >
-                {seedingStringing ? Icons.spinner : Icons.check}
-                {seedingStringing
-                  ? 'Setting Up...'
-                  : 'Set Up Stringing Services'}
-              </button>
-            </SettingSection>
-
-            <SettingSection
-              title='Stringing String Catalog'
-              description='Which strings (by company) show as available on the /local-store/stringing booking form. Toggle a string off to hide it from customers without deleting it — e.g. temporarily out of stock.'
-            >
-              <div className='flex gap-2 mb-1'>
-                {(['badminton', 'tennis', 'squash'] as const).map((sp) => (
-                  <button
-                    key={sp}
-                    onClick={() => setStringCatalogSport(sp)}
-                    className={`px-3 py-1.5 rounded-lg text-[12.5px] font-semibold capitalize border transition-colors cursor-pointer ${
-                      stringCatalogSport === sp
-                        ? 'bg-[#008060] border-[#008060] text-white'
-                        : 'bg-white border-[#E1E3E5] text-[#6D7175] hover:bg-[#F6F6F7]'
-                    }`}
-                  >
-                    {sp}
-                  </button>
-                ))}
-              </div>
-
-              {stringCatalogLoading ? (
-                <p className='text-[12.5px] text-[#6D7175]'>Loading catalog…</p>
-              ) : (
-                <>
-                  <div className='border border-[#E1E3E5] rounded-lg overflow-hidden'>
-                    {stringCatalog.filter((s) => s.sport === stringCatalogSport)
-                      .length === 0 ? (
-                      <p className='px-4 py-3 text-[12.5px] text-[#8C9196]'>
-                        No strings added for {stringCatalogSport} yet.
-                      </p>
-                    ) : (
-                      stringCatalog
-                        .filter((s) => s.sport === stringCatalogSport)
-                        .sort((a, b) => a.brand.localeCompare(b.brand))
-                        .map((s, idx) => (
-                          <div
-                            key={s.id}
-                            className={`flex items-center gap-3 px-4 py-2.5 ${
-                              idx !== 0 ? 'border-t border-[#F1F2F3]' : ''
-                            }`}
-                          >
-                            <button
-                              onClick={() => handleToggleString(s.id)}
-                              disabled={savingStringCatalog}
-                              title={
-                                s.available
-                                  ? 'Available — click to mark unavailable'
-                                  : 'Unavailable — click to mark available'
-                              }
-                              className={`shrink-0 w-9 h-5 rounded-full relative transition-colors cursor-pointer disabled:opacity-50 ${
-                                s.available ? 'bg-[#008060]' : 'bg-[#C9CCCF]'
-                              }`}
-                            >
-                              <span
-                                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                                  s.available ? 'translate-x' : '-translate-x-4'
-                                }`}
-                              />
-                            </button>
-                            <div className='flex-1 min-w-0'>
-                              <p className='text-[13px] font-medium text-[#202223] truncate'>
-                                {s.brand} — {s.name}
-                              </p>
-                              <p
-                                className={`text-[11px] font-medium ${
-                                  s.available
-                                    ? 'text-[#008060]'
-                                    : 'text-[#D82C0D]'
-                                }`}
-                              >
-                                {s.available
-                                  ? 'Available'
-                                  : 'Currently unavailable'}
-                              </p>
-                            </div>
-                            <button
-                              onClick={() => handleDeleteString(s.id)}
-                              disabled={savingStringCatalog}
-                              title='Remove from catalog'
-                              className='shrink-0 p-1.5 text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FBEAE5] rounded-md transition-colors cursor-pointer disabled:opacity-50'
-                            >
-                              <TrashIcon size={15} />
-                            </button>
-                          </div>
-                        ))
-                    )}
-                  </div>
-
-                  <div className='flex items-end gap-2 pt-1'>
-                    <div className='flex-1'>
-                      <label className='block text-[11px] font-semibold text-[#6D7175] uppercase tracking-wide mb-1'>
-                        Company / Brand
-                      </label>
-                      <input
-                        type='text'
-                        value={newString.brand}
-                        onChange={(e) =>
-                          setNewString((n) => ({ ...n, brand: e.target.value }))
-                        }
-                        placeholder='e.g. Yonex'
-                        className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
-                      />
-                    </div>
-                    <div className='flex-1'>
-                      <label className='block text-[11px] font-semibold text-[#6D7175] uppercase tracking-wide mb-1'>
-                        String Name
-                      </label>
-                      <input
-                        type='text'
-                        value={newString.name}
-                        onChange={(e) =>
-                          setNewString((n) => ({ ...n, name: e.target.value }))
-                        }
-                        placeholder='e.g. BG 65'
-                        onKeyDown={(e) =>
-                          e.key === 'Enter' && handleAddString()
-                        }
-                        className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
-                      />
-                    </div>
-                    <button
-                      onClick={handleAddString}
-                      disabled={savingStringCatalog}
-                      className='flex items-center gap-1.5 px-4 py-2 bg-[#202223] hover:bg-black text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 border-none cursor-pointer shrink-0'
-                    >
-                      <PlusIcon size={14} />
-                      Add
-                    </button>
-                  </div>
-                </>
-              )}
-            </SettingSection>
-          </div>
-
-          {/* Account Settings */}
+          {}
           <div className='bg-white border border-[#E1E3E5] rounded-xl px-6 py-2'>
             <div className='py-4 border-b border-[#E1E3E5]'>
               <h2 className='font-sora text-[16px] font-semibold text-[#202223] flex items-center gap-2'>
@@ -989,13 +791,23 @@ export default function SettingsPage() {
                 <InputField
                   label='Full Name'
                   value={account.name}
-                  onChange={(v) => setAccount((a) => ({ ...a, name: v }))}
+                  onChange={(v) =>
+                    setAccount((a) => ({
+                      ...a,
+                      name: v,
+                    }))
+                  }
                   icon={Icons.user}
                 />
                 <InputField
                   label='Email'
                   value={account.email}
-                  onChange={(v) => setAccount((a) => ({ ...a, email: v }))}
+                  onChange={(v) =>
+                    setAccount((a) => ({
+                      ...a,
+                      email: v,
+                    }))
+                  }
                   type='email'
                   icon={Icons.mail}
                 />
@@ -1010,7 +822,10 @@ export default function SettingsPage() {
                 label='Current Password'
                 value={account.currentPassword}
                 onChange={(v) =>
-                  setAccount((a) => ({ ...a, currentPassword: v }))
+                  setAccount((a) => ({
+                    ...a,
+                    currentPassword: v,
+                  }))
                 }
                 type='password'
                 placeholder='••••••••'
@@ -1020,7 +835,10 @@ export default function SettingsPage() {
                   label='New Password'
                   value={account.newPassword}
                   onChange={(v) =>
-                    setAccount((a) => ({ ...a, newPassword: v }))
+                    setAccount((a) => ({
+                      ...a,
+                      newPassword: v,
+                    }))
                   }
                   type='password'
                   placeholder='••••••••'
@@ -1030,7 +848,10 @@ export default function SettingsPage() {
                   label='Confirm Password'
                   value={account.confirmPassword}
                   onChange={(v) =>
-                    setAccount((a) => ({ ...a, confirmPassword: v }))
+                    setAccount((a) => ({
+                      ...a,
+                      confirmPassword: v,
+                    }))
                   }
                   type='password'
                   placeholder='••••••••'
@@ -1047,7 +868,9 @@ export default function SettingsPage() {
                   }
                   toast.info(
                     "Password changes for dashboard admins need a small Medusa-backend change (an email notification subscriber for the reset-password flow) — that lives in your separate Medusa server codebase, not this Next.js app, so it can't be wired from here. Ask whoever manages your Medusa backend to add it, or reset it directly from the Medusa admin database.",
-                    { duration: 10000 },
+                    {
+                      duration: 10000,
+                    },
                   )
                 }}
                 className='flex items-center gap-2 px-4 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors cursor-pointer'
@@ -1057,7 +880,7 @@ export default function SettingsPage() {
             </SettingSection>
           </div>
 
-          {/* Danger Zone */}
+          {}
           <div className='bg-white border border-[#D82C0D]/20 rounded-xl px-6 py-2'>
             <div className='py-4 border-b border-[#E1E3E5]'>
               <h2 className='font-sora text-[16px] font-semibold text-[#D82C0D] flex items-center gap-2'>
@@ -1086,7 +909,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Delete confirm modal */}
+      {}
       {showDeleteConfirm && (
         <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
           <div
@@ -1126,14 +949,11 @@ export default function SettingsPage() {
               </button>
               <button
                 onClick={() => {
-                  // Deliberately NOT wired to an actual delete-everything API call.
-                  // There's no single safe Medusa endpoint that wipes every
-                  // product/order/customer/category — doing that from a UI
-                  // button risks a catastrophic, irreversible mistake. Real
-                  // store deletion should happen at the hosting/database level.
                   toast.info(
                     'Full store deletion needs to be done at the hosting/database level (not a single API call) — contact whoever manages your Medusa server/database to do this safely.',
-                    { duration: 8000 },
+                    {
+                      duration: 8000,
+                    },
                   )
                   setShowDeleteConfirm(false)
                   setDeleteConfirmText('')

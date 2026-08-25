@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
 import Link from 'next/link'
-
 const Icons = {
   truck: (
     <svg
@@ -132,35 +131,91 @@ const Icons = {
     </svg>
   ),
 }
-
 const SETTINGS_NAV = [
-  { label: 'General', href: '/dashboard/settings' },
-  { label: 'Billing', href: '/dashboard/settings/billing' },
-  { label: 'Shipping', href: '/dashboard/settings/shipping', active: true },
-  { label: 'Notifications', href: '/dashboard/settings/notifications' },
+  {
+    label: 'General',
+    href: '/dashboard/settings',
+  },
+  {
+    label: 'Billing',
+    href: '/dashboard/settings/billing',
+  },
+  {
+    label: 'Shipping',
+    href: '/dashboard/settings/shipping',
+    active: true,
+  },
+  {
+    label: 'Notifications',
+    href: '/dashboard/settings/notifications',
+  },
+  {
+    label: 'Marketing',
+    href: '/dashboard/settings/marketing',
+  },
 ]
-
-// Common countries for the "Add Zone" picker. Medusa needs real ISO-3166
-// alpha-2 codes for its geo_zones — this isn't exhaustive, just the
-// countries a UK racket store realistically ships to. Add more here if needed.
 const COUNTRY_OPTIONS = [
-  { code: 'gb', label: 'United Kingdom' },
-  { code: 'ie', label: 'Ireland' },
-  { code: 'fr', label: 'France' },
-  { code: 'de', label: 'Germany' },
-  { code: 'es', label: 'Spain' },
-  { code: 'it', label: 'Italy' },
-  { code: 'nl', label: 'Netherlands' },
-  { code: 'be', label: 'Belgium' },
-  { code: 'pt', label: 'Portugal' },
-  { code: 'dk', label: 'Denmark' },
-  { code: 'se', label: 'Sweden' },
-  { code: 'no', label: 'Norway' },
-  { code: 'us', label: 'United States' },
-  { code: 'ca', label: 'Canada' },
-  { code: 'au', label: 'Australia' },
+  {
+    code: 'gb',
+    label: 'United Kingdom',
+  },
+  {
+    code: 'ie',
+    label: 'Ireland',
+  },
+  {
+    code: 'fr',
+    label: 'France',
+  },
+  {
+    code: 'de',
+    label: 'Germany',
+  },
+  {
+    code: 'es',
+    label: 'Spain',
+  },
+  {
+    code: 'it',
+    label: 'Italy',
+  },
+  {
+    code: 'nl',
+    label: 'Netherlands',
+  },
+  {
+    code: 'be',
+    label: 'Belgium',
+  },
+  {
+    code: 'pt',
+    label: 'Portugal',
+  },
+  {
+    code: 'dk',
+    label: 'Denmark',
+  },
+  {
+    code: 'se',
+    label: 'Sweden',
+  },
+  {
+    code: 'no',
+    label: 'Norway',
+  },
+  {
+    code: 'us',
+    label: 'United States',
+  },
+  {
+    code: 'ca',
+    label: 'Canada',
+  },
+  {
+    code: 'au',
+    label: 'Australia',
+  },
 ]
-
 interface RateOption {
   id: string
   name: string
@@ -171,32 +226,31 @@ interface RateOption {
   is_pickup: boolean
   provider_id?: string
   provider_label?: string
-  // True when a non-pickup rate isn't wired to the real Royal Mail
-  // fulfillment provider — see scripts/fix-royal-mail-provider.ts for the
-  // full story. Marking such an order "Fulfilled" flips its status here
-  // but never reaches Royal Mail's Click & Drop dashboard.
   provider_mismatch?: boolean
 }
-
 interface RealZone {
-  id: string // service_zone id
+  id: string
   name: string
   fulfillment_set_name: string | null
   options: RateOption[]
 }
-
 interface FulfillmentSet {
   id: string
   name: string
-  service_zones: { id: string; name: string }[]
+  service_zones: {
+    id: string
+    name: string
+  }[]
 }
-
 export default function ShippingPage() {
-  // ── Real Medusa shipping zones/rates ────────────────────────────────────
   const [zones, setZones] = useState<RealZone[]>([])
   const [fulfillmentSets, setFulfillmentSets] = useState<FulfillmentSet[]>([])
   const [shippingProfiles, setShippingProfiles] = useState<
-    { id: string; name: string; type: string }[]
+    {
+      id: string
+      name: string
+      type: string
+    }[]
   >([])
   const [loadingZones, setLoadingZones] = useState(true)
   const [zonesError, setZonesError] = useState<string | null>(null)
@@ -204,21 +258,15 @@ export default function ShippingPage() {
     null,
   )
   const [fixingRateId, setFixingRateId] = useState<string | null>(null)
-
-  // ── Add rate modal ───────────────────────────────────────────────────────
   const [rateModalZoneId, setRateModalZoneId] = useState<string | null>(null)
   const [rateName, setRateName] = useState('')
   const [ratePrice, setRatePrice] = useState('')
   const [rateIsPickup, setRateIsPickup] = useState(false)
   const [savingRate, setSavingRate] = useState(false)
-
-  // ── Add zone modal ───────────────────────────────────────────────────────
   const [showZoneModal, setShowZoneModal] = useState(false)
   const [newZoneName, setNewZoneName] = useState('')
   const [newZoneCountries, setNewZoneCountries] = useState<string[]>([])
   const [savingZone, setSavingZone] = useState(false)
-
-  // ── General settings (store-level config, not tied to checkout options) ─
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [freeShippingThreshold, setFreeShippingThreshold] = useState('80')
@@ -229,7 +277,6 @@ export default function ShippingPage() {
     codFee: false,
     codLimit: true,
   })
-
   const loadZones = useCallback(async () => {
     setLoadingZones(true)
     setZonesError(null)
@@ -244,26 +291,15 @@ export default function ShippingPage() {
         throw new Error(zoneData.error ?? 'Failed to load shipping zones')
       if (!optionsRes.ok)
         throw new Error(optionsData.error ?? 'Failed to load shipping options')
-
       const sets: FulfillmentSet[] = (zoneData.locations ?? []).flatMap(
         (loc: any) => loc.fulfillment_sets ?? [],
       )
       setFulfillmentSets(sets)
       setShippingProfiles(zoneData.shipping_profiles ?? [])
       setRoyalMailProviderId(optionsData.royal_mail_provider_id ?? null)
-
-      // Real service zones (from /shipping-zones) merged with their rates
-      // (from /shipping-options, which is where prices actually live).
       const optionZonesById = new Map<string, RealZone>(
         (optionsData.zones ?? []).map((z: any) => [z.id, z]),
       )
-      // BUG FIX: pickup rates used to be filtered OUT here
-      // (`.filter(o => !o.is_pickup)`), so "Store Pickup" style options
-      // were invisible in this dashboard and could only be created/fixed
-      // via the scripts/add-store-pickup-option.ts CLI script. Now that
-      // the "Add rate" modal below supports a Pickup toggle (which sets
-      // the correct 'enabled_in_store' rule via the API route), pickup
-      // rates are shown and manageable here too — no more terminal needed.
       const merged: RealZone[] = sets.flatMap((set) =>
         set.service_zones.map((sz) => {
           const withRates = optionZonesById.get(sz.id)
@@ -282,9 +318,7 @@ export default function ShippingPage() {
       setLoadingZones(false)
     }
   }, [])
-
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: standard data-fetch/derived-state pattern (set loading/derived state synchronously, real work happens async or on next tick); reviewed, not a bug.
     loadZones()
     fetch('/api/admin/shipping-settings')
       .then((r) => r.json())
@@ -297,13 +331,14 @@ export default function ShippingPage() {
       })
       .catch(() => {})
   }, [loadZones])
-
   const handleSave = async () => {
     setSaving(true)
     try {
       const res = await fetch('/api/admin/shipping-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           freeShippingThreshold,
           defaultWeight,
@@ -320,14 +355,12 @@ export default function ShippingPage() {
       setSaving(false)
     }
   }
-
   const openRateModal = (zoneId: string) => {
     setRateModalZoneId(zoneId)
     setRateName('')
     setRatePrice('')
     setRateIsPickup(false)
   }
-
   const handleAddRate = async () => {
     if (!rateModalZoneId || !rateName.trim() || ratePrice === '') return
     const profile =
@@ -342,7 +375,9 @@ export default function ShippingPage() {
     try {
       const res = await fetch('/api/admin/shipping-options', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           name: rateName.trim(),
           amount: Number(ratePrice),
@@ -362,7 +397,6 @@ export default function ShippingPage() {
       setSavingRate(false)
     }
   }
-
   const handleEditRate = async (rate: RateOption) => {
     const newName = window.prompt('Rate name', rate.name)
     if (newName === null) return
@@ -374,8 +408,13 @@ export default function ShippingPage() {
     try {
       const res = await fetch(`/api/admin/shipping-options/${rate.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName, amount: Number(newPrice) || 0 }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: newName,
+          amount: Number(newPrice) || 0,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Failed to update rate')
@@ -385,7 +424,6 @@ export default function ShippingPage() {
       toast.error(err.message ?? 'Failed to update rate')
     }
   }
-
   const handleDeleteRate = async (rate: RateOption) => {
     if (
       !window.confirm(
@@ -405,10 +443,6 @@ export default function ShippingPage() {
       toast.error(err.message ?? 'Failed to delete rate')
     }
   }
-
-  // One-click fix for the "Royal Mail" provider-mismatch bug — rewires an
-  // existing delivery rate to the real Royal Mail Click & Drop provider
-  // without needing the CLI script or a delete+recreate.
   const handleFixProvider = async (rate: RateOption) => {
     if (!royalMailProviderId) {
       toast.error(
@@ -420,8 +454,12 @@ export default function ShippingPage() {
     try {
       const res = await fetch(`/api/admin/shipping-options/${rate.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider_id: royalMailProviderId }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          provider_id: royalMailProviderId,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Failed to update provider')
@@ -433,7 +471,6 @@ export default function ShippingPage() {
       setFixingRateId(null)
     }
   }
-
   const handleAddZone = async () => {
     if (!newZoneName.trim() || newZoneCountries.length === 0) return
     const set = fulfillmentSets[0]
@@ -447,7 +484,9 @@ export default function ShippingPage() {
     try {
       const res = await fetch('/api/admin/shipping-zones', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           name: newZoneName.trim(),
           fulfillment_set_id: set.id,
@@ -467,7 +506,6 @@ export default function ShippingPage() {
       setSavingZone(false)
     }
   }
-
   return (
     <div className='space-y-5'>
       <div className='flex items-center justify-between'>
@@ -491,7 +529,7 @@ export default function ShippingPage() {
       </div>
 
       <div className='grid grid-cols-1 xl:grid-cols-[200px_1fr] gap-5'>
-        {/* Sidebar */}
+        {}
         <div className='bg-white border border-[#E1E3E5] rounded-xl p-2 h-fit'>
           {SETTINGS_NAV.map((item) => (
             <Link
@@ -505,7 +543,7 @@ export default function ShippingPage() {
         </div>
 
         <div className='space-y-5'>
-          {/* General shipping settings */}
+          {}
           <div className='bg-white border border-[#E1E3E5] rounded-xl p-6 space-y-5'>
             <h2 className='font-sora text-[15px] font-semibold text-[#202223] flex items-center gap-2'>
               <span className='text-[#6D7175]'>{Icons.truck}</span> General
@@ -567,7 +605,7 @@ export default function ShippingPage() {
             </div>
           </div>
 
-          {/* Shipping zones — real Medusa service zones + shipping options */}
+          {}
           <div className='bg-white border border-[#E1E3E5] rounded-xl overflow-hidden'>
             <div className='flex items-center justify-between px-6 py-4 border-b border-[#E1E3E5]'>
               <h2 className='font-sora text-[15px] font-semibold text-[#202223]'>
@@ -610,7 +648,7 @@ export default function ShippingPage() {
                       </div>
                     </div>
 
-                    {/* Rates */}
+                    {}
                     <div className='space-y-2'>
                       {zone.options.length === 0 && (
                         <p className='text-[12.5px] text-[#6D7175]'>
@@ -620,12 +658,7 @@ export default function ShippingPage() {
                       {zone.options.map((rate) => (
                         <div
                           key={rate.id}
-                          className={`flex items-center justify-between p-3 border rounded-lg ${
-                            rate.provider_mismatch ||
-                            (rate.price_type !== 'calculated' && !rate.hasPrice)
-                              ? 'bg-[#FFF4F4] border-[#FED3D1]'
-                              : 'bg-[#F6F6F7] border-[#E1E3E5]'
-                          }`}
+                          className={`flex items-center justify-between p-3 border rounded-lg ${rate.provider_mismatch || (rate.price_type !== 'calculated' && !rate.hasPrice) ? 'bg-[#FFF4F4] border-[#FED3D1]' : 'bg-[#F6F6F7] border-[#E1E3E5]'}`}
                         >
                           <div>
                             <p className='text-[13px] font-medium text-[#202223] flex items-center gap-1.5'>
@@ -635,11 +668,7 @@ export default function ShippingPage() {
                               {rate.name}
                               {rate.provider_label && (
                                 <span
-                                  className={`text-[10.5px] font-medium px-1.5 py-0.5 rounded ${
-                                    rate.provider_mismatch
-                                      ? 'bg-[#FED3D1] text-[#D82C0D]'
-                                      : 'bg-[#E3F1DF] text-[#008060]'
-                                  }`}
+                                  className={`text-[10.5px] font-medium px-1.5 py-0.5 rounded ${rate.provider_mismatch ? 'bg-[#FED3D1] text-[#D82C0D]' : 'bg-[#E3F1DF] text-[#008060]'}`}
                                 >
                                   {rate.provider_label}
                                 </span>
@@ -714,7 +743,7 @@ export default function ShippingPage() {
             )}
           </div>
 
-          {/* COD Settings */}
+          {}
           <div className='bg-white border border-[#E1E3E5] rounded-xl p-6 space-y-4'>
             <h2 className='font-sora text-[15px] font-semibold text-[#202223]'>
               Cash on Delivery (COD)
@@ -761,7 +790,9 @@ export default function ShippingPage() {
                   >
                     <span
                       className='absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all'
-                      style={{ left: codSettings[item.key] ? '22px' : '2px' }}
+                      style={{
+                        left: codSettings[item.key] ? '22px' : '2px',
+                      }}
                     />
                   </button>
                 </div>
@@ -771,7 +802,7 @@ export default function ShippingPage() {
         </div>
       </div>
 
-      {/* Add Rate Modal */}
+      {}
       {rateModalZoneId && (
         <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
           <div
@@ -855,7 +886,7 @@ export default function ShippingPage() {
         </div>
       )}
 
-      {/* Add Zone Modal */}
+      {}
       {showZoneModal && (
         <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
           <div

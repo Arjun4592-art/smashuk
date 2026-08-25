@@ -1,11 +1,10 @@
-import LegalPage from '@/components/website/LegalPage'
-import { FREE_SHIPPING_THRESHOLD, SITE_NAME } from '@/lib/constants'
-
-export const metadata = { title: `Delivery Information | ${SITE_NAME}` }
-
+import LegalPage from '@/components/website/LegalPage';
+import { FREE_SHIPPING_THRESHOLD, SITE_NAME } from '@/lib/constants';
+export const metadata = {
+  title: `Delivery Information | ${SITE_NAME}`
+};
 export default function DeliveryPage() {
-  return (
-    <LegalPage title='Delivery Information'>
+  return <LegalPage title='Delivery Information'>
       <p>
         We aim to get your order to you as quickly as possible. Here's how
         shipping works at {SITE_NAME}.
@@ -42,6 +41,5 @@ export default function DeliveryPage() {
         <a href='/contact' className='text-[#E8553A] hover:underline'>Contact page</a>{' '}
         if you're ordering from elsewhere and we'll see what we can do.
       </p>
-    </LegalPage>
-  )
+    </LegalPage>;
 }
