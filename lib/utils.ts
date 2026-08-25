@@ -22,7 +22,7 @@ export function cn(...inputs: ClassValue[]) {
 export const PRODUCT_GRID_COLS: Record<2 | 3 | 4, string> = {
   2: 'grid-cols-2',
   3: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
-  4: 'grid-cols-2 lg:grid-cols-4',
+  4: 'grid-cols-1 sm:grid-cols-3 lg:grid-cols-4',
 }
 export function formatCurrency(amount: number, currency = 'GBP'): string {
   return new Intl.NumberFormat('en-GB', {
