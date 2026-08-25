@@ -92,6 +92,17 @@ function AlertIcon() {
       <path d='M12 9v5M12 17h.01' />
     </svg>;
 }
+function SegmentIcon() {
+  return <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round'>
+      <circle cx='12' cy='12' r='3' />
+      <path d='M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83' />
+    </svg>;
+}
+function daysSince(dateStr: string) {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return Infinity;
+  return (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24);
+}
 function EmptyCustomersIcon() {
   return <svg width='36' height='36' viewBox='0 0 24 24' fill='none' stroke='#C4C8CC' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round'>
       <path d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2' />
@@ -273,6 +284,123 @@ function CustomersContent() {
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
   const totalRevenue = customers.reduce((s: number, c: typeof customers[number]) => s + c.totalSpent, 0);
   const vipCustomers = customers.filter((c: typeof customers[number]) => c.totalSpent > 300).length;
+
+  // Segments
+  type Customer = typeof customers[number];
+  const SEGMENTS: {
+    id: string;
+    label: string;
+    description: string;
+    color: string;
+    filter: (c: Customer) => boolean;
+  }[] = [{
+    id: 'vip',
+    label: 'VIP Customers',
+    description: 'Spent over £300 lifetime',
+    color: 'amber',
+    filter: c => c.totalSpent > 300
+  }, {
+    id: 'active',
+    label: 'Active',
+    description: 'Current status is active',
+    color: 'emerald',
+    filter: c => c.status === 'active'
+  }, {
+    id: 'at-risk',
+    label: 'At Risk',
+    description: 'No order in the last 60 days',
+    color: 'orange',
+    filter: c => c.status !== 'blocked' && daysSince(c.joinedAt) > 60 && c.totalOrders > 0 && daysSince(c.lastOrder) > 60
+  }, {
+    id: 'new',
+    label: 'New',
+    description: 'Joined in the last 30 days',
+    color: 'blue',
+    filter: c => daysSince(c.joinedAt) <= 30
+  }, {
+    id: 'repeat',
+    label: 'Repeat Buyers',
+    description: '2 or more orders placed',
+    color: 'violet',
+    filter: c => c.totalOrders >= 2
+  }, {
+    id: 'no-orders',
+    label: 'No Orders Yet',
+    description: "Haven't placed an order",
+    color: 'gray',
+    filter: c => c.totalOrders === 0
+  }, {
+    id: 'blocked',
+    label: 'Blocked',
+    description: 'Blocked from ordering',
+    color: 'red',
+    filter: c => c.status === 'blocked'
+  }];
+  const SEGMENT_STYLES: Record<string, {
+    bg: string;
+    text: string;
+  }> = {
+    amber: {
+      bg: 'bg-amber-50',
+      text: 'text-amber-600'
+    },
+    emerald: {
+      bg: 'bg-[#008060]/8',
+      text: 'text-[#008060]'
+    },
+    orange: {
+      bg: 'bg-orange-50',
+      text: 'text-orange-600'
+    },
+    blue: {
+      bg: 'bg-[#2C6ECB]/8',
+      text: 'text-[#2C6ECB]'
+    },
+    violet: {
+      bg: 'bg-violet-50',
+      text: 'text-violet-600'
+    },
+    gray: {
+      bg: 'bg-[#F6F6F7]',
+      text: 'text-[#6D7175]'
+    },
+    red: {
+      bg: 'bg-[#D82C0D]/8',
+      text: 'text-[#D82C0D]'
+    }
+  };
+  const [selectedSegment, setSelectedSegment] = useState<string | null>(null);
+  const activeSegment = SEGMENTS.find(s => s.id === selectedSegment) ?? null;
+  const segmentCustomers = activeSegment ? customers.filter(activeSegment.filter) : [];
+  const handleExportSegment = () => {
+    if (!activeSegment || segmentCustomers.length === 0) {
+      toast.error('Nothing to export');
+      return;
+    }
+    const rows = segmentCustomers.map((c: Customer) => ({
+      Name: c.name,
+      Email: c.email,
+      Phone: c.phone,
+      City: c.city,
+      Status: c.status,
+      'Total Orders': c.totalOrders,
+      'Total Spent': c.totalSpent,
+      'Joined At': c.joinedAt
+    }));
+    const csv = Papa.unparse(rows);
+    const blob = new Blob([csv], {
+      type: 'text/csv;charset=utf-8;'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `segment-${activeSegment.id}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} customers`);
+  };
   function setTab(tab: string) {
     if (tab === 'customers') router.push('/dashboard/customers');else router.push(`/dashboard/customers?view=${tab}`);
   }
@@ -325,7 +453,7 @@ function CustomersContent() {
         }, {
           id: 'segments',
           label: 'Segments',
-          count: 0
+          count: SEGMENTS.length
         }].map(tab => <button key={tab.id} onClick={() => setTab(tab.id)} className={`px-4 py-3 text-[13px] font-medium whitespace-nowrap border-b-2 transition-all duration-150 bg-transparent border-l-0 border-r-0 border-t-0 cursor-pointer ${view === tab.id ? 'border-b-[#008060] text-[#008060]' : 'border-b-transparent text-[#8C9196] hover:text-[#202223]'}`}>
               {tab.label}
               <span className='ml-1.5 text-[10.5px] text-[#B0B5BA]'>
@@ -505,11 +633,103 @@ function CustomersContent() {
             </div>
           </>}
 
-        {view === 'segments' && <div className='px-5 py-16 text-center'>
-            <p className='text-[14px] font-medium text-[#202223]'>Segments</p>
-            <p className='text-[13px] text-[#8C9196] mt-1'>
-              Customer segments — coming soon
-            </p>
+        {view === 'segments' && <div className='p-4 space-y-4'>
+            {}
+            <div className='grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3'>
+              {SEGMENTS.map(seg => {
+            const count = customers.filter(seg.filter).length;
+            const style = SEGMENT_STYLES[seg.color];
+            const isActive = selectedSegment === seg.id;
+            return <button key={seg.id} onClick={() => setSelectedSegment(isActive ? null : seg.id)} className={`text-left bg-white border rounded-xl p-4 flex items-start gap-3 cursor-pointer transition-all duration-150 hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)] hover:-translate-y-0.5 ${isActive ? 'border-[#008060] ring-2 ring-[#008060]/15' : 'border-[#E1E3E5]'}`}>
+                    <div className={`w-9 h-9 ${style.bg} rounded-lg flex items-center justify-center ${style.text} shrink-0`}>
+                      <SegmentIcon />
+                    </div>
+                    <div className='min-w-0'>
+                      <div className='flex items-center gap-2'>
+                        <p className='text-[13px] font-semibold text-[#202223]'>
+                          {seg.label}
+                        </p>
+                        <span className='text-[11px] font-medium text-[#8C9196]'>
+                          {loading ? '—' : count}
+                        </span>
+                      </div>
+                      <p className='text-[11.5px] text-[#8C9196] mt-0.5 leading-snug'>
+                        {seg.description}
+                      </p>
+                    </div>
+                  </button>;
+          })}
+            </div>
+
+            {}
+            {activeSegment && <div className='border border-[#E1E3E5] rounded-xl overflow-hidden'>
+                <div className='flex items-center justify-between px-4 py-3 bg-[#FAFAFA] border-b border-[#E1E3E5]'>
+                  <div>
+                    <p className='text-[13px] font-semibold text-[#202223]'>
+                      {activeSegment.label}{' '}
+                      <span className='text-[#8C9196] font-normal'>
+                        ({segmentCustomers.length})
+                      </span>
+                    </p>
+                    <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
+                      {activeSegment.description}
+                    </p>
+                  </div>
+                  <button onClick={handleExportSegment} className='inline-flex items-center gap-2 px-3 py-1.5 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[12.5px] font-medium text-[#202223] rounded-lg transition-colors duration-150 cursor-pointer shadow-sm'>
+                    <ExportIcon />
+                    Export
+                  </button>
+                </div>
+                {segmentCustomers.length === 0 ? <div className='px-5 py-14 text-center'>
+                    <p className='text-[13px] text-[#8C9196]'>
+                      No customers match this segment yet
+                    </p>
+                  </div> : <div className='overflow-x-auto'>
+                    <table className='w-full'>
+                      <thead>
+                        <tr className='border-b border-[#E1E3E5]'>
+                          {['Customer', 'Location', 'Orders', 'Total Spent', 'Status'].map((h, i) => <th key={i} className='px-4 py-2.5 text-[11px] font-semibold text-[#9CA3AF] uppercase tracking-wider text-left'>
+                              {h}
+                            </th>)}
+                        </tr>
+                      </thead>
+                      <tbody className='divide-y divide-[#F5F5F5]'>
+                        {segmentCustomers.map((customer: Customer) => <tr key={customer.id} className='hover:bg-[#FAFAFA] transition-colors duration-100'>
+                            <td className='px-4 py-3'>
+                              <div className='flex items-center gap-3'>
+                                <div className='w-7 h-7 rounded-full bg-[#008060] flex items-center justify-center text-white text-[10.5px] font-bold shrink-0 ring-2 ring-[#008060]/10'>
+                                  {customer.avatar}
+                                </div>
+                                <div className='min-w-0'>
+                                  <p className='text-[13px] font-medium text-[#202223]'>
+                                    {customer.name}
+                                  </p>
+                                  <p className='text-[11px] text-[#B0B5BA] truncate mt-0.5'>
+                                    {customer.email}
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className='px-4 py-3 text-[13px] text-[#202223]'>
+                              {customer.city || '—'}
+                            </td>
+                            <td className='px-4 py-3 text-[13px] font-semibold text-[#202223]'>
+                              {customer.totalOrders}
+                            </td>
+                            <td className='px-4 py-3 text-[13px] font-semibold text-[#202223]'>
+                              {formatCurrency(customer.totalSpent)}
+                            </td>
+                            <td className='px-4 py-3'>
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold capitalize ${STATUS_STYLES[customer.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[customer.status] ?? 'bg-gray-400'}`} />
+                                {customer.status}
+                              </span>
+                            </td>
+                          </tr>)}
+                      </tbody>
+                    </table>
+                  </div>}
+              </div>}
           </div>}
       </div>
 

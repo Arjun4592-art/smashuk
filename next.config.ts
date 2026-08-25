@@ -1,3 +1,5 @@
-import type { NextConfig } from 'next';
-const nextConfig: NextConfig = {};
-export default nextConfig;
+import type { NextConfig } from 'next'
+const nextConfig: NextConfig = {
+  serverExternalPackages: ['isomorphic-dompurify', 'jsdom'],
+}
+export default nextConfig
