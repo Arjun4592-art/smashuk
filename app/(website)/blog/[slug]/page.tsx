@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import DOMPurify from 'isomorphic-dompurify'
+import sanitizeHtml from 'sanitize-html'
 import { getBlogPost, getBlogPosts } from '@/lib/blog-posts'
 import { SPORTS } from '@/lib/blog-sports'
 import { SITE_NAME, SITE_URL } from '@/lib/constants'
@@ -9,7 +9,36 @@ import NewsletterForm from '@/components/website/NewsletterForm'
 import ShareRow from '@/components/website/blog/ShareRow'
 import { FacebookIcon, InstagramIcon, EditIcon } from '@/components/ui/Icons'
 export const revalidate = 120
-export const runtime = 'nodejs'
+// sanitize-html is a pure-JS, dependency-light HTML sanitizer with no jsdom/ESM
+// interop issues, so it works reliably in Vercel's serverless/Turbopack bundle
+// (isomorphic-dompurify pulls in jsdom -> html-encoding-sniffer -> @exodus/bytes,
+// which ships as an ESM-only file that Turbopack's server require() can't load).
+function sanitizeBlogHtml(html: string) {
+  return sanitizeHtml(html, {
+    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
+      'img',
+      'video',
+      'h1',
+      'h2',
+      'iframe',
+    ]),
+    allowedAttributes: {
+      ...sanitizeHtml.defaults.allowedAttributes,
+      img: ['src', 'alt', 'width', 'height', 'loading'],
+      video: ['src', 'controls', 'width', 'height', 'poster'],
+      a: ['href', 'name', 'target', 'rel'],
+      iframe: [
+        'src',
+        'width',
+        'height',
+        'allow',
+        'allowfullscreen',
+        'frameborder',
+      ],
+    },
+    allowedIframeHostnames: ['www.youtube.com', 'player.vimeo.com'],
+  })
+}
 function formatDate(d: string) {
   const date = new Date(d)
   if (Number.isNaN(date.getTime())) return ''
@@ -118,7 +147,7 @@ export default async function BlogPostPage({
               {post.contentHtml ? (
                 <div
                   dangerouslySetInnerHTML={{
-                    __html: DOMPurify.sanitize(post.contentHtml),
+                    __html: sanitizeBlogHtml(post.contentHtml),
                   }}
                 />
               ) : (

@@ -1,242 +1,212 @@
-import { notFound } from 'next/navigation';
-import Link from 'next/link';
-import sanitizeHtml from 'sanitize-html';
-import { getBlogPost, getBlogPosts } from '@/lib/blog-posts';
-import { SPORTS } from '@/lib/blog-sports';
-import { SITE_NAME, SITE_URL } from '@/lib/constants';
-import { generateBlogPostSchema, safeJsonLd } from '@/lib/seo';
-import NewsletterForm from '@/components/website/NewsletterForm';
-import ShareRow from '@/components/website/blog/ShareRow';
-import { FacebookIcon, InstagramIcon, EditIcon } from '@/components/ui/Icons';
-export const revalidate = 120;
-// sanitize-html is a pure-JS, dependency-light HTML sanitizer with no jsdom/ESM
-// interop issues, so it works reliably in Vercel's serverless/Turbopack bundle
-// (isomorphic-dompurify pulls in jsdom -> html-encoding-sniffer -> @exodus/bytes,
-// which ships as an ESM-only file that Turbopack's server require() can't load).
-function sanitizeBlogHtml(html: string) {
-  return sanitizeHtml(html, {
-    allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'video', 'h1', 'h2', 'iframe']),
-    allowedAttributes: {
-      ...sanitizeHtml.defaults.allowedAttributes,
-      img: ['src', 'alt', 'width', 'height', 'loading'],
-      video: ['src', 'controls', 'width', 'height', 'poster'],
-      a: ['href', 'name', 'target', 'rel'],
-      iframe: ['src', 'width', 'height', 'allow', 'allowfullscreen', 'frameborder']
-    },
-    allowedIframeHostnames: ['www.youtube.com', 'player.vimeo.com']
-  });
+export interface BlogPost {
+  slug: string
+  title: string
+  excerpt: string
+  content: string[]
+  contentHtml?: string
+  coverImage: string
+  category: string
+  publishedAt: string
+  readTime: string
+  author?: string
+  seoTitle?: string
+  seoDescription?: string
 }
-function formatDate(d: string) {
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
-  });
+const MEDUSA_URL = (
+  process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
+).replace(/\/+$/, '')
+const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
+// Render.com free/starter backends spin down when idle and can take 50-60s+ to
+// wake up on the next request. That's long enough to blow past Vercel's static
+// generation timeout and fail the whole build. Cap each fetch to a short window
+// during build/prerender so we fall back to FALLBACK_BLOG_POSTS instead of hanging.
+const FETCH_TIMEOUT_MS = 8000
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = FETCH_TIMEOUT_MS,
+) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
 }
-export async function generateMetadata({
-  params
-}: {
-  params: Promise<{
-    slug: string;
-  }>;
-}) {
-  const {
-    slug
-  } = await params;
-  const post = await getBlogPost(slug);
-  if (!post) return {
-    title: SITE_NAME
-  };
+function estimateReadTime(html: string): string {
+  const words = html
+    .replace(/<[^>]+>/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length
+  const minutes = Math.max(1, Math.round(words / 200))
+  return `${minutes} min read`
+}
+function normalizeMedusaPost(p: any): BlogPost {
+  const html: string = p.content || ''
+  const paragraphs = html
+    .split(/<\/(?:p|h1|h2|h3|h4|h5|h6|li|blockquote)>/i)
+    .map((chunk: string) => chunk.replace(/<[^>]+>/g, '').trim())
+    .filter(Boolean)
   return {
-    title: post.seoTitle || `${post.title} | ${SITE_NAME}`,
-    description: post.seoDescription || post.excerpt
-  };
+    slug: p.slug,
+    title: p.title,
+    excerpt: p.excerpt || '',
+    content: paragraphs.length ? paragraphs : [html.replace(/<[^>]+>/g, '')],
+    contentHtml: html || undefined,
+    coverImage: p.cover_image || '/placeholder-blog.jpg',
+    category: p.category?.name || 'General',
+    publishedAt: p.published_at || p.created_at,
+    readTime: estimateReadTime(html),
+    author:
+      (typeof p.author === 'string' ? p.author : p.author?.name) ||
+      p.author_name ||
+      p.authorName ||
+      undefined,
+    seoTitle: p.seo_title || undefined,
+    seoDescription: p.seo_description || undefined,
+  }
 }
-export default async function BlogPostPage({
-  params
-}: {
-  params: Promise<{
-    slug: string;
-  }>;
-}) {
-  const {
-    slug
-  } = await params;
-  const [post, allPostsRaw] = await Promise.all([getBlogPost(slug), getBlogPosts()]);
-  if (!post) notFound();
-  const allPosts = [...allPostsRaw].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
-  const currentIndex = allPosts.findIndex(p => p.slug === post.slug);
-  const previousPost = currentIndex >= 0 ? allPosts[currentIndex + 1] : undefined;
-  const nextPost = currentIndex > 0 ? allPosts[currentIndex - 1] : undefined;
-  const popular = allPosts.filter(p => p.slug !== post.slug).slice(0, 5);
-  const sport = SPORTS.find(s => s.name === post.category);
-  const postUrl = `${SITE_URL}/blog/${post.slug}`;
-  return <div className='bg-[#F5F3EF] min-h-screen'>
-      <script type='application/ld+json' dangerouslySetInnerHTML={{
-      __html: safeJsonLd(generateBlogPostSchema(post))
-    }} />
-
-      <div className='max-w-6xl mx-auto px-4 md:px-6 py-10 md:py-14'>
-        <Link href='/blog' className='text-[13px] text-[#E8553A] hover:underline font-lato font-semibold'>
-          ← Back to Blog
-        </Link>
-
-        <div className='mt-6 grid lg:grid-cols-[minmax(0,1fr)_300px] gap-10'>
-          {}
-          <article className='bg-white rounded-2xl border border-[#0A1F44]/8 p-6 md:p-10'>
-            <p className='text-[10px] text-[#E8553A] font-bold font-montserrat uppercase tracking-wider mb-3'>
-              {post.category} · {post.readTime} · {formatDate(post.publishedAt)}
-            </p>
-
-            <h1 className={`font-montserrat font-black text-3xl md:text-4xl text-[#0A1F44] leading-tight ${post.author ? 'mb-2' : 'mb-4'}`}>
-              {post.title}
-            </h1>
-
-            {post.author && <p className='flex items-center gap-1.5 text-[13px] text-gray-500 font-lato mb-4'>
-                By{' '}
-                <span className='font-semibold text-[#0A1F44]'>
-                  {post.author}
-                </span>
-                <EditIcon size={13} className='text-gray-400' />
-              </p>}
-
-            <div className='mb-6'>
-              <ShareRow url={postUrl} title={post.title} />
-            </div>
-
-            <div className='aspect-[16/9] bg-gray-100 rounded-2xl overflow-hidden mb-8'>
-              {}
-              <img src={post.coverImage} alt={post.title} className='w-full h-full object-cover' />
-            </div>
-
-            <div className='prose prose-sm max-w-none font-lato text-gray-600 leading-relaxed [&_h1]:font-montserrat [&_h1]:font-black [&_h1]:text-[#0A1F44] [&_h1]:text-2xl [&_h1]:mt-6 [&_h1]:mb-3 [&_h2]:font-montserrat [&_h2]:font-black [&_h2]:text-[#0A1F44] [&_h2]:text-xl [&_h2]:mt-6 [&_h2]:mb-3 [&_h3]:font-montserrat [&_h3]:font-bold [&_h3]:text-[#0A1F44] [&_h3]:text-lg [&_h3]:mt-5 [&_h3]:mb-2 [&_h4]:font-montserrat [&_h4]:font-bold [&_h4]:text-[#0A1F44] [&_h4]:text-base [&_h4]:mt-4 [&_h4]:mb-2 [&_h5]:font-montserrat [&_h5]:font-bold [&_h5]:text-[#0A1F44] [&_h5]:text-[13px] [&_h5]:uppercase [&_h5]:tracking-wide [&_h5]:mt-4 [&_h5]:mb-2 [&_p]:my-4 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-4 [&_li]:my-1 [&_blockquote]:border-l-4 [&_blockquote]:border-[#E8553A]/40 [&_blockquote]:pl-4 [&_blockquote]:py-1 [&_blockquote]:my-5 [&_blockquote]:italic [&_blockquote]:text-[#0A1F44] [&_a]:text-[#E8553A] [&_a]:underline [&_img]:rounded-xl [&_img]:my-5 [&_video]:rounded-xl [&_video]:my-5 [&_video]:max-w-full [&_table]:border-collapse [&_table]:w-full [&_table]:my-5 [&_table]:text-sm [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-50 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-montserrat [&_th]:font-bold [&_th]:text-[#0A1F44] [&_td]:border [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-2'>
-              {post.contentHtml ? <div dangerouslySetInnerHTML={{
-              __html: sanitizeBlogHtml(post.contentHtml)
-            }} /> : post.content.map((para, i) => <p key={i}>{para}</p>)}
-            </div>
-
-            {}
-            <div className='flex flex-wrap items-center gap-2 mt-10 pt-6 border-t border-gray-100'>
-              <span className='text-[11px] font-montserrat font-bold text-gray-400 uppercase tracking-wide mr-1'>
-                Tags
-              </span>
-              <Link href={sport ? `/blog/${sport.slug}` : '/blog'} className='px-3 py-1 rounded-full bg-[#F5F3EF] text-[#0A1F44] text-xs font-montserrat font-semibold hover:bg-[#0A1F44]/10 transition-colors'>
-                {post.category}
-              </Link>
-              <Link href='/blog' className='px-3 py-1 rounded-full bg-[#F5F3EF] text-[#0A1F44] text-xs font-montserrat font-semibold hover:bg-[#0A1F44]/10 transition-colors'>
-                Tips &amp; Advice
-              </Link>
-            </div>
-
-            {}
-            <div className='flex flex-wrap items-center justify-between gap-4 mt-6'>
-              <ShareRow url={postUrl} title={post.title} />
-              <Link href='/shop' className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors whitespace-nowrap'>
-                Shop {post.category}
-              </Link>
-            </div>
-
-            {}
-            {(previousPost || nextPost) && <div className='grid sm:grid-cols-2 gap-4 mt-8 pt-6 border-t border-gray-100'>
-                <div>
-                  {previousPost && <Link href={`/blog/${previousPost.slug}`} className='group block'>
-                      <span className='text-[11px] text-gray-400 font-montserrat font-bold uppercase tracking-wide'>
-                        ← Previous Article
-                      </span>
-                      <span className='block text-sm font-montserrat font-bold text-[#0A1F44] group-hover:text-[#E8553A] transition-colors mt-1'>
-                        {previousPost.title}
-                      </span>
-                    </Link>}
-                </div>
-                <div className='sm:text-right'>
-                  {nextPost && <Link href={`/blog/${nextPost.slug}`} className='group block'>
-                      <span className='text-[11px] text-gray-400 font-montserrat font-bold uppercase tracking-wide'>
-                        Next Article →
-                      </span>
-                      <span className='block text-sm font-montserrat font-bold text-[#0A1F44] group-hover:text-[#E8553A] transition-colors mt-1'>
-                        {nextPost.title}
-                      </span>
-                    </Link>}
-                </div>
-              </div>}
-          </article>
-
-          {}
-          <aside className='flex flex-col gap-6 lg:sticky lg:top-24 lg:self-start'>
-            {}
-            {popular.length > 0 && <div className='bg-white rounded-2xl border border-[#0A1F44]/8 p-6'>
-                <h3 className='font-montserrat font-black text-[#0A1F44] text-sm uppercase tracking-wide mb-4'>
-                  Popular Posts
-                </h3>
-                <div className='flex flex-col gap-4'>
-                  {popular.map((p, i) => <Link key={p.slug} href={`/blog/${p.slug}`} className='group flex gap-3 items-center'>
-                      <span className='flex-shrink-0 w-5 h-5 rounded-full bg-[#E8553A] text-white text-[11px] font-montserrat font-black flex items-center justify-center'>
-                        {i + 1}
-                      </span>
-                      <div className='flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden bg-gray-100'>
-                        {}
-                        <img src={p.coverImage} alt={p.title} className='w-full h-full object-cover' />
-                      </div>
-                      <span>
-                        <span className='block text-sm font-montserrat font-bold text-[#0A1F44] leading-snug group-hover:text-[#E8553A] transition-colors'>
-                          {p.title}
-                        </span>
-                        <span className='block text-[11px] text-gray-400 mt-1'>
-                          {p.category} · {formatDate(p.publishedAt)}
-                        </span>
-                      </span>
-                    </Link>)}
-                </div>
-              </div>}
-
-            {}
-            <div className='bg-[#0A1F44] rounded-2xl p-6'>
-              <h3 className='font-montserrat font-black text-white text-sm uppercase tracking-wide mb-2'>
-                Get Exclusive News &amp; Offers!
-              </h3>
-              <p className='text-white/50 text-[13px] leading-relaxed mb-4'>
-                Get access to our weekly blog on the latest products and news!
-              </p>
-              <NewsletterForm variant='dark' />
-              <p className='text-white/30 text-[11px] mt-6'>
-                100% free, unsubscribe any time!
-              </p>
-            </div>
-
-            {}
-            <div className='bg-white rounded-2xl border border-[#0A1F44]/8 p-6'>
-              <h3 className='font-montserrat font-black text-[#0A1F44] text-sm uppercase tracking-wide mb-4'>
-                Follow Us
-              </h3>
-              <div className='flex gap-2'>
-                <a href='https://facebook.com/smashpro' target='_blank' rel='noopener noreferrer' aria-label='Follow us on Facebook' className='w-9 h-9 rounded-full bg-[#F5F3EF] hover:bg-[#0A1F44]/10 flex items-center justify-center text-[#0A1F44] transition-colors'>
-                  <FacebookIcon size={15} />
-                </a>
-                <a href='https://instagram.com/smashpro' target='_blank' rel='noopener noreferrer' aria-label='Follow us on Instagram' className='w-9 h-9 rounded-full bg-[#F5F3EF] hover:bg-[#0A1F44]/10 flex items-center justify-center text-[#0A1F44] transition-colors'>
-                  <InstagramIcon size={15} />
-                </a>
-              </div>
-            </div>
-
-            {}
-            <div className='bg-white rounded-2xl border border-[#0A1F44]/8 p-6'>
-              <h3 className='font-montserrat font-black text-[#0A1F44] text-sm uppercase tracking-wide mb-4'>
-                Browse By Sport
-              </h3>
-              <div className='flex flex-col gap-2'>
-                {SPORTS.map(s => <Link key={s.slug} href={`/blog/${s.slug}`} className='flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-montserrat font-semibold bg-[#F5F3EF] text-[#0A1F44] hover:bg-[#0A1F44]/5 transition-colors'>
-                    <span>
-                      <span className='mr-2'>{s.icon}</span>
-                      {s.name}
-                    </span>
-                    <span>→</span>
-                  </Link>)}
-              </div>
-            </div>
-          </aside>
-        </div>
-      </div>
-    </div>;
+export async function getBlogPosts(category?: string): Promise<BlogPost[]> {
+  try {
+    const params = new URLSearchParams({
+      status: 'published',
+      limit: '100',
+    })
+    const res = await fetchWithTimeout(
+      `${MEDUSA_URL}/store/blog-posts?${params}`,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-publishable-api-key': PUBLISHABLE_KEY,
+        },
+        next: {
+          revalidate: 120,
+        },
+      },
+    )
+    if (!res.ok) throw new Error(`Medusa blog-posts error: ${res.status}`)
+    const data = await res.json()
+    const posts: any[] = data.posts ?? data.blog_posts ?? []
+    if (!posts.length) return FALLBACK_BLOG_POSTS
+    const normalized = posts.map(normalizeMedusaPost)
+    return category && category !== 'All'
+      ? normalized.filter((p) => p.category === category)
+      : normalized
+  } catch (err) {
+    console.error('[lib/blog-posts] getBlogPosts fallback:', err)
+    return category && category !== 'All'
+      ? FALLBACK_BLOG_POSTS.filter((p) => p.category === category)
+      : FALLBACK_BLOG_POSTS
+  }
 }
+export async function getBlogPost(slug: string): Promise<BlogPost | undefined> {
+  try {
+    const res = await fetchWithTimeout(
+      `${MEDUSA_URL}/store/blog-posts/${encodeURIComponent(slug)}`,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-publishable-api-key': PUBLISHABLE_KEY,
+        },
+        next: {
+          revalidate: 120,
+        },
+      },
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const post = data.post ?? data.blog_post
+      if (post && post.status === 'published') return normalizeMedusaPost(post)
+    }
+  } catch (err) {
+    console.error('[lib/blog-posts] getBlogPost fallback:', err)
+  }
+  return FALLBACK_BLOG_POSTS.find((p) => p.slug === slug)
+}
+export async function getBlogCategories(): Promise<string[]> {
+  const posts = await getBlogPosts()
+  return ['All', ...Array.from(new Set(posts.map((p) => p.category)))]
+}
+export const FALLBACK_BLOG_POSTS: BlogPost[] = [
+  {
+    slug: 'how-to-choose-a-badminton-racket',
+    title: 'How to Choose the Right Badminton Racket',
+    excerpt:
+      "Weight, balance, and string tension all change how a racket feels. Here's how to pick one that actually suits your game.",
+    coverImage:
+      'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=1200&q=80',
+    category: 'Badminton',
+    author: 'SMASH UK Team',
+    publishedAt: '2026-06-15',
+    readTime: '5 min read',
+    content: [
+      'Picking a badminton racket comes down to three things: weight, balance, and string tension — and getting these right matters more than the brand on the frame.',
+      'Weight is usually shown as 3U (85-89g) or 4U (80-84g). Lighter rackets (4U) are easier to swing fast for quick net play and defense, while heavier 3U rackets carry more power into your smashes if you can generate the swing speed.',
+      'Balance is either head-heavy, even-balance, or head-light. Head-heavy rackets hit harder but tire your wrist faster; head-light rackets are quicker to maneuver, better for doubles and fast exchanges at the net.',
+      "String tension changes feel more than most players expect. Lower tension (18-22 lbs) gives a bigger sweet spot and more power for beginners. Higher tension (24-28 lbs) gives more control and a crisper feel, but shrinks your margin for error — it's for players with consistent technique.",
+      "If you're not sure, start with a 4U, even-balance racket strung around 20-22 lbs. It's the most forgiving setup to learn on, and you can always go heavier or tighter once you know what you're missing.",
+    ],
+  },
+  {
+    slug: 'squash-string-tension-guide',
+    title: 'Squash String & Tension: A Practical Guide',
+    excerpt:
+      'Before choosing a squash string, get familiar with sweet spot size, tension trade-offs, and what actually suits beginners vs advanced players.',
+    coverImage:
+      'https://images.unsplash.com/photo-1613918431703-aa50889a3c19?w=1200&q=80',
+    category: 'Squash',
+    author: 'SMASH UK Team',
+    publishedAt: '2026-05-28',
+    readTime: '4 min read',
+    content: [
+      'Every racket has a "sweet spot" — the area on the string bed that gives you maximum power with the least effort. Tension directly controls how big that sweet spot is.',
+      'Higher tension shrinks the sweet spot but rewards players who consistently hit it dead-center with more control. Lower tension grows the sweet spot, making it far more forgiving — which is exactly why beginners and casual players get more power from lower tension, not higher.',
+      'That\'s counter-intuitive to a lot of new players who assume "tighter strings = more power," but for anyone still developing consistent technique, a looser string bed does more of the work for you.',
+      "The trade-off: tighter strings under high tension break more easily on mis-hits, since they're already stretched close to their limit.",
+      'For string type, synthetic gut is durable and a great all-rounder for social players. Premium multifilament strings (like those from Tecnifibre and Ashaway) give better feel and control and are popular with intermediate-to-advanced players who can justify the higher cost and shorter lifespan.',
+      "Not sure what tension your racket is currently strung at, or want to switch it up? Book a restring with us — it's often the cheapest performance upgrade you can make.",
+    ],
+  },
+  {
+    slug: 'tennis-racket-grip-size-guide',
+    title: 'Tennis Racket Grip Size: How to Get It Right',
+    excerpt:
+      "The wrong grip size causes more mishits and arm strain than most players realize. Here's how to measure and choose correctly.",
+    coverImage:
+      'https://images.unsplash.com/photo-1595435742656-5272d0b3fa82?w=1200&q=80',
+    category: 'Tennis',
+    author: 'SMASH UK Team',
+    publishedAt: '2026-04-10',
+    readTime: '3 min read',
+    content: [
+      'Grip size is one of the most overlooked specs when buying a tennis racket, but it directly affects control, comfort, and injury risk over time.',
+      "A simple way to check: hold the racket in your normal grip, and try to fit the index finger of your free hand into the gap between your fingertips and palm. If it fits snugly, that's your size. Too much space means the grip is too small; no space at all means it's too big.",
+      "A grip that's too small forces you to squeeze harder to control the racket, which is a common cause of tennis elbow over time. Too large, and you lose wrist snap and racket-head speed.",
+      "If you're between sizes, sizing down and adding an overgrip is usually the better call — overgrips are cheap, easy to swap, and let you fine-tune the feel without committing to a grip that's permanently too big.",
+    ],
+  },
+  {
+    slug: 'choosing-your-first-padel-bat',
+    title: 'Choosing Your First Padel Bat',
+    excerpt:
+      "Padel bats don't use string or tension like tennis or badminton — shape, weight and core density are what actually change how one plays.",
+    coverImage:
+      'https://images.unsplash.com/photo-1626224387982-f83f8f9a6d4f?w=1200&q=80',
+    category: 'Padel',
+    author: 'SMASH UK Team',
+    publishedAt: '2026-07-02',
+    readTime: '4 min read',
+    content: [
+      'Padel bats are solid — no strings, no tension — so shape, weight and core material do all the work that tension and string bed would do in tennis or badminton.',
+      'Shape comes in three types: round (biggest sweet spot, most forgiving, best for beginners), teardrop (a balance of control and power for improving players), and diamond (smallest sweet spot, most power, aimed at advanced players with consistent technique).',
+      'Core density is usually soft, medium or hard. Soft cores give more control and are kinder on the arm; hard cores give more power but transmit more shock, which matters if you already get elbow or wrist niggles.',
+      'Weight typically sits between 350-375g. Lighter bats are easier to maneuver for quick volleys at the net; heavier bats carry more power into smashes but tire your arm faster over a long match.',
+      "If it's your first bat, a round-shaped, medium-core bat around 360g is the easiest starting point — forgiving enough to build confidence while you get used to the walls and glass.",
+    ],
+  },
+]
