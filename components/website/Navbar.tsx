@@ -23,6 +23,49 @@ const NAV_LINKS = [{
   label: 'Blog',
   href: '/blog'
 }];
+interface MegaMenuBlogLink {
+  label: string;
+  href: string;
+}
+function useMegaMenuBlogLinks(): Record<string, MegaMenuBlogLink[]> {
+  const [posts, setPosts] = useState<{
+    slug: string;
+    title: string;
+    category: string;
+    publishedAt?: string;
+  }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/store/blogs?limit=100').then(res => res.ok ? res.json() : null).then(data => {
+      if (cancelled) return;
+      const raw: any[] = data?.posts ?? [];
+      setPosts(raw.map(p => ({
+        slug: p.slug,
+        title: p.title,
+        category: (typeof p.category === 'string' ? p.category : p.category?.name) || 'General',
+        publishedAt: p.published_at || p.created_at
+      })));
+    }).catch(() => {
+      if (!cancelled) setPosts([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const MAX_BLOGS_PER_MENU = 4;
+  const byMenuKey: Record<string, MegaMenuBlogLink[]> = {};
+  for (const key of Object.keys(MEGA_MENUS)) {
+    const menu = MEGA_MENUS[key as MegaMenuKey];
+    const matches = posts.filter(p => p.category.toLowerCase() === menu.label.toLowerCase()).sort((a, b) => new Date(b.publishedAt ?? 0).getTime() - new Date(a.publishedAt ?? 0).getTime()).slice(0, MAX_BLOGS_PER_MENU);
+    if (matches.length > 0) {
+      byMenuKey[key] = matches.map(p => ({
+        label: p.title,
+        href: `/blog/${p.slug}`
+      }));
+    }
+  }
+  return byMenuKey;
+}
 function useMedusaCategories() {
   const [categories, setCategories] = useState<{
     id: string;
@@ -70,6 +113,7 @@ export default function Navbar() {
   const isAuthenticated = useAuthStore(s => s.isAuthenticated);
   const wishlistCount = useWishlistStore(s => s.items.length);
   const categories = useMedusaCategories();
+  const megaMenuBlogLinks = useMegaMenuBlogLinks();
   useEffect(() => {
     fetch('/api/admin/store-settings').then(res => res.ok ? res.json() : null).then(data => {
       if (typeof data?.taxRate === 'number') setTaxRate(data.taxRate);
@@ -220,6 +264,11 @@ export default function Navbar() {
               {menuKeys.map(key => {
               const menu = MEGA_MENUS[key];
               const isActive = activeMegaMenu === key;
+              const blogLinks = megaMenuBlogLinks[key];
+              const displayColumns = blogLinks ? [...menu.columns, {
+                heading: 'Guides',
+                links: blogLinks
+              }] : menu.columns;
               return <div key={key} className='relative' onMouseEnter={() => openMenu(key)} onMouseLeave={scheduleClose}>
                     <Link href={menu.href} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all font-lato ${isActive ? 'text-[#E8553A] bg-[#E8553A]/8' : 'text-[#0A1F44] hover:text-[#E8553A] hover:bg-[#E8553A]/5'}`}>
                       {menu.label}
@@ -228,13 +277,13 @@ export default function Navbar() {
 
                     {}
                     <div className={`absolute top-full left-1/2 -translate-x-1/2 pt-2 transition-all duration-200 z-50 ${isActive ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-1 pointer-events-none'}`} style={{
-                  width: `min(94vw, ${menu.columns.length >= 4 ? '820px' : menu.columns.length === 3 ? '640px' : 'featured2' in menu && menu.featured2 ? '640px' : '480px'})`
+                  width: `min(94vw, ${displayColumns.length >= 4 ? '820px' : displayColumns.length === 3 ? '640px' : 'featured2' in menu && menu.featured2 ? '640px' : '480px'})`
                 }}>
                       <div className='bg-white rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.14)] border border-[#E5E7EB] p-6'>
                         <div className='grid gap-x-6 gap-y-4' style={{
                       gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))'
                     }}>
-                          {menu.columns.map(col => <div key={col.heading}>
+                          {displayColumns.map(col => <div key={col.heading}>
                               <p className='font-montserrat font-black text-[11px] uppercase tracking-[0.15em] text-[#9CA3AF] mb-3.5'>
                                 {col.heading}
                               </p>
@@ -242,7 +291,7 @@ export default function Navbar() {
                                 {col.links.map(link => <li key={link.href}>
                                     <Link href={link.href} onClick={() => setActiveMegaMenu(null)} className='flex items-center gap-1.5 text-sm font-lato text-[#4B5563] hover:text-[#E8553A] py-1 transition-colors group/link'>
                                       <span className='w-1 h-1 rounded-full bg-[#E5E7EB] group-hover/link:bg-[#E8553A] transition-colors shrink-0' />
-                                      {link.label}
+                                      <span className='line-clamp-1'>{link.label}</span>
                                     </Link>
                                   </li>)}
                               </ul>
@@ -305,6 +354,11 @@ export default function Navbar() {
             {menuKeys.map(key => {
             const menu = MEGA_MENUS[key];
             const isExpanded = mobileExpanded === key;
+            const blogLinks = megaMenuBlogLinks[key];
+            const displayColumns = blogLinks ? [...menu.columns, {
+              heading: 'Guides',
+              links: blogLinks
+            }] : menu.columns;
             return <div key={key}>
                   <button onClick={() => setMobileExpanded(isExpanded ? null : key)} className='flex items-center justify-between w-full px-4 py-3 rounded-xl text-sm font-medium text-[#0A1F44] hover:bg-[#F2F4F7] transition-colors font-lato'>
                     <span className='flex items-center gap-2'>
@@ -315,7 +369,7 @@ export default function Navbar() {
                   </button>
 
                   {isExpanded && <div className='mx-2 mb-2 bg-[#F2F4F7] rounded-xl overflow-hidden'>
-                      {menu.columns.map(col => <div key={col.heading} className='px-4 py-3 border-b border-[#E5E7EB] last:border-0'>
+                      {displayColumns.map(col => <div key={col.heading} className='px-4 py-3 border-b border-[#E5E7EB] last:border-0'>
                           <p className='font-montserrat font-black text-[10px] uppercase tracking-[0.15em] text-[#9CA3AF] mb-2'>
                             {col.heading}
                           </p>

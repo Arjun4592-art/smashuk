@@ -2,8 +2,9 @@
 
 import { useSearchParams } from 'next/navigation'
 import { useMemo, useState, useCallback, useEffect } from 'react'
-import { useAllStoreProducts as useStoreProducts } from '@/hooks/useProducts'
+import { useAllStoreProductsProgressive } from '@/hooks/useProducts'
 import { normalizeProduct, matchesBadgeFilter } from '@/lib/api/store'
+import { canonicalizeSpecLabel } from '@/lib/spec-filters'
 import ProductGrid from '@/components/website/ProductGrid'
 import ShopFilterSidebar, {
   DEFAULT_FILTERS,
@@ -48,10 +49,14 @@ export default function ShopClient() {
       categories: category ? [category] : [],
     }))
   }, [category])
-  const { data, isLoading, isError } = useStoreProducts()
+  const {
+    products: rawProducts,
+    isLoading,
+    isError,
+  } = useAllStoreProductsProgressive()
   const products = useMemo(
-    () => (data?.products ?? []).map(normalizeProduct),
-    [data],
+    () => rawProducts.map(normalizeProduct),
+    [rawProducts],
   )
   const filtered = useMemo(() => {
     let result = products.filter((p) => p.inStock)
@@ -111,7 +116,9 @@ export default function ShopClient() {
         specEntries.every(([label, values]) =>
           values.some((v) =>
             p.specs?.some(
-              (s) => norm(s.label) === norm(label) && norm(s.value) === norm(v),
+              (s) =>
+                canonicalizeSpecLabel(p.sport, p.category, s.label) === label &&
+                norm(s.value) === norm(v),
             ),
           ),
         ),

@@ -45,10 +45,12 @@ const DELIVERY_INFO_SECTIONS: {
 }];
 const StripeCardBlock = forwardRef(function StripeCardBlock({
   onReady,
+  onLoadError,
   onMethodChange,
   returnUrl
 }: {
   onReady?: () => void;
+  onLoadError?: (message: string) => void;
   onMethodChange?: (type: string) => void;
   returnUrl: string;
 }, ref) {
@@ -73,7 +75,7 @@ const StripeCardBlock = forwardRef(function StripeCardBlock({
       }
     }
   }));
-  return <PaymentElement onReady={onReady} onChange={e => onMethodChange?.(e.value.type)} options={{
+  return <PaymentElement onReady={onReady} onLoadError={e => onLoadError?.(e.error?.message ?? 'Could not load the card form. Please disable ad blockers or try a different browser.')} onChange={e => onMethodChange?.(e.value.type)} options={{
     wallets: {
       applePay: 'never',
       googlePay: 'never'
@@ -157,6 +159,7 @@ export default function CheckoutPage() {
     });
   }, []);
   const [paymentElementReady, setPaymentElementReady] = useState(false);
+  const [cardLoadError, setCardLoadError] = useState('');
   const [selectedPaymentType, setSelectedPaymentType] = useState('card');
   const cardRef = useRef<{
     confirmPayment: () => Promise<void>;
@@ -295,10 +298,14 @@ export default function CheckoutPage() {
     }
   }, [deliveryMode, resolvedDeliveryOption?.id, pickupOption, selectedShippingOptionId]);
   useEffect(() => {
-    if (!cardClientSecret || paymentElementReady) return;
-    const timer = setTimeout(() => setPaymentElementReady(true), 4000);
+    if (!cardClientSecret || paymentElementReady || cardLoadError) return;
+    // If Stripe hasn't fired onReady/onLoadError within 8s, something failed silently
+    // (blocked script, invalid key, network issue) — surface it instead of pretending it's ready.
+    const timer = setTimeout(() => {
+      setCardLoadError('Card form is taking too long to load. Please disable any ad blockers/privacy extensions, check your connection, and refresh the page.');
+    }, 8000);
     return () => clearTimeout(timer);
-  }, [cardClientSecret, paymentElementReady]);
+  }, [cardClientSecret, paymentElementReady, cardLoadError]);
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm(f => ({
       ...f,
@@ -309,6 +316,7 @@ export default function CheckoutPage() {
     if (cardClientSecret || !cartId || checkoutStep !== 'payment') return;
     let cancelled = false;
     setCardLoading(true);
+    setCardLoadError('');
     (async () => {
       try {
         const collectionRes = await fetch('/api/store/payment', {
@@ -349,6 +357,7 @@ export default function CheckoutPage() {
         if (!cancelled) setCardClientSecret(secret);
       } catch (err: any) {
         if (!cancelled) {
+          setCardLoadError(err.message ?? 'Could not load card payment form');
           toast.error(err.message ?? 'Could not load card payment form', {
             duration: 6000
           });
@@ -783,13 +792,25 @@ export default function CheckoutPage() {
               </div>
 
               <div className='mt-4 pt-4 border-t border-gray-100'>
-                {!cardClientSecret && <div className='flex items-center justify-center gap-2.5 py-8'>
+                {!cardClientSecret && !cardLoadError && <div className='flex items-center justify-center gap-2.5 py-8'>
                     <div className='w-5 h-5 border-2 border-gray-200 border-t-[#E8553A] rounded-full animate-spin' />
                     <p className='text-sm text-gray-400 font-lato'>
                       {cardLoading ? 'Loading secure card form…' : 'Preparing payment form…'}
                     </p>
                   </div>}
-                {cardClientSecret && <>
+                {cardLoadError && <div className='flex flex-col items-center gap-3 py-6 text-center'>
+                    <p className='text-sm text-red-500 font-lato max-w-sm'>
+                      {cardLoadError}
+                    </p>
+                    <button onClick={() => {
+                setCardLoadError('');
+                setCardClientSecret('');
+                setPaymentElementReady(false);
+              }} className='px-4 py-2 rounded-lg border border-[#E8553A] text-[#E8553A] text-sm font-semibold hover:bg-[#E8553A]/5'>
+                      Try again
+                    </button>
+                  </div>}
+                {cardClientSecret && !cardLoadError && <>
                     {!paymentElementReady && <div className='flex items-center justify-center gap-2.5 py-8'>
                         <div className='w-5 h-5 border-2 border-gray-200 border-t-[#E8553A] rounded-full animate-spin' />
                         <p className='text-sm text-gray-400 font-lato'>
@@ -801,7 +822,7 @@ export default function CheckoutPage() {
                       <Elements stripe={stripePromise} options={{
                   clientSecret: cardClientSecret
                 }}>
-                        <StripeCardBlock ref={cardRef} onReady={() => setPaymentElementReady(true)} onMethodChange={setSelectedPaymentType} returnUrl={typeof window !== 'undefined' ? `${window.location.origin}/checkout/complete?cart_id=${cartId}` : ''} />
+                        <StripeCardBlock ref={cardRef} onReady={() => setPaymentElementReady(true)} onLoadError={msg => setCardLoadError(msg)} onMethodChange={setSelectedPaymentType} returnUrl={typeof window !== 'undefined' ? `${window.location.origin}/checkout/complete?cart_id=${cartId}` : ''} />
                       </Elements>
                     </div>
                   </>}
@@ -816,7 +837,7 @@ export default function CheckoutPage() {
                 </span>
               </div>
 
-              <button onClick={handlePlaceOrder} disabled={placing || cardLoading || !cardClientSecret || !paymentElementReady} className={`w-full flex items-center justify-center gap-2 py-4 rounded-xl font-montserrat font-black text-base mt-4 transition-all ${placing ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#E8553A] hover:bg-[#D4441F] text-white shadow-lg hover:-translate-y-0.5'}`}>
+              <button onClick={handlePlaceOrder} disabled={placing || cardLoading || !cardClientSecret || !paymentElementReady || !!cardLoadError} className={`w-full flex items-center justify-center gap-2 py-4 rounded-xl font-montserrat font-black text-base mt-4 transition-all ${placing ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#E8553A] hover:bg-[#D4441F] text-white shadow-lg hover:-translate-y-0.5'}`}>
                 {placing ? 'Placing Order...' : `Pay ${formatCurrency(displayTotal)}`}
               </button>
 

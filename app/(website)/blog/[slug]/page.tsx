@@ -7,6 +7,7 @@ import { SITE_NAME, SITE_URL } from '@/lib/constants'
 import { generateBlogPostSchema, safeJsonLd } from '@/lib/seo'
 import NewsletterForm from '@/components/website/NewsletterForm'
 import ShareRow from '@/components/website/blog/ShareRow'
+import BlogProductEmbedHydrator from '@/components/website/blog/BlogProductEmbedHydrator'
 import { FacebookIcon, InstagramIcon, EditIcon } from '@/components/ui/Icons'
 export const revalidate = 120
 // sanitize-html is a pure-JS, dependency-light HTML sanitizer with no jsdom/ESM
@@ -21,12 +22,38 @@ function sanitizeBlogHtml(html: string) {
       'h1',
       'h2',
       'iframe',
+      'p',
+      'a',
+      'button',
     ]),
     allowedAttributes: {
       ...sanitizeHtml.defaults.allowedAttributes,
-      img: ['src', 'alt', 'width', 'height', 'loading'],
+      img: ['src', 'alt', 'width', 'height', 'loading', 'class'],
       video: ['src', 'controls', 'width', 'height', 'poster'],
-      a: ['href', 'name', 'target', 'rel'],
+      button: ['type', 'class'],
+      a: [
+        'href',
+        'name',
+        'target',
+        'rel',
+        'class',
+        'data-product-id',
+        'data-handle',
+        'data-title',
+        'data-price',
+      ],
+      // "class" on div/p/a is only used for the product-embed and
+      // product-grid-embed card markup produced by the blog editor's
+      // product picker(s).
+      div: [
+        'class',
+        'data-product-id',
+        'data-handle',
+        'data-title',
+        'data-price',
+        'data-count',
+      ],
+      p: ['class'],
       iframe: [
         'src',
         'width',
@@ -143,7 +170,10 @@ export default async function BlogPostPage({
               />
             </div>
 
-            <div className='prose prose-sm max-w-none font-lato text-gray-600 leading-relaxed [&_h1]:font-montserrat [&_h1]:font-black [&_h1]:text-[#0A1F44] [&_h1]:text-2xl [&_h1]:mt-6 [&_h1]:mb-3 [&_h2]:font-montserrat [&_h2]:font-black [&_h2]:text-[#0A1F44] [&_h2]:text-xl [&_h2]:mt-6 [&_h2]:mb-3 [&_h3]:font-montserrat [&_h3]:font-bold [&_h3]:text-[#0A1F44] [&_h3]:text-lg [&_h3]:mt-5 [&_h3]:mb-2 [&_h4]:font-montserrat [&_h4]:font-bold [&_h4]:text-[#0A1F44] [&_h4]:text-base [&_h4]:mt-4 [&_h4]:mb-2 [&_h5]:font-montserrat [&_h5]:font-bold [&_h5]:text-[#0A1F44] [&_h5]:text-[13px] [&_h5]:uppercase [&_h5]:tracking-wide [&_h5]:mt-4 [&_h5]:mb-2 [&_p]:my-4 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-4 [&_li]:my-1 [&_blockquote]:border-l-4 [&_blockquote]:border-[#E8553A]/40 [&_blockquote]:pl-4 [&_blockquote]:py-1 [&_blockquote]:my-5 [&_blockquote]:italic [&_blockquote]:text-[#0A1F44] [&_a]:text-[#E8553A] [&_a]:underline [&_img]:rounded-xl [&_img]:my-5 [&_video]:rounded-xl [&_video]:my-5 [&_video]:max-w-full [&_table]:border-collapse [&_table]:w-full [&_table]:my-5 [&_table]:text-sm [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-50 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-montserrat [&_th]:font-bold [&_th]:text-[#0A1F44] [&_td]:border [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-2'>
+            <div
+              id='blog-post-content'
+              className='prose prose-sm max-w-none font-lato text-gray-600 leading-relaxed [&_h1]:font-montserrat [&_h1]:font-black [&_h1]:text-[#0A1F44] [&_h1]:text-2xl [&_h1]:mt-6 [&_h1]:mb-3 [&_h2]:font-montserrat [&_h2]:font-black [&_h2]:text-[#0A1F44] [&_h2]:text-xl [&_h2]:mt-6 [&_h2]:mb-3 [&_h3]:font-montserrat [&_h3]:font-bold [&_h3]:text-[#0A1F44] [&_h3]:text-lg [&_h3]:mt-5 [&_h3]:mb-2 [&_h4]:font-montserrat [&_h4]:font-bold [&_h4]:text-[#0A1F44] [&_h4]:text-base [&_h4]:mt-4 [&_h4]:mb-2 [&_h5]:font-montserrat [&_h5]:font-bold [&_h5]:text-[#0A1F44] [&_h5]:text-[13px] [&_h5]:uppercase [&_h5]:tracking-wide [&_h5]:mt-4 [&_h5]:mb-2 [&_p]:my-4 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-4 [&_li]:my-1 [&_blockquote]:border-l-4 [&_blockquote]:border-[#E8553A]/40 [&_blockquote]:pl-4 [&_blockquote]:py-1 [&_blockquote]:my-5 [&_blockquote]:italic [&_blockquote]:text-[#0A1F44] [&_a]:text-[#E8553A] [&_a]:underline [&_img]:rounded-xl [&_img]:my-5 [&_video]:rounded-xl [&_video]:my-5 [&_video]:max-w-full [&_table]:border-collapse [&_table]:w-full [&_table]:my-5 [&_table]:text-sm [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-50 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-montserrat [&_th]:font-bold [&_th]:text-[#0A1F44] [&_td]:border [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-2 [&_.product-embed]:not-prose [&_.product-embed]:my-6 [&_.product-embed]:border [&_.product-embed]:border-[#0A1F44]/10 [&_.product-embed]:rounded-2xl [&_.product-embed]:overflow-hidden [&_.product-embed]:max-w-[240px] [&_.product-embed]:bg-white [&_.product-embed]:transition-all [&_.product-embed]:duration-300 [&_.product-embed]:hover:shadow-[0_8px_32px_rgba(232,85,58,0.10)] [&_.product-embed]:hover:-translate-y-1 [&_.product-embed-link]:block [&_.product-embed-link]:no-underline [&_.product-embed-image-wrap]:aspect-square [&_.product-embed-image-wrap]:bg-[#F2F4F7] [&_.product-embed-image]:w-full [&_.product-embed-image]:h-full [&_.product-embed-image]:object-cover [&_.product-embed-info]:p-4 [&_.product-embed-info]:pb-3 [&_.product-embed-title]:font-montserrat [&_.product-embed-title]:font-bold [&_.product-embed-title]:text-[#0A1F44] [&_.product-embed-title]:text-sm [&_.product-embed-title]:my-0 [&_.product-embed-title]:line-clamp-2 [&_.product-embed-price]:text-[#E8553A] [&_.product-embed-price]:font-semibold [&_.product-embed-price]:text-sm [&_.product-embed-price]:my-0 [&_.product-embed-price]:mt-1.5 [&_.product-embed-add-btn]:block [&_.product-embed-add-btn]:mx-4 [&_.product-embed-add-btn]:mb-4 [&_.product-embed-add-btn]:w-[calc(100%-2rem)] [&_.product-embed-add-btn]:py-2.5 [&_.product-embed-add-btn]:rounded-xl [&_.product-embed-add-btn]:bg-[#0A1F44] [&_.product-embed-add-btn]:text-white [&_.product-embed-add-btn]:text-[12px] [&_.product-embed-add-btn]:font-montserrat [&_.product-embed-add-btn]:font-bold [&_.product-embed-add-btn]:uppercase [&_.product-embed-add-btn]:tracking-wide [&_.product-embed-add-btn]:transition-colors [&_.product-embed-add-btn]:cursor-pointer [&_.product-embed-add-btn]:hover:bg-[#E8553A] [&_.product-embed-add-btn]:disabled:opacity-60 [&_.product-embed-add-btn]:disabled:cursor-not-allowed [&_.product-grid-embed]:not-prose [&_.product-grid-embed]:grid [&_.product-grid-embed]:grid-cols-2 sm:[&_.product-grid-embed]:grid-cols-4 [&_.product-grid-embed]:gap-4 [&_.product-grid-embed]:my-6 [&_.product-grid-item]:flex [&_.product-grid-item]:flex-col [&_.product-grid-item]:justify-between [&_.product-grid-item]:border [&_.product-grid-item]:border-[#0A1F44]/10 [&_.product-grid-item]:rounded-xl [&_.product-grid-item]:p-3 [&_.product-grid-item]:bg-[#F5F3EF]/40 [&_.product-grid-item]:transition-transform [&_.product-grid-item]:hover:-translate-y-0.5 [&_.product-grid-link]:block [&_.product-grid-link]:no-underline [&_.product-grid-image]:w-full [&_.product-grid-image]:aspect-square [&_.product-grid-image]:rounded-lg [&_.product-grid-image]:object-cover [&_.product-grid-image]:mb-2 [&_.product-grid-title]:font-montserrat [&_.product-grid-title]:font-bold [&_.product-grid-title]:text-[#0A1F44] [&_.product-grid-title]:text-[13px] [&_.product-grid-title]:my-0 [&_.product-grid-title]:line-clamp-2 [&_.product-grid-price]:text-[#E8553A] [&_.product-grid-price]:font-semibold [&_.product-grid-price]:text-[13px] [&_.product-grid-price]:my-0 [&_.product-grid-price]:mt-1 [&_.product-grid-add-btn]:block [&_.product-grid-add-btn]:mt-3 [&_.product-grid-add-btn]:w-full [&_.product-grid-add-btn]:py-2 [&_.product-grid-add-btn]:rounded-lg [&_.product-grid-add-btn]:bg-[#0A1F44] [&_.product-grid-add-btn]:text-white [&_.product-grid-add-btn]:text-[11px] [&_.product-grid-add-btn]:font-montserrat [&_.product-grid-add-btn]:font-bold [&_.product-grid-add-btn]:uppercase [&_.product-grid-add-btn]:tracking-wide [&_.product-grid-add-btn]:transition-colors [&_.product-grid-add-btn]:cursor-pointer [&_.product-grid-add-btn]:hover:bg-[#E8553A] [&_.product-grid-add-btn]:disabled:opacity-60 [&_.product-grid-add-btn]:disabled:cursor-not-allowed'
+            >
               {post.contentHtml ? (
                 <div
                   dangerouslySetInnerHTML={{
@@ -154,6 +184,8 @@ export default async function BlogPostPage({
                 post.content.map((para, i) => <p key={i}>{para}</p>)
               )}
             </div>
+
+            <BlogProductEmbedHydrator containerId='blog-post-content' />
 
             {}
             <div className='flex flex-wrap items-center gap-2 mt-10 pt-6 border-t border-gray-100'>

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 80" width="200" height="80">
+  <text x="100" y="42" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="700" font-size="30" letter-spacing="1" fill="#C8102E">Prince</text>
+  <rect x="75" y="52" width="50" height="4" rx="2" fill="#C8102E" opacity="0.55"/>
+</svg>

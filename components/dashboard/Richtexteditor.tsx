@@ -13,7 +13,14 @@ import TextAlign from '@tiptap/extension-text-align'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import VideoNode from '@/components/dashboard/editor-extensions/VideoNode'
+import ProductCardNode from '@/components/dashboard/editor-extensions/ProductCardNode'
+import ProductGridNode from '@/components/dashboard/editor-extensions/ProductGridNode'
 import IndentExtension from '@/components/dashboard/editor-extensions/IndentExtension'
+import ImageCropModal from '@/components/dashboard/ImageCropModal'
+import ProductPickerModal, {
+  PickedProduct,
+} from '@/components/dashboard/ProductPickerModal'
+import ProductGridPickerModal from '@/components/dashboard/ProductGridPickerModal'
 const TEXT_COLORS = [
   '#202223',
   '#E8553A',
@@ -394,6 +401,66 @@ function ImageIcon() {
     </svg>
   )
 }
+function ProductGridIcon() {
+  return (
+    <svg width='16' height='16' viewBox='0 0 16 16' fill='none'>
+      <rect
+        x='2'
+        y='2.5'
+        width='4.2'
+        height='4.2'
+        rx='0.6'
+        stroke='currentColor'
+        strokeWidth='1.3'
+      />
+      <rect
+        x='9.8'
+        y='2.5'
+        width='4.2'
+        height='4.2'
+        rx='0.6'
+        stroke='currentColor'
+        strokeWidth='1.3'
+      />
+      <rect
+        x='2'
+        y='9.3'
+        width='4.2'
+        height='4.2'
+        rx='0.6'
+        stroke='currentColor'
+        strokeWidth='1.3'
+      />
+      <rect
+        x='9.8'
+        y='9.3'
+        width='4.2'
+        height='4.2'
+        rx='0.6'
+        stroke='currentColor'
+        strokeWidth='1.3'
+      />
+    </svg>
+  )
+}
+function ProductIcon() {
+  return (
+    <svg width='16' height='16' viewBox='0 0 16 16' fill='none'>
+      <path
+        d='M2.5 5.5L8 2.5L13.5 5.5V10.5L8 13.5L2.5 10.5V5.5Z'
+        stroke='currentColor'
+        strokeWidth='1.3'
+        strokeLinejoin='round'
+      />
+      <path
+        d='M2.5 5.5L8 8.5M8 8.5L13.5 5.5M8 8.5V13.5'
+        stroke='currentColor'
+        strokeWidth='1.3'
+        strokeLinejoin='round'
+      />
+    </svg>
+  )
+}
 function VideoIcon() {
   return (
     <svg width='16' height='16' viewBox='0 0 16 16' fill='none'>
@@ -593,6 +660,13 @@ export default function RichTextEditor({
   placeholder,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [pendingImageCrop, setPendingImageCrop] = useState<{
+    src: string
+    name: string
+    type: string
+  } | null>(null)
+  const [showProductPicker, setShowProductPicker] = useState(false)
+  const [showProductGridPicker, setShowProductGridPicker] = useState(false)
   const videoInputRef = useRef<HTMLInputElement>(null)
   const editor = useEditor({
     immediatelyRender: false,
@@ -608,6 +682,8 @@ export default function RichTextEditor({
         },
       }),
       VideoNode,
+      ProductCardNode,
+      ProductGridNode,
       TableKit.configure({
         table: {
           resizable: true,
@@ -632,6 +708,14 @@ export default function RichTextEditor({
       }),
     ],
     content: value || '',
+    // Re-sync immediately on mount too, not just on edits. Old posts were
+    // saved with an older version of a node's renderHTML (e.g. ProductCardNode
+    // before the "Add to Cart" button existed) — TipTap re-renders those nodes
+    // with the CURRENT schema as soon as it parses them, but without this the
+    // parent form's `content` state would keep the stale saved HTML until the
+    // user made a real edit, so clicking Save alone wouldn't persist the
+    // up-to-date markup.
+    onCreate: ({ editor }) => onChange(editor.getHTML()),
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     editorProps: {
       attributes: {
@@ -646,6 +730,27 @@ export default function RichTextEditor({
           '[&_blockquote]:border-l-4 [&_blockquote]:border-[#008060]/40 [&_blockquote]:pl-3 [&_blockquote]:py-0.5 [&_blockquote]:my-3 [&_blockquote]:italic [&_blockquote]:text-[#4B5563] ' +
           '[&_a]:text-[#008060] [&_a]:underline ' +
           '[&_video]:my-3 [&_video]:rounded-lg [&_video]:max-w-full ' +
+          '[&_.product-embed]:my-3 [&_.product-embed]:border [&_.product-embed]:border-[#E1E3E5] [&_.product-embed]:rounded-xl [&_.product-embed]:overflow-hidden [&_.product-embed]:max-w-[220px] ' +
+          '[&_.product-embed-link]:block [&_.product-embed-link]:no-underline ' +
+          '[&_.product-embed-image-wrap]:aspect-square [&_.product-embed-image-wrap]:bg-[#F6F6F7] ' +
+          '[&_.product-embed-image]:w-full [&_.product-embed-image]:h-full [&_.product-embed-image]:object-cover ' +
+          '[&_.product-embed-info]:p-3 [&_.product-embed-info]:pb-2 ' +
+          '[&_.product-embed-title]:text-[13px] [&_.product-embed-title]:font-medium [&_.product-embed-title]:text-[#202223] [&_.product-embed-title]:m-0 [&_.product-embed-title]:line-clamp-2 ' +
+          '[&_.product-embed-price]:text-[12px] [&_.product-embed-price]:text-[#6D7175] [&_.product-embed-price]:m-0 [&_.product-embed-price]:mt-1 ' +
+          '[&_.product-embed-add-btn]:block [&_.product-embed-add-btn]:mx-3 [&_.product-embed-add-btn]:mb-3 [&_.product-embed-add-btn]:w-[calc(100%-1.5rem)] [&_.product-embed-add-btn]:py-1.5 [&_.product-embed-add-btn]:rounded-lg [&_.product-embed-add-btn]:bg-[#008060] [&_.product-embed-add-btn]:text-white [&_.product-embed-add-btn]:text-[11px] [&_.product-embed-add-btn]:font-semibold [&_.product-embed-add-btn]:cursor-default ' +
+          '[&_.product-embed-wrapper]:relative [&_.product-embed-wrapper]:inline-block [&_.product-grid-wrapper]:relative [&_.product-grid-wrapper]:block ' +
+          '[&_.product-embed-remove-btn]:absolute [&_.product-embed-remove-btn]:top-1.5 [&_.product-embed-remove-btn]:right-1.5 [&_.product-grid-remove-btn]:absolute [&_.product-grid-remove-btn]:top-1.5 [&_.product-grid-remove-btn]:right-1.5 ' +
+          '[&_.product-embed-remove-btn]:w-5 [&_.product-embed-remove-btn]:h-5 [&_.product-grid-remove-btn]:w-5 [&_.product-grid-remove-btn]:h-5 ' +
+          '[&_.product-embed-remove-btn]:rounded-full [&_.product-grid-remove-btn]:rounded-full [&_.product-embed-remove-btn]:bg-black/60 [&_.product-grid-remove-btn]:bg-black/60 [&_.product-embed-remove-btn]:text-white [&_.product-grid-remove-btn]:text-white ' +
+          '[&_.product-embed-remove-btn]:text-sm [&_.product-grid-remove-btn]:text-sm [&_.product-embed-remove-btn]:leading-none [&_.product-grid-remove-btn]:leading-none [&_.product-embed-remove-btn]:flex [&_.product-grid-remove-btn]:flex [&_.product-embed-remove-btn]:items-center [&_.product-grid-remove-btn]:items-center [&_.product-embed-remove-btn]:justify-center [&_.product-grid-remove-btn]:justify-center ' +
+          '[&_.product-embed-remove-btn]:cursor-pointer [&_.product-grid-remove-btn]:cursor-pointer [&_.product-embed-remove-btn]:hover:bg-red-500 [&_.product-grid-remove-btn]:hover:bg-red-500 [&_.product-embed-remove-btn]:z-10 [&_.product-grid-remove-btn]:z-10 ' +
+          '[&_.product-grid-embed]:my-3 [&_.product-grid-embed]:grid [&_.product-grid-embed]:grid-cols-2 [&_.product-grid-embed]:gap-2.5 ' +
+          '[&_.product-grid-item]:flex [&_.product-grid-item]:flex-col [&_.product-grid-item]:border [&_.product-grid-item]:border-[#E1E3E5] [&_.product-grid-item]:rounded-lg [&_.product-grid-item]:p-2 ' +
+          '[&_.product-grid-link]:block [&_.product-grid-link]:no-underline ' +
+          '[&_.product-grid-image]:w-full [&_.product-grid-image]:aspect-square [&_.product-grid-image]:rounded-md [&_.product-grid-image]:object-cover [&_.product-grid-image]:mb-1.5 ' +
+          '[&_.product-grid-title]:text-[12.5px] [&_.product-grid-title]:font-medium [&_.product-grid-title]:text-[#202223] [&_.product-grid-title]:m-0 [&_.product-grid-title]:line-clamp-2 ' +
+          '[&_.product-grid-price]:text-[12px] [&_.product-grid-price]:text-[#6D7175] [&_.product-grid-price]:m-0 [&_.product-grid-price]:mt-0.5 ' +
+          '[&_.product-grid-add-btn]:block [&_.product-grid-add-btn]:mt-2 [&_.product-grid-add-btn]:w-full [&_.product-grid-add-btn]:py-1.5 [&_.product-grid-add-btn]:rounded-lg [&_.product-grid-add-btn]:bg-[#008060] [&_.product-grid-add-btn]:text-white [&_.product-grid-add-btn]:text-[11px] [&_.product-grid-add-btn]:font-semibold [&_.product-grid-add-btn]:cursor-default ' +
           '[&_table]:border-collapse [&_table]:w-full [&_table]:my-3 ' +
           '[&_th]:border [&_th]:border-[#E1E3E5] [&_th]:bg-[#FAFBFB] [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[12.5px] [&_th]:font-semibold ' +
           '[&_td]:border [&_td]:border-[#E1E3E5] [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:text-[13px] ' +
@@ -1152,10 +1257,28 @@ export default function RichTextEditor({
           className='hidden'
           onChange={(e) => {
             const file = e.target.files?.[0]
-            if (file) uploadImage(file)
+            if (file) {
+              setPendingImageCrop({
+                src: URL.createObjectURL(file),
+                name: file.name,
+                type: file.type,
+              })
+            }
             e.target.value = ''
           }}
         />
+        <ToolbarButton
+          title='Insert product'
+          onClick={() => setShowProductPicker(true)}
+        >
+          <ProductIcon />
+        </ToolbarButton>
+        <ToolbarButton
+          title='Insert product grid (2-4 products)'
+          onClick={() => setShowProductGridPicker(true)}
+        >
+          <ProductGridIcon />
+        </ToolbarButton>
         <ToolbarButton
           title='Insert video'
           onClick={() => videoInputRef.current?.click()}
@@ -1237,6 +1360,43 @@ export default function RichTextEditor({
       <div className='rounded-b-lg overflow-hidden'>
         <EditorContent editor={editor} />
       </div>
+
+      {showProductPicker && (
+        <ProductPickerModal
+          onClose={() => setShowProductPicker(false)}
+          onSelect={(product: PickedProduct) => {
+            setShowProductPicker(false)
+            editor?.chain().focus().setProductCard(product).run()
+          }}
+        />
+      )}
+
+      {showProductGridPicker && (
+        <ProductGridPickerModal
+          onClose={() => setShowProductGridPicker(false)}
+          onConfirm={(products: PickedProduct[]) => {
+            setShowProductGridPicker(false)
+            editor?.chain().focus().setProductGrid({ products }).run()
+          }}
+        />
+      )}
+
+      {pendingImageCrop && (
+        <ImageCropModal
+          imageSrc={pendingImageCrop.src}
+          fileName={pendingImageCrop.name}
+          fileType={pendingImageCrop.type}
+          onCancel={() => {
+            URL.revokeObjectURL(pendingImageCrop.src)
+            setPendingImageCrop(null)
+          }}
+          onConfirm={(croppedFile) => {
+            URL.revokeObjectURL(pendingImageCrop.src)
+            setPendingImageCrop(null)
+            uploadImage(croppedFile)
+          }}
+        />
+      )}
     </div>
   )
 }

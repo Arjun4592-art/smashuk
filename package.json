@@ -19,6 +19,7 @@
     "@tiptap/extension-color": "^3.30.2",
     "@tiptap/extension-highlight": "^3.30.2",
     "@tiptap/extension-image": "^3.30.2",
+    "react-easy-crop": "^6.2.3",
     "@tiptap/extension-link": "^3.30.2",
     "@tiptap/extension-placeholder": "^3.30.2",
     "@tiptap/extension-table": "^3.30.2",
