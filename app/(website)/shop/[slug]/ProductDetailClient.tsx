@@ -105,7 +105,10 @@ async function resolveStringOptions(sport?: string): Promise<StringOption[]> {
             v.allow_backorder === true ||
             v.manage_inventory === false,
         )
-        const variant = purchasable ?? variants[0]
+        // No purchasable variant = this stringing product is out of stock on
+        // the website — don't fall back to an out-of-stock variant, exclude
+        // the product from the String Upgrade dropdown instead.
+        const variant = purchasable
         if (!variant) return null
         const gbp = (variant.prices ?? []).find(
           (pr: any) => pr.currency_code === 'gbp',
@@ -114,8 +117,18 @@ async function resolveStringOptions(sport?: string): Promise<StringOption[]> {
         const priceAmount =
           calcAmount && calcAmount > 0 ? calcAmount : gbp?.amount
         if (priceAmount === undefined) return null
-        const title: string = match.title ?? 'Stringing'
-        const brand: string = match.metadata?.brand || title.split(' ')[0] || ''
+        // Strip the store's own "Smash Racket Pro" label wherever it shows
+        // up (title or metadata brand) — only the string maker's actual
+        // brand (Yonex, Li-Ning, Ashaway, etc.) should be shown.
+        const isSmashLabel = (s: string) => /smash racket pro/i.test(s)
+        const title: string = (match.title ?? 'Stringing')
+          .replace(/smash racket pro/gi, '')
+          .trim()
+        const metaBrand: string = match.metadata?.brand ?? ''
+        const brand: string =
+          (metaBrand && !isSmashLabel(metaBrand) ? metaBrand : '') ||
+          title.split(' ')[0] ||
+          ''
         const name =
           brand && title.startsWith(brand)
             ? title.slice(brand.length).trim()
