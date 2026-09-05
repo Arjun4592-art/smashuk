@@ -1,173 +1,221 @@
-'use client';
+'use client'
 
-import { useState, useEffect, useRef } from 'react';
-import Link from 'next/link';
-import { useCartStore } from '@/store/cartStore';
-import { SITE_NAME, SITE_LOGO, FREE_SHIPPING_THRESHOLD, CONTACT_PHONE, CONTACT_EMAIL } from '@/lib/constants';
-import { SearchIcon, CartIcon, UserIcon, MenuIcon, CloseIcon, ChevronDownIcon, HeartIcon, ArrowRightIcon } from '@/components/ui/Icons';
-import { useAuthStore } from '@/store/authStore';
-import { useWishlistStore } from '@/store/wishlistStore';
-import { useMedusaProducts } from '@/hooks/useProducts';
-import { MEGA_MENUS, type MegaMenuKey } from '@/lib/mega-menu-data';
-const NAV_LINKS = [{
-  label: 'New Arrivals',
-  href: '/shop?badge=NEW'
-}, {
-  label: 'Sale 🔥',
-  href: '/shop?badge=SALE',
-  highlight: true
-}, {
-  label: 'Gift Cards',
-  href: '/gift-cards'
-}, {
-  label: 'Blog',
-  href: '/blog'
-}];
+import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
+import { useCartStore } from '@/store/cartStore'
+import {
+  SITE_NAME,
+  SITE_LOGO,
+  FREE_SHIPPING_THRESHOLD,
+  CONTACT_PHONE,
+  CONTACT_EMAIL,
+} from '@/lib/constants'
+import {
+  SearchIcon,
+  CartIcon,
+  UserIcon,
+  MenuIcon,
+  CloseIcon,
+  ChevronDownIcon,
+  HeartIcon,
+  ArrowRightIcon,
+} from '@/components/ui/Icons'
+import { useAuthStore } from '@/store/authStore'
+import { useWishlistStore } from '@/store/wishlistStore'
+import { useMedusaProducts } from '@/hooks/useProducts'
+import { MEGA_MENUS, type MegaMenuKey } from '@/lib/mega-menu-data'
+const NAV_LINKS = [
+  {
+    label: 'New Arrivals',
+    href: '/shop?badge=NEW',
+  },
+  {
+    label: 'Sale 🔥',
+    href: '/shop?badge=SALE',
+    highlight: true,
+  },
+  {
+    label: 'Gift Cards',
+    href: '/gift-cards',
+  },
+  {
+    label: 'Blog',
+    href: '/blog',
+  },
+]
 interface MegaMenuBlogLink {
-  label: string;
-  href: string;
+  label: string
+  href: string
 }
 function useMegaMenuBlogLinks(): Record<string, MegaMenuBlogLink[]> {
-  const [posts, setPosts] = useState<{
-    slug: string;
-    title: string;
-    category: string;
-    publishedAt?: string;
-  }[]>([]);
+  const [posts, setPosts] = useState<
+    {
+      slug: string
+      title: string
+      category: string
+      publishedAt?: string
+    }[]
+  >([])
   useEffect(() => {
-    let cancelled = false;
-    fetch('/api/store/blogs?limit=100').then(res => res.ok ? res.json() : null).then(data => {
-      if (cancelled) return;
-      const raw: any[] = data?.posts ?? [];
-      setPosts(raw.map(p => ({
-        slug: p.slug,
-        title: p.title,
-        category: (typeof p.category === 'string' ? p.category : p.category?.name) || 'General',
-        publishedAt: p.published_at || p.created_at
-      })));
-    }).catch(() => {
-      if (!cancelled) setPosts([]);
-    });
+    let cancelled = false
+    fetch('/api/store/blogs?limit=100')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled) return
+        const raw: any[] = data?.posts ?? []
+        setPosts(
+          raw.map((p) => ({
+            slug: p.slug,
+            title: p.title,
+            category:
+              (typeof p.category === 'string'
+                ? p.category
+                : p.category?.name) || 'General',
+            publishedAt: p.published_at || p.created_at,
+          })),
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setPosts([])
+      })
     return () => {
-      cancelled = true;
-    };
-  }, []);
-  const MAX_BLOGS_PER_MENU = 4;
-  const byMenuKey: Record<string, MegaMenuBlogLink[]> = {};
+      cancelled = true
+    }
+  }, [])
+  const MAX_BLOGS_PER_MENU = 4
+  const byMenuKey: Record<string, MegaMenuBlogLink[]> = {}
   for (const key of Object.keys(MEGA_MENUS)) {
-    const menu = MEGA_MENUS[key as MegaMenuKey];
-    const matches = posts.filter(p => p.category.toLowerCase() === menu.label.toLowerCase()).sort((a, b) => new Date(b.publishedAt ?? 0).getTime() - new Date(a.publishedAt ?? 0).getTime()).slice(0, MAX_BLOGS_PER_MENU);
+    const menu = MEGA_MENUS[key as MegaMenuKey]
+    const matches = posts
+      .filter((p) => p.category.toLowerCase() === menu.label.toLowerCase())
+      .sort(
+        (a, b) =>
+          new Date(b.publishedAt ?? 0).getTime() -
+          new Date(a.publishedAt ?? 0).getTime(),
+      )
+      .slice(0, MAX_BLOGS_PER_MENU)
     if (matches.length > 0) {
-      byMenuKey[key] = matches.map(p => ({
+      byMenuKey[key] = matches.map((p) => ({
         label: p.title,
-        href: `/blog/${p.slug}`
-      }));
+        href: `/blog/${p.slug}`,
+      }))
     }
   }
-  return byMenuKey;
+  return byMenuKey
 }
 function useMedusaCategories() {
-  const [categories, setCategories] = useState<{
-    id: string;
-    name: string;
-    handle: string;
-  }[]>([]);
+  const [categories, setCategories] = useState<
+    {
+      id: string
+      name: string
+      handle: string
+    }[]
+  >([])
   useEffect(() => {
     async function fetchCategories() {
       try {
-        const {
-          medusaStore
-        } = await import('@/lib/medusa');
-        const {
-          product_categories
-        } = await medusaStore.store.category.list({
+        const { medusaStore } = await import('@/lib/medusa')
+        const { product_categories } = await medusaStore.store.category.list({
           limit: 20,
-          fields: 'id,name,handle'
-        });
-        setCategories((product_categories ?? []).map((c: any) => ({
-          id: c.id,
-          name: c.name,
-          handle: c.handle ?? c.id
-        })));
+          fields: 'id,name,handle',
+        })
+        setCategories(
+          (product_categories ?? []).map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            handle: c.handle ?? c.id,
+          })),
+        )
       } catch {
-        setCategories([]);
+        setCategories([])
       }
     }
-    fetchCategories();
-  }, []);
-  return categories;
+    fetchCategories()
+  }, [])
+  return categories
 }
-export default function Navbar() {
-  const [isScrolled, setIsScrolled] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [mobileExpanded, setMobileExpanded] = useState<string | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [mounted, setMounted] = useState(false);
-  const [activeMegaMenu, setActiveMegaMenu] = useState<MegaMenuKey | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const itemCount = useCartStore(s => s.itemCount);
-  const setTaxRate = useCartStore(s => s.setTaxRate);
-  const user = useAuthStore(s => s.user);
-  const isAuthenticated = useAuthStore(s => s.isAuthenticated);
-  const wishlistCount = useWishlistStore(s => s.items.length);
-  const categories = useMedusaCategories();
-  const megaMenuBlogLinks = useMegaMenuBlogLinks();
+export default function Navbar({
+  promoCode = 'SMASH10',
+  promoDiscountLabel = '10% off',
+}: {
+  promoCode?: string
+  promoDiscountLabel?: string
+} = {}) {
+  const [isScrolled, setIsScrolled] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [mobileExpanded, setMobileExpanded] = useState<string | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [mounted, setMounted] = useState(false)
+  const [activeMegaMenu, setActiveMegaMenu] = useState<MegaMenuKey | null>(null)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const itemCount = useCartStore((s) => s.itemCount)
+  const setTaxRate = useCartStore((s) => s.setTaxRate)
+  const user = useAuthStore((s) => s.user)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const wishlistCount = useWishlistStore((s) => s.items.length)
+  const categories = useMedusaCategories()
+  const megaMenuBlogLinks = useMegaMenuBlogLinks()
   useEffect(() => {
-    fetch('/api/admin/store-settings').then(res => res.ok ? res.json() : null).then(data => {
-      if (typeof data?.taxRate === 'number') setTaxRate(data.taxRate);
-    }).catch(() => {});
-  }, [setTaxRate]);
+    fetch('/api/admin/store-settings')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (typeof data?.taxRate === 'number') setTaxRate(data.taxRate)
+      })
+      .catch(() => {})
+  }, [setTaxRate])
   const openMenu = (key: MegaMenuKey) => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    setActiveMegaMenu(key);
-  };
+    if (closeTimer.current) clearTimeout(closeTimer.current)
+    setActiveMegaMenu(key)
+  }
   const scheduleClose = () => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setActiveMegaMenu(null), 150);
-  };
-  useEffect(() => setMounted(true), []);
+    if (closeTimer.current) clearTimeout(closeTimer.current)
+    closeTimer.current = setTimeout(() => setActiveMegaMenu(null), 150)
+  }
+  useEffect(() => setMounted(true), [])
   useEffect(() => {
-    const handleScroll = () => setIsScrolled(window.scrollY > 20);
+    const handleScroll = () => setIsScrolled(window.scrollY > 20)
     window.addEventListener('scroll', handleScroll, {
-      passive: true
-    });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+      passive: true,
+    })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
   useEffect(() => {
     if (searchOpen) {
-      searchRef.current?.focus();
-      document.body.style.overflow = 'hidden';
+      searchRef.current?.focus()
+      document.body.style.overflow = 'hidden'
     } else {
-      document.body.style.overflow = '';
+      document.body.style.overflow = ''
     }
     return () => {
-      document.body.style.overflow = '';
-    };
-  }, [searchOpen]);
+      document.body.style.overflow = ''
+    }
+  }, [searchOpen])
   useEffect(() => {
-    if (mobileOpen) document.body.style.overflow = 'hidden';else document.body.style.overflow = '';
+    if (mobileOpen) document.body.style.overflow = 'hidden'
+    else document.body.style.overflow = ''
     return () => {
-      document.body.style.overflow = '';
-    };
-  }, [mobileOpen]);
+      document.body.style.overflow = ''
+    }
+  }, [mobileOpen])
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth >= 1024) setMobileOpen(false);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+      if (window.innerWidth >= 1024) setMobileOpen(false)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
   const handleSearch = () => {
     if (searchQuery.trim()) {
-      window.location.href = `/shop?q=${encodeURIComponent(searchQuery.trim())}`;
-      setSearchOpen(false);
-      setSearchQuery('');
+      window.location.href = `/shop?q=${encodeURIComponent(searchQuery.trim())}`
+      setSearchOpen(false)
+      setSearchQuery('')
     }
-  };
-  const menuKeys = Object.keys(MEGA_MENUS) as MegaMenuKey[];
-  return <>
+  }
+  const menuKeys = Object.keys(MEGA_MENUS) as MegaMenuKey[]
+  return (
+    <>
       {}
       <div className='bg-[#0A1F44] text-white text-xs font-lato tracking-wide'>
         <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center'>
@@ -175,22 +223,36 @@ export default function Navbar() {
           <div className='flex-1 min-w-0 overflow-hidden py-2.5'>
             <div className='flex items-center w-max animate-scroll'>
               {Array.from({
-              length: 4
-            }).map((_, i) => <span key={i} className='flex items-center gap-2 shrink-0 whitespace-nowrap pr-16'>
+                length: 4,
+              }).map((_, i) => (
+                <span
+                  key={i}
+                  className='flex items-center gap-2 shrink-0 whitespace-nowrap pr-16'
+                >
                   🚚 Free shipping on orders above £{FREE_SHIPPING_THRESHOLD}
                   &nbsp;·&nbsp; Use code{' '}
-                  <span className='text-[#E8553A] font-bold'>SMASH10</span> for
-                  10% off &nbsp;·&nbsp; 🏆 UK&apos;s #1 Racket Sports Store
-                </span>)}
+                  <span className='text-[#E8553A] font-bold'>
+                    {promoCode}
+                  </span>{' '}
+                  for {promoDiscountLabel} &nbsp;·&nbsp; 🏆 UK&apos;s #1 Racket
+                  Sports Store
+                </span>
+              ))}
             </div>
           </div>
 
           {}
           <div className='hidden lg:flex items-center gap-5 pl-6 ml-4 py-1.5 shrink-0 text-white/70 border-l border-white/10'>
-            <a href={`tel:${CONTACT_PHONE}`} className='hover:text-white transition-colors whitespace-nowrap'>
+            <a
+              href={`tel:${CONTACT_PHONE}`}
+              className='hover:text-white transition-colors whitespace-nowrap'
+            >
               Need help? Call us {CONTACT_PHONE}
             </a>
-            <a href={`mailto:${CONTACT_EMAIL}`} className='hover:text-white transition-colors whitespace-nowrap'>
+            <a
+              href={`mailto:${CONTACT_EMAIL}`}
+              className='hover:text-white transition-colors whitespace-nowrap'
+            >
               {CONTACT_EMAIL}
             </a>
           </div>
@@ -198,59 +260,108 @@ export default function Navbar() {
       </div>
 
       {}
-      <header className={`sticky top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled ? 'bg-white/95 backdrop-blur-md shadow-lg' : 'bg-white shadow-sm'}`}>
+      <header
+        className={`sticky top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled ? 'bg-white/95 backdrop-blur-md shadow-lg' : 'bg-white shadow-sm'}`}
+      >
         <nav className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
           <div className='flex items-center justify-between h-16'>
             {}
             <Link href='/' className='flex items-center gap-2 shrink-0 group'>
               {}
-              <img src={SITE_LOGO} alt={SITE_NAME} className='h-9 w-auto group-hover:scale-105 transition-transform' />
+              <img
+                src={SITE_LOGO}
+                alt={SITE_NAME}
+                className='h-9 w-auto group-hover:scale-105 transition-transform'
+              />
             </Link>
 
             {}
             <div className='hidden lg:flex items-center gap-1 ml-auto'>
               <div className='flex items-center gap-0.5 mr-2'>
-                {NAV_LINKS.map(link => <Link key={link.href} href={link.href} className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all font-lato ${(link as any).highlight ? 'text-[#E8553A] hover:bg-[#E8553A]/8 font-bold' : 'text-[#0A1F44] hover:text-[#E8553A] hover:bg-[#E8553A]/5'}`}>
+                {NAV_LINKS.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all font-lato ${(link as any).highlight ? 'text-[#E8553A] hover:bg-[#E8553A]/8 font-bold' : 'text-[#0A1F44] hover:text-[#E8553A] hover:bg-[#E8553A]/5'}`}
+                  >
                     {link.label}
-                  </Link>)}
+                  </Link>
+                ))}
               </div>
-              <button onClick={() => setSearchOpen(true)} className='p-2.5 text-[#4B5563] hover:text-[#E8553A] hover:bg-[#E8553A]/5 rounded-lg transition-all' aria-label='Search'>
+              <button
+                onClick={() => setSearchOpen(true)}
+                className='p-2.5 text-[#4B5563] hover:text-[#E8553A] hover:bg-[#E8553A]/5 rounded-lg transition-all'
+                aria-label='Search'
+              >
                 <SearchIcon size={19} />
               </button>
-              <Link href='/wishlist' className='relative p-2.5 text-[#4B5563] hover:text-[#E8553A] hover:bg-[#E8553A]/5 rounded-lg transition-all' aria-label='Wishlist'>
+              <Link
+                href='/wishlist'
+                className='relative p-2.5 text-[#4B5563] hover:text-[#E8553A] hover:bg-[#E8553A]/5 rounded-lg transition-all'
+                aria-label='Wishlist'
+              >
                 <HeartIcon size={19} />
-                {mounted && wishlistCount > 0 && <span className='absolute top-0.5 right-0.5 w-4 h-4 bg-[#E8553A] text-white text-[9px] font-black rounded-full flex items-center justify-center'>
+                {mounted && wishlistCount > 0 && (
+                  <span className='absolute top-0.5 right-0.5 w-4 h-4 bg-[#E8553A] text-white text-[9px] font-black rounded-full flex items-center justify-center'>
                     {wishlistCount > 99 ? '99+' : wishlistCount}
-                  </span>}
+                  </span>
+                )}
               </Link>
-              {isAuthenticated ? <Link href='/profile' className='p-2 text-[#0A1F44] hover:text-[#E8553A] hover:bg-[#E8553A]/5 rounded-lg transition-all'>
+              {isAuthenticated ? (
+                <Link
+                  href='/profile'
+                  className='p-2 text-[#0A1F44] hover:text-[#E8553A] hover:bg-[#E8553A]/5 rounded-lg transition-all'
+                >
                   <div className='w-7 h-7 bg-[#0A1F44] text-white rounded-full flex items-center justify-center text-xs font-montserrat font-black'>
                     {user?.name?.slice(0, 2).toUpperCase() ?? 'U'}
                   </div>
-                </Link> : <Link href='/login' className='p-2.5 text-[#4B5563] hover:text-[#E8553A] hover:bg-[#E8553A]/5 rounded-lg transition-all' aria-label='Account'>
+                </Link>
+              ) : (
+                <Link
+                  href='/login'
+                  className='p-2.5 text-[#4B5563] hover:text-[#E8553A] hover:bg-[#E8553A]/5 rounded-lg transition-all'
+                  aria-label='Account'
+                >
                   <UserIcon size={19} />
-                </Link>}
-              <Link href='/cart' className='relative flex items-center gap-2 ml-1 bg-[#0A1F44] hover:bg-[#E8553A] text-white px-4 py-2.5 rounded-xl transition-all duration-200 group' aria-label='Cart'>
+                </Link>
+              )}
+              <Link
+                href='/cart'
+                className='relative flex items-center gap-2 ml-1 bg-[#0A1F44] hover:bg-[#E8553A] text-white px-4 py-2.5 rounded-xl transition-all duration-200 group'
+                aria-label='Cart'
+              >
                 <CartIcon size={17} />
                 <span className='text-sm font-black font-montserrat'>Cart</span>
-                {mounted && itemCount > 0 && <span className='absolute -top-2 -right-2 w-5 h-5 bg-[#E8553A] group-hover:bg-white group-hover:text-[#E8553A] text-white text-[10px] font-black rounded-full flex items-center justify-center transition-colors'>
+                {mounted && itemCount > 0 && (
+                  <span className='absolute -top-2 -right-2 w-5 h-5 bg-[#E8553A] group-hover:bg-white group-hover:text-[#E8553A] text-white text-[10px] font-black rounded-full flex items-center justify-center transition-colors'>
                     {itemCount > 99 ? '99+' : itemCount}
-                  </span>}
+                  </span>
+                )}
               </Link>
             </div>
 
             {}
             <div className='flex lg:hidden items-center gap-2'>
-              <button onClick={() => setSearchOpen(true)} className='p-2 text-[#0A1F44]' aria-label='Search'>
+              <button
+                onClick={() => setSearchOpen(true)}
+                className='p-2 text-[#0A1F44]'
+                aria-label='Search'
+              >
                 <SearchIcon size={20} />
               </button>
               <Link href='/cart' className='relative p-2 text-[#0A1F44]'>
                 <CartIcon size={20} />
-                {mounted && itemCount > 0 && <span className='absolute -top-1 -right-1 w-5 h-5 bg-[#E8553A] text-white text-[10px] font-black rounded-full flex items-center justify-center'>
+                {mounted && itemCount > 0 && (
+                  <span className='absolute -top-1 -right-1 w-5 h-5 bg-[#E8553A] text-white text-[10px] font-black rounded-full flex items-center justify-center'>
                     {itemCount > 99 ? '99+' : itemCount}
-                  </span>}
+                  </span>
+                )}
               </Link>
-              <button onClick={() => setMobileOpen(!mobileOpen)} className='p-2 text-[#0A1F44]' aria-label='Toggle menu'>
+              <button
+                onClick={() => setMobileOpen(!mobileOpen)}
+                className='p-2 text-[#0A1F44]'
+                aria-label='Toggle menu'
+              >
                 {mobileOpen ? <CloseIcon size={22} /> : <MenuIcon size={22} />}
               </button>
             </div>
@@ -261,47 +372,96 @@ export default function Navbar() {
         <div className='hidden lg:block border-t border-[#F2F4F7] bg-[#FAFAFA]'>
           <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
             <div className='flex items-center justify-center gap-0.5 h-11'>
-              {menuKeys.map(key => {
-              const menu = MEGA_MENUS[key];
-              const isActive = activeMegaMenu === key;
-              const blogLinks = megaMenuBlogLinks[key];
-              const displayColumns = blogLinks ? [...menu.columns, {
-                heading: 'Guides',
-                links: blogLinks
-              }] : menu.columns;
-              return <div key={key} className='relative' onMouseEnter={() => openMenu(key)} onMouseLeave={scheduleClose}>
-                    <Link href={menu.href} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all font-lato ${isActive ? 'text-[#E8553A] bg-[#E8553A]/8' : 'text-[#0A1F44] hover:text-[#E8553A] hover:bg-[#E8553A]/5'}`}>
+              {menuKeys.map((key) => {
+                const menu = MEGA_MENUS[key]
+                const isActive = activeMegaMenu === key
+                const blogLinks = megaMenuBlogLinks[key]
+                const displayColumns = blogLinks
+                  ? [
+                      ...menu.columns,
+                      {
+                        heading: 'Guides',
+                        links: blogLinks,
+                      },
+                    ]
+                  : menu.columns
+                return (
+                  <div
+                    key={key}
+                    className='relative'
+                    onMouseEnter={() => openMenu(key)}
+                    onMouseLeave={scheduleClose}
+                  >
+                    <Link
+                      href={menu.href}
+                      className={`flex items-center gap-1 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all font-lato ${isActive ? 'text-[#E8553A] bg-[#E8553A]/8' : 'text-[#0A1F44] hover:text-[#E8553A] hover:bg-[#E8553A]/5'}`}
+                    >
                       {menu.label}
-                      <ChevronDownIcon size={12} className={`transition-transform duration-200 ${isActive ? 'rotate-180 text-[#E8553A]' : 'text-[#9CA3AF]'}`} />
+                      <ChevronDownIcon
+                        size={12}
+                        className={`transition-transform duration-200 ${isActive ? 'rotate-180 text-[#E8553A]' : 'text-[#9CA3AF]'}`}
+                      />
                     </Link>
 
                     {}
-                    <div className={`absolute top-full left-1/2 -translate-x-1/2 pt-2 transition-all duration-200 z-50 ${isActive ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-1 pointer-events-none'}`} style={{
-                  width: `min(94vw, ${displayColumns.length >= 4 ? '820px' : displayColumns.length === 3 ? '640px' : 'featured2' in menu && menu.featured2 ? '640px' : '480px'})`
-                }}>
+                    <div
+                      className={`absolute top-full left-1/2 -translate-x-1/2 pt-2 transition-all duration-200 z-50 ${isActive ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-1 pointer-events-none'}`}
+                      style={{
+                        width: `min(94vw, ${displayColumns.length >= 4 ? '820px' : displayColumns.length === 3 ? '640px' : 'featured2' in menu && menu.featured2 ? '640px' : '480px'})`,
+                      }}
+                    >
                       <div className='bg-white rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.14)] border border-[#E5E7EB] p-6'>
-                        <div className='grid gap-x-6 gap-y-4' style={{
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))'
-                    }}>
-                          {displayColumns.map(col => <div key={col.heading}>
+                        <div
+                          className='grid gap-x-6 gap-y-4'
+                          style={{
+                            gridTemplateColumns:
+                              'repeat(auto-fit, minmax(140px, 1fr))',
+                          }}
+                        >
+                          {displayColumns.map((col) => (
+                            <div key={col.heading}>
                               <p className='font-montserrat font-black text-[11px] uppercase tracking-[0.15em] text-[#9CA3AF] mb-3.5'>
                                 {col.heading}
                               </p>
                               <ul className='space-y-1.5'>
-                                {col.links.map(link => <li key={link.href}>
-                                    <Link href={link.href} onClick={() => setActiveMegaMenu(null)} className='flex items-center gap-1.5 text-sm font-lato text-[#4B5563] hover:text-[#E8553A] py-1 transition-colors group/link'>
+                                {col.links.map((link) => (
+                                  <li key={link.href}>
+                                    <Link
+                                      href={link.href}
+                                      onClick={() => setActiveMegaMenu(null)}
+                                      className='flex items-center gap-1.5 text-sm font-lato text-[#4B5563] hover:text-[#E8553A] py-1 transition-colors group/link'
+                                    >
                                       <span className='w-1 h-1 rounded-full bg-[#E5E7EB] group-hover/link:bg-[#E8553A] transition-colors shrink-0' />
-                                      <span className='line-clamp-1'>{link.label}</span>
+                                      <span className='line-clamp-1'>
+                                        {link.label}
+                                      </span>
                                     </Link>
-                                  </li>)}
+                                  </li>
+                                ))}
                               </ul>
-                            </div>)}
+                            </div>
+                          ))}
                         </div>
 
-                        <div className={`mt-5 pt-4 border-t border-[#F2F4F7] grid gap-3 ${'featured2' in menu && menu.featured2 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
-                          {[menu.featured, (menu as any).featured2].filter(Boolean).map((feat: any) => feat.image ? <Link key={feat.href} href={feat.href} onClick={() => setActiveMegaMenu(null)} className='block rounded-xl overflow-hidden border border-transparent hover:border-[#E8553A]/20 transition-all group/feat bg-[#F2F4F7]'>
+                        <div
+                          className={`mt-5 pt-4 border-t border-[#F2F4F7] grid gap-3 ${'featured2' in menu && menu.featured2 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}
+                        >
+                          {[menu.featured, (menu as any).featured2]
+                            .filter(Boolean)
+                            .map((feat: any) =>
+                              feat.image ? (
+                                <Link
+                                  key={feat.href}
+                                  href={feat.href}
+                                  onClick={() => setActiveMegaMenu(null)}
+                                  className='block rounded-xl overflow-hidden border border-transparent hover:border-[#E8553A]/20 transition-all group/feat bg-[#F2F4F7]'
+                                >
                                   {}
-                                  <img src={feat.image} alt={feat.label} className='w-full h-32 object-cover' />
+                                  <img
+                                    src={feat.image}
+                                    alt={feat.label}
+                                    className='w-full h-32 object-cover'
+                                  />
                                   <div className='px-4 py-3'>
                                     <p className='font-montserrat font-black text-sm text-[#0A1F44] group-hover/feat:text-[#E8553A] transition-colors'>
                                       {feat.label}
@@ -310,7 +470,14 @@ export default function Navbar() {
                                       {feat.description}
                                     </p>
                                   </div>
-                                </Link> : <Link key={feat.href} href={feat.href} onClick={() => setActiveMegaMenu(null)} className='flex items-center justify-between gap-3 px-4 py-3.5 bg-[#F2F4F7] hover:bg-[#E8553A]/6 rounded-xl border border-transparent hover:border-[#E8553A]/20 transition-all group/feat'>
+                                </Link>
+                              ) : (
+                                <Link
+                                  key={feat.href}
+                                  href={feat.href}
+                                  onClick={() => setActiveMegaMenu(null)}
+                                  className='flex items-center justify-between gap-3 px-4 py-3.5 bg-[#F2F4F7] hover:bg-[#E8553A]/6 rounded-xl border border-transparent hover:border-[#E8553A]/20 transition-all group/feat'
+                                >
                                   <div>
                                     <p className='font-montserrat font-black text-sm text-[#0A1F44] group-hover/feat:text-[#E8553A] transition-colors'>
                                       {feat.label}
@@ -321,98 +488,173 @@ export default function Navbar() {
                                   </div>
                                   <span className='flex items-center gap-1 text-[13px] font-bold font-montserrat text-[#E8553A] whitespace-nowrap shrink-0'>
                                     {feat.cta}
-                                    <ArrowRightIcon size={11} className='group-hover/feat:translate-x-1 transition-transform' />
+                                    <ArrowRightIcon
+                                      size={11}
+                                      className='group-hover/feat:translate-x-1 transition-transform'
+                                    />
                                   </span>
-                                </Link>)}
+                                </Link>
+                              ),
+                            )}
                         </div>
                       </div>
                     </div>
-                  </div>;
-            })}
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>
 
         {}
-        <div className={`lg:hidden bg-white border-t border-[#E5E7EB] overflow-hidden transition-all duration-300 ${mobileOpen ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div
+          className={`lg:hidden bg-white border-t border-[#E5E7EB] overflow-hidden transition-all duration-300 ${mobileOpen ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}
+        >
           <div className='px-4 py-4 space-y-1 max-h-[80vh] overflow-y-auto'>
             {}
-            {categories.length > 0 && <div className='pb-3 mb-1 border-b border-[#E5E7EB]'>
+            {categories.length > 0 && (
+              <div className='pb-3 mb-1 border-b border-[#E5E7EB]'>
                 <p className='text-[10px] font-black text-[#9CA3AF] uppercase tracking-[0.15em] font-montserrat px-4 mb-2'>
                   Categories
                 </p>
                 <div className='flex flex-wrap gap-1.5 px-2'>
-                  <Link href='/shop' onClick={() => setMobileOpen(false)} className='px-3 py-1.5 bg-[#0A1F44] text-white rounded-full text-[12px] font-semibold font-lato'>
+                  <Link
+                    href='/shop'
+                    onClick={() => setMobileOpen(false)}
+                    className='px-3 py-1.5 bg-[#0A1F44] text-white rounded-full text-[12px] font-semibold font-lato'
+                  >
                     All
                   </Link>
-                  {categories.map(cat => <Link key={cat.id} href={`/shop?category_id=${cat.id}`} onClick={() => setMobileOpen(false)} className='px-3 py-1.5 bg-[#F2F4F7] text-[#4B5563] hover:bg-[#E8553A]/10 hover:text-[#E8553A] rounded-full text-[12px] font-semibold font-lato transition-colors'>
+                  {categories.map((cat) => (
+                    <Link
+                      key={cat.id}
+                      href={`/shop?category_id=${cat.id}`}
+                      onClick={() => setMobileOpen(false)}
+                      className='px-3 py-1.5 bg-[#F2F4F7] text-[#4B5563] hover:bg-[#E8553A]/10 hover:text-[#E8553A] rounded-full text-[12px] font-semibold font-lato transition-colors'
+                    >
                       {cat.name}
-                    </Link>)}
+                    </Link>
+                  ))}
                 </div>
-              </div>}
+              </div>
+            )}
 
-            {menuKeys.map(key => {
-            const menu = MEGA_MENUS[key];
-            const isExpanded = mobileExpanded === key;
-            const blogLinks = megaMenuBlogLinks[key];
-            const displayColumns = blogLinks ? [...menu.columns, {
-              heading: 'Guides',
-              links: blogLinks
-            }] : menu.columns;
-            return <div key={key}>
-                  <button onClick={() => setMobileExpanded(isExpanded ? null : key)} className='flex items-center justify-between w-full px-4 py-3 rounded-xl text-sm font-medium text-[#0A1F44] hover:bg-[#F2F4F7] transition-colors font-lato'>
+            {menuKeys.map((key) => {
+              const menu = MEGA_MENUS[key]
+              const isExpanded = mobileExpanded === key
+              const blogLinks = megaMenuBlogLinks[key]
+              const displayColumns = blogLinks
+                ? [
+                    ...menu.columns,
+                    {
+                      heading: 'Guides',
+                      links: blogLinks,
+                    },
+                  ]
+                : menu.columns
+              return (
+                <div key={key}>
+                  <button
+                    onClick={() => setMobileExpanded(isExpanded ? null : key)}
+                    className='flex items-center justify-between w-full px-4 py-3 rounded-xl text-sm font-medium text-[#0A1F44] hover:bg-[#F2F4F7] transition-colors font-lato'
+                  >
                     <span className='flex items-center gap-2'>
                       <span>{menu.icon}</span>
                       <span>{menu.label}</span>
                     </span>
-                    <ChevronDownIcon size={15} className={`transition-transform duration-200 text-[#9CA3AF] ${isExpanded ? 'rotate-180' : ''}`} />
+                    <ChevronDownIcon
+                      size={15}
+                      className={`transition-transform duration-200 text-[#9CA3AF] ${isExpanded ? 'rotate-180' : ''}`}
+                    />
                   </button>
 
-                  {isExpanded && <div className='mx-2 mb-2 bg-[#F2F4F7] rounded-xl overflow-hidden'>
-                      {displayColumns.map(col => <div key={col.heading} className='px-4 py-3 border-b border-[#E5E7EB] last:border-0'>
+                  {isExpanded && (
+                    <div className='mx-2 mb-2 bg-[#F2F4F7] rounded-xl overflow-hidden'>
+                      {displayColumns.map((col) => (
+                        <div
+                          key={col.heading}
+                          className='px-4 py-3 border-b border-[#E5E7EB] last:border-0'
+                        >
                           <p className='font-montserrat font-black text-[10px] uppercase tracking-[0.15em] text-[#9CA3AF] mb-2'>
                             {col.heading}
                           </p>
                           <div className='grid grid-cols-2 gap-x-4 gap-y-1'>
-                            {col.links.map(link => <Link key={link.href} href={link.href} onClick={() => setMobileOpen(false)} className='text-[13px] font-lato text-[#4B5563] hover:text-[#E8553A] py-0.5 transition-colors'>
+                            {col.links.map((link) => (
+                              <Link
+                                key={link.href}
+                                href={link.href}
+                                onClick={() => setMobileOpen(false)}
+                                className='text-[13px] font-lato text-[#4B5563] hover:text-[#E8553A] py-0.5 transition-colors'
+                              >
                                 {link.label}
-                              </Link>)}
+                              </Link>
+                            ))}
                           </div>
-                        </div>)}
+                        </div>
+                      ))}
                       <div className='px-4 py-3'>
-                        <Link href={menu.href} onClick={() => setMobileOpen(false)} className='flex items-center justify-center gap-2 w-full py-2.5 bg-[#0A1F44] text-white text-sm font-black rounded-xl font-montserrat'>
+                        <Link
+                          href={menu.href}
+                          onClick={() => setMobileOpen(false)}
+                          className='flex items-center justify-center gap-2 w-full py-2.5 bg-[#0A1F44] text-white text-sm font-black rounded-xl font-montserrat'
+                        >
                           All {menu.label}
                           <ArrowRightIcon size={13} />
                         </Link>
                       </div>
-                    </div>}
-                </div>;
-          })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
 
             <div className='border-t border-[#E5E7EB] my-2' />
 
-            {NAV_LINKS.map(link => <Link key={link.href} href={link.href} onClick={() => setMobileOpen(false)} className={`flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-colors font-lato ${(link as any).highlight ? 'text-[#E8553A] bg-[#E8553A]/5 font-bold' : 'text-[#0A1F44] hover:bg-[#F2F4F7]'}`}>
+            {NAV_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-colors font-lato ${(link as any).highlight ? 'text-[#E8553A] bg-[#E8553A]/5 font-bold' : 'text-[#0A1F44] hover:bg-[#F2F4F7]'}`}
+              >
                 {link.label}
-              </Link>)}
+              </Link>
+            ))}
 
             <div className='border-t border-[#E5E7EB] pt-3 mt-3 space-y-1'>
-              <Link href={isAuthenticated ? '/profile' : '/login'} onClick={() => setMobileOpen(false)} className='flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-[#0A1F44] hover:bg-[#F2F4F7] transition-colors font-lato'>
+              <Link
+                href={isAuthenticated ? '/profile' : '/login'}
+                onClick={() => setMobileOpen(false)}
+                className='flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-[#0A1F44] hover:bg-[#F2F4F7] transition-colors font-lato'
+              >
                 <UserIcon size={17} />
                 {isAuthenticated ? 'My Profile' : 'My Account'}
               </Link>
-              <Link href='/wishlist' onClick={() => setMobileOpen(false)} className='flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-[#0A1F44] hover:bg-[#F2F4F7] transition-colors font-lato'>
+              <Link
+                href='/wishlist'
+                onClick={() => setMobileOpen(false)}
+                className='flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-[#0A1F44] hover:bg-[#F2F4F7] transition-colors font-lato'
+              >
                 <HeartIcon size={17} />
                 Wishlist
-                {mounted && wishlistCount > 0 && <span className='bg-[#E8553A] text-white text-xs font-black px-2 py-0.5 rounded-full'>
+                {mounted && wishlistCount > 0 && (
+                  <span className='bg-[#E8553A] text-white text-xs font-black px-2 py-0.5 rounded-full'>
                     {wishlistCount}
-                  </span>}
+                  </span>
+                )}
               </Link>
-              <Link href='/cart' onClick={() => setMobileOpen(false)} className='flex items-center justify-center gap-2 w-full py-3 bg-[#0A1F44] hover:bg-[#E8553A] text-white rounded-xl text-sm font-black font-montserrat mt-2 transition-colors'>
+              <Link
+                href='/cart'
+                onClick={() => setMobileOpen(false)}
+                className='flex items-center justify-center gap-2 w-full py-3 bg-[#0A1F44] hover:bg-[#E8553A] text-white rounded-xl text-sm font-black font-montserrat mt-2 transition-colors'
+              >
                 <CartIcon size={17} />
                 View Cart
-                {mounted && itemCount > 0 && <span className='bg-[#E8553A] text-white text-xs font-black px-2 py-0.5 rounded-full'>
+                {mounted && itemCount > 0 && (
+                  <span className='bg-[#E8553A] text-white text-xs font-black px-2 py-0.5 rounded-full'>
                     {itemCount}
-                  </span>}
+                  </span>
+                )}
               </Link>
             </div>
           </div>
@@ -420,18 +662,41 @@ export default function Navbar() {
       </header>
 
       {}
-      {searchOpen && <div className='fixed inset-0 z-60 bg-[#0A1F44]/60 backdrop-blur-sm flex items-start justify-center pt-20 px-4' onClick={() => setSearchOpen(false)}>
-          <div className='w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden' onClick={e => e.stopPropagation()}>
+      {searchOpen && (
+        <div
+          className='fixed inset-0 z-60 bg-[#0A1F44]/60 backdrop-blur-sm flex items-start justify-center pt-20 px-4'
+          onClick={() => setSearchOpen(false)}
+        >
+          <div
+            className='w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden'
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className='flex items-center gap-3 px-5 py-4'>
               <SearchIcon size={19} className='text-[#9CA3AF] shrink-0' />
-              <input ref={searchRef} type='text' value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder='Search rackets, brands, sports...' className='flex-1 text-base outline-none text-[#0A1F44] placeholder-[#9CA3AF] font-lato' onKeyDown={e => {
-            if (e.key === 'Enter') handleSearch();
-            if (e.key === 'Escape') setSearchOpen(false);
-          }} />
-              {searchQuery && <button onClick={() => setSearchQuery('')} className='p-1 text-[#9CA3AF] hover:text-[#0A1F44]'>
+              <input
+                ref={searchRef}
+                type='text'
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder='Search rackets, brands, sports...'
+                className='flex-1 text-base outline-none text-[#0A1F44] placeholder-[#9CA3AF] font-lato'
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSearch()
+                  if (e.key === 'Escape') setSearchOpen(false)
+                }}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className='p-1 text-[#9CA3AF] hover:text-[#0A1F44]'
+                >
                   <CloseIcon size={15} />
-                </button>}
-              <button onClick={() => setSearchOpen(false)} className='p-1.5 text-[#9CA3AF] hover:text-[#0A1F44] border-l border-[#E5E7EB] pl-3'>
+                </button>
+              )}
+              <button
+                onClick={() => setSearchOpen(false)}
+                className='p-1.5 text-[#9CA3AF] hover:text-[#0A1F44] border-l border-[#E5E7EB] pl-3'
+              >
                 <CloseIcon size={17} />
               </button>
             </div>
@@ -441,34 +706,60 @@ export default function Navbar() {
                 Popular Categories
               </p>
               <div className='flex flex-wrap gap-2 mb-5'>
-                {menuKeys.map(key => {
-              const menu = MEGA_MENUS[key];
-              return <Link key={key} href={menu.href} onClick={() => setSearchOpen(false)} className='flex items-center gap-1.5 px-3 py-1.5 bg-[#F2F4F7] hover:bg-[#E8553A]/8 hover:text-[#E8553A] border border-[#E5E7EB] hover:border-[#E8553A]/30 rounded-full text-sm text-[#0A1F44] transition-all font-lato'>
+                {menuKeys.map((key) => {
+                  const menu = MEGA_MENUS[key]
+                  return (
+                    <Link
+                      key={key}
+                      href={menu.href}
+                      onClick={() => setSearchOpen(false)}
+                      className='flex items-center gap-1.5 px-3 py-1.5 bg-[#F2F4F7] hover:bg-[#E8553A]/8 hover:text-[#E8553A] border border-[#E5E7EB] hover:border-[#E8553A]/30 rounded-full text-sm text-[#0A1F44] transition-all font-lato'
+                    >
                       <span>{menu.icon}</span>
                       <span>{menu.label}</span>
-                    </Link>;
-            })}
+                    </Link>
+                  )
+                })}
               </div>
 
               <p className='text-[10px] font-black text-[#9CA3AF] uppercase tracking-[0.15em] mb-2 font-montserrat'>
                 Popular Searches
               </p>
               <div className='flex flex-wrap gap-2'>
-                {['Yonex Racket', 'Babolat Tennis', 'Badminton Shoes', 'Padel Racket', 'Victor Bag'].map(term => <button key={term} onClick={() => {
-              setSearchQuery(term);
-              setTimeout(handleSearch, 100);
-            }} className='px-3 py-1.5 text-[13px] text-[#4B5563] hover:text-[#E8553A] transition-colors font-lato'>
+                {[
+                  'Yonex Racket',
+                  'Babolat Tennis',
+                  'Badminton Shoes',
+                  'Padel Racket',
+                  'Victor Bag',
+                ].map((term) => (
+                  <button
+                    key={term}
+                    onClick={() => {
+                      setSearchQuery(term)
+                      setTimeout(handleSearch, 100)
+                    }}
+                    className='px-3 py-1.5 text-[13px] text-[#4B5563] hover:text-[#E8553A] transition-colors font-lato'
+                  >
                     🔍 {term}
-                  </button>)}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {searchQuery && <div className='px-5 pb-4'>
-                <button onClick={handleSearch} className='w-full bg-[#E8553A] hover:bg-[#D4441F] text-white py-3 rounded-xl text-sm font-black font-montserrat transition-colors'>
+            {searchQuery && (
+              <div className='px-5 pb-4'>
+                <button
+                  onClick={handleSearch}
+                  className='w-full bg-[#E8553A] hover:bg-[#D4441F] text-white py-3 rounded-xl text-sm font-black font-montserrat transition-colors'
+                >
                   Search for &quot;{searchQuery}&quot;
                 </button>
-              </div>}
+              </div>
+            )}
           </div>
-        </div>}
-    </>;
+        </div>
+      )}
+    </>
+  )
 }

@@ -198,6 +198,10 @@ const SETTINGS_NAV = [
     href: '/dashboard/settings/marketing',
     active: true,
   },
+  {
+    label: 'Promo Banner',
+    href: '/dashboard/settings/promo-banner',
+  },
 ]
 
 function SettingSection({
