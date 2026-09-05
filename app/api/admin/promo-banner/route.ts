@@ -3,7 +3,7 @@ import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import {
   DEFAULT_PROMO_BANNER,
   invalidatePromoBannerCache,
-} from '@/lib/'
+} from '@/lib/promo-banner'
 
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
