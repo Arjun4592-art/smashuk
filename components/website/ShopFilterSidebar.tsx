@@ -9,7 +9,12 @@ import {
 } from '@/components/ui/Icons'
 import { SPORTS } from '@/lib/constants'
 import { matchesBadgeFilter } from '@/lib/api/store'
-import { canonicalizeSpecLabel, SPEC_FILTER_ORDER } from '@/lib/spec-filters'
+import {
+  canonicalizeSpecLabel,
+  SPEC_FILTER_ORDER,
+  resolveSpecFilterValue,
+  compareWeightValues,
+} from '@/lib/spec-filters'
 import type { Product } from '@/types'
 export interface FilterState {
   sports: string[]
@@ -28,8 +33,10 @@ interface ShopFilterSidebarProps {
   activeCount: number
   allProducts?: Product[]
   activeSports?: string[]
+  activeBadges?: string[]
   categoryProducts?: Product[]
   hideSportSection?: boolean
+  hideCategorySection?: boolean
 }
 const BRANDS = [
   'Yonex',
@@ -140,7 +147,7 @@ export const DEFAULT_FILTERS: FilterState = {
   brands: [],
   categories: [],
   priceRange: [MIN_PRICE, MAX_PRICE],
-  inStockOnly: false,
+  inStockOnly: true,
   minRating: null,
   badges: [],
   specs: {},
@@ -192,8 +199,10 @@ export default function ShopFilterSidebar({
   activeCount,
   allProducts,
   activeSports = [],
+  activeBadges = [],
   categoryProducts,
   hideSportSection = false,
+  hideCategorySection = false,
 }: ShopFilterSidebarProps) {
   const availableBrands = (() => {
     if (!allProducts || activeSports.length === 0) return null
@@ -244,8 +253,8 @@ export default function ShopFilterSidebar({
       if (activeSports.length && !activeSports.includes(p.sport)) continue
       if (filters.brands.length && !filters.brands.includes(p.brand)) continue
       if (
-        filters.badges.length &&
-        !filters.badges.some((b) => matchesBadgeFilter(p, b))
+        activeBadges.length &&
+        !activeBadges.some((b) => matchesBadgeFilter(p, b))
       )
         continue
       if (!p.category) continue
@@ -304,16 +313,21 @@ export default function ShopFilterSidebar({
     for (const p of categoryProducts) {
       for (const s of p.specs ?? []) {
         if (!s.label || !s.value) continue
-        const trimmedValue = s.value.trim()
-        if (!trimmedValue) continue
         const canonicalLabel = canonicalizeSpecLabel(
           p.sport,
           p.category,
           s.label,
         )
         if (!canonicalLabel) continue
+        const resolvedValue = resolveSpecFilterValue(
+          p.sport,
+          p.category,
+          canonicalLabel,
+          s.value,
+        )
+        if (!resolvedValue) continue
         if (!map.has(canonicalLabel)) map.set(canonicalLabel, new Set())
-        map.get(canonicalLabel)!.add(trimmedValue)
+        map.get(canonicalLabel)!.add(resolvedValue)
       }
     }
     const MAX_SPEC_GROUPS = 6
@@ -333,7 +347,10 @@ export default function ShopFilterSidebar({
       .slice(0, MAX_SPEC_GROUPS)
       .map(([label, values]) => ({
         label,
-        values: [...values].sort(),
+        values:
+          label === 'Weight'
+            ? [...values].sort(compareWeightValues)
+            : [...values].sort(),
       }))
   })()
   useEffect(() => {
@@ -356,8 +373,8 @@ export default function ShopFilterSidebar({
       if (!p.inStock) continue
       if (filters.brands.length && !filters.brands.includes(p.brand)) continue
       if (
-        filters.badges.length &&
-        !filters.badges.some((b) => matchesBadgeFilter(p, b))
+        activeBadges.length &&
+        !activeBadges.some((b) => matchesBadgeFilter(p, b))
       )
         continue
       map.set(p.sport, (map.get(p.sport) ?? 0) + 1)
@@ -399,6 +416,10 @@ export default function ShopFilterSidebar({
       source = source.filter((p) => activeSports.includes(p.sport))
     if (filters.brands.length)
       source = source.filter((p) => filters.brands.includes(p.brand))
+    if (activeBadges.length)
+      source = source.filter((p) =>
+        activeBadges.some((b) => matchesBadgeFilter(p, b)),
+      )
     return {
       inStock: source.filter((p) => p.inStock).length,
       outOfStock: source.filter((p) => !p.inStock).length,
@@ -416,7 +437,14 @@ export default function ShopFilterSidebar({
           s.label,
         )
         if (!canonicalLabel) continue
-        const key = `${canonicalLabel}::${s.value.trim()}`
+        const resolvedValue = resolveSpecFilterValue(
+          p.sport,
+          p.category,
+          canonicalLabel,
+          s.value,
+        )
+        if (!resolvedValue) continue
+        const key = `${canonicalLabel}::${resolvedValue}`
         map.set(key, (map.get(key) ?? 0) + 1)
       }
     }
@@ -509,17 +537,17 @@ export default function ShopFilterSidebar({
                 {filters.minRating}★+ ×
               </span>
             )}
-            {filters.inStockOnly && (
+            {!filters.inStockOnly && (
               <span
                 onClick={() =>
                   onChange({
                     ...filters,
-                    inStockOnly: false,
+                    inStockOnly: true,
                   })
                 }
                 className='inline-flex items-center gap-1 bg-white border border-[#E8553A]/30 text-[#E8553A] text-[10px] font-bold font-montserrat px-2 py-1 rounded-full cursor-pointer hover:bg-[#E8553A] hover:text-white transition-colors'
               >
-                In Stock ×
+                Showing Out of Stock ×
               </span>
             )}
           </div>
@@ -557,35 +585,37 @@ export default function ShopFilterSidebar({
 
           {}
           {}
-          {activeSports.length > 0 && categoryOptions.length > 0 && (
-            <Section
-              title='Category'
-              count={filters.categories.length || undefined}
-            >
-              <div className='flex flex-wrap gap-1.5'>
-                {categoryOptions.map((c) => {
-                  const active = filters.categories.some(
-                    (v) => c.handle.includes(v) || v.includes(c.handle),
-                  )
-                  return (
-                    <button
-                      key={c.handle}
-                      type='button'
-                      onClick={() => toggle('categories', c.handle)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold font-lato border transition-all duration-150 ${active ? 'bg-[#0A1F44] text-white border-[#0A1F44] shadow-sm' : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#0A1F44]/20 hover:text-[#0A1F44]'}`}
-                    >
-                      <span>{c.label}</span>
-                      <span
-                        className={`text-[10px] ${active ? 'text-white/60' : 'text-[#9CA3AF]'}`}
+          {!hideCategorySection &&
+            activeSports.length > 0 &&
+            categoryOptions.length > 0 && (
+              <Section
+                title='Category'
+                count={filters.categories.length || undefined}
+              >
+                <div className='flex flex-wrap gap-1.5'>
+                  {categoryOptions.map((c) => {
+                    const active = filters.categories.some(
+                      (v) => c.handle.includes(v) || v.includes(c.handle),
+                    )
+                    return (
+                      <button
+                        key={c.handle}
+                        type='button'
+                        onClick={() => toggle('categories', c.handle)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold font-lato border transition-all duration-150 ${active ? 'bg-[#0A1F44] text-white border-[#0A1F44] shadow-sm' : 'bg-[#F2F4F7] text-[#4B5563] border-transparent hover:border-[#0A1F44]/20 hover:text-[#0A1F44]'}`}
                       >
-                        ({c.count})
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </Section>
-          )}
+                        <span>{c.label}</span>
+                        <span
+                          className={`text-[10px] ${active ? 'text-white/60' : 'text-[#9CA3AF]'}`}
+                        >
+                          ({c.count})
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </Section>
+            )}
 
           {}
           <Section title='Brand' count={filters.brands.length || undefined}>

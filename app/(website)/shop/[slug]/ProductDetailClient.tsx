@@ -30,6 +30,107 @@ import SizeGuideModal from '@/components/website/SizeGuideModal'
 import NotifyStockForm from '@/components/website/NotifyStockForm'
 import { recordRecentlyViewed } from '@/lib/recently-viewed'
 import type { CrossSellProduct, Product } from '@/types'
+
+const CLOTHING_SIZE_ORDER = [
+  'XXS',
+  'XS',
+  'S',
+  'M',
+  'L',
+  'XL',
+  'XXL',
+  '2XL',
+  'XXXL',
+  '3XL',
+  '4XL',
+]
+
+/**
+ * Orders option values (grip sizes, shoe/clothing sizes, etc.) into a
+ * sensible ascending order instead of relying on whatever order they were
+ * created/returned in.
+ */
+function sortOptionValues(values: string[]): string[] {
+  if (values.length <= 1) return values
+
+  // Racket/badminton grip sizes: G0, G1, G2 ... G5
+  const gripPattern = /^G\d+$/i
+  if (values.every((v) => gripPattern.test(v.trim()))) {
+    return [...values].sort(
+      (a, b) =>
+        parseInt(a.trim().slice(1), 10) - parseInt(b.trim().slice(1), 10),
+    )
+  }
+
+  // Pure numeric sizes (shoe sizes etc.), including half sizes like "9.5"
+  const numericPattern = /^\d+(\.\d+)?$/
+  if (values.every((v) => numericPattern.test(v.trim()))) {
+    return [...values].sort(
+      (a, b) => parseFloat(a.trim()) - parseFloat(b.trim()),
+    )
+  }
+
+  // Prefixed numeric sizes, e.g. "UK 8", "US 9.5"
+  const prefixedNumericPattern = /^[A-Za-z]*\s*\d+(\.\d+)?$/
+  if (values.every((v) => prefixedNumericPattern.test(v.trim()))) {
+    return [...values].sort((a, b) => {
+      const na = parseFloat(a.trim().replace(/[^\d.]/g, ''))
+      const nb = parseFloat(b.trim().replace(/[^\d.]/g, ''))
+      return na - nb
+    })
+  }
+
+  // Standard clothing sizes
+  if (
+    values.every((v) => CLOTHING_SIZE_ORDER.includes(v.trim().toUpperCase()))
+  ) {
+    return [...values].sort(
+      (a, b) =>
+        CLOTHING_SIZE_ORDER.indexOf(a.trim().toUpperCase()) -
+        CLOTHING_SIZE_ORDER.indexOf(b.trim().toUpperCase()),
+    )
+  }
+
+  return values
+}
+
+/** Builds option groups from a product, with values sorted into a natural order. */
+function buildOptionGroups(product: any) {
+  return (product.options ?? []).map((opt: any) => ({
+    id: opt.id,
+    title: opt.title,
+    values: sortOptionValues(
+      (opt.values?.map((v: any) => v.value) ?? []) as string[],
+    ),
+  }))
+}
+
+/**
+ * Picks the default variant for a product: the first in-stock variant,
+ * preferring earlier values in each option group's natural sort order
+ * (e.g. a G0 grip is preferred over G1, but only if G0 is in stock).
+ * Falls back to the first variant overall if nothing is in stock.
+ */
+function pickDefaultVariant(product: any, groups: any[]) {
+  const variants: any[] = product.variants ?? []
+  if (variants.length === 0) return undefined
+
+  const rank = (v: any) =>
+    groups.reduce((acc: number, g: any, gi: number) => {
+      const entry = v.options?.find((o: any) => o.option_id === g.id)
+      const idx = entry ? g.values.indexOf(entry.value) : 0
+      return acc + Math.max(idx, 0) * Math.pow(1000, groups.length - gi)
+    }, 0)
+
+  const inStock = variants.filter(
+    (v: any) =>
+      typeof v.inventory_quantity !== 'number' || v.inventory_quantity > 0,
+  )
+  const pool = inStock.length > 0 ? inStock : variants
+
+  return [...pool].sort((a, b) => rank(a) - rank(b))[0]
+}
+
 interface StringOption {
   id: string
   name: string
@@ -1203,7 +1304,11 @@ export default function ProductDetailClient({
   const [added, setAdded] = useState(false)
   const [selectedVariantId, setSelectedVariantId] = useState<
     string | undefined
-  >(product.variants?.[0]?.id)
+  >(
+    () =>
+      pickDefaultVariant(product, buildOptionGroups(product))?.id ??
+      product.variants?.[0]?.id,
+  )
   const hasMultipleVariants = (product.variants?.length ?? 0) > 1
   const selectedVariant =
     product.variants?.find((v: any) => v.id === selectedVariantId) ??
@@ -1224,19 +1329,18 @@ export default function ProductDetailClient({
     setActiveImage(0)
   }, [selectedVariantId])
   const optionGroups = useMemo(
-    () =>
-      (product.options ?? []).map((opt: any) => ({
-        id: opt.id,
-        title: opt.title,
-        values: opt.values?.map((v: any) => v.value) ?? [],
-      })),
+    () => buildOptionGroups(product),
     [product.options],
   )
   const [selectedOptions, setSelectedOptions] = useState<
     Record<string, string>
   >(() => {
     const map: Record<string, string> = {}
-    product.variants?.[0]?.options?.forEach((o: any) => {
+    const defaultVariant = pickDefaultVariant(
+      product,
+      buildOptionGroups(product),
+    )
+    defaultVariant?.options?.forEach((o: any) => {
       const group = (product.options ?? []).find(
         (g: any) => g.id === o.option_id,
       )
@@ -2077,11 +2181,11 @@ export default function ProductDetailClient({
               SKU: <span className='font-semibold'>{product.sku}</span>
             </p>
 
-            <div className='order-9 lg:order-8 grid grid-cols-3 gap-3 pt-6 border-t border-gray-100'>
+            <div className='order-9 lg:order-8 grid grid-cols-3 gap-3 pt-6 mb-6 border-t border-gray-100'>
               {[
                 {
                   icon: <TruckIcon size={18} />,
-                  text: 'Free Delivery',
+                  text: 'Fast Shipping',
                 },
                 {
                   icon: <ShieldIcon size={18} />,
@@ -2089,7 +2193,7 @@ export default function ProductDetailClient({
                 },
                 {
                   icon: <RefreshIcon size={18} />,
-                  text: '7-Day Returns',
+                  text: '30-Day Returns',
                 },
               ].map((badge) => (
                 <div

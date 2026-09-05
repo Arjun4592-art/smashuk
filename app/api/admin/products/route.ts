@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
   })
   if (q) params.set('q', q)
   if (status) params.set('status', status)
+  params.set('order', '-created_at')
   params.set(
     'fields',
     'id,title,handle,status,thumbnail,metadata,*images,*categories,*variants,variants.id,variants.title,variants.sku,variants.barcode,*variants.prices,*variants.images,*variants.inventory_items,*variants.inventory_items.inventory.location_levels',

@@ -259,9 +259,9 @@ export default function EditProductPage({
             Array.isArray(p.tags) && p.tags.length > 0
               ? p.tags.map((t: any) => t.value).join(', ')
               : (p.metadata?.tags ?? ''),
-          metaTitle: '',
-          metaDescription: '',
-          metaKeywords: '',
+          metaTitle: p.metadata?.metaTitle ?? '',
+          metaDescription: p.metadata?.metaDescription ?? '',
+          metaKeywords: p.metadata?.metaKeywords ?? '',
         })
         const KNOWN_KEYS = new Set([
           'brand',

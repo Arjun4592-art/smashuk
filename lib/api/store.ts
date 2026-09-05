@@ -22,10 +22,20 @@ function pickCategory(categories: any[] | undefined): {
   id: string
 } {
   if (!categories || categories.length === 0) return { handle: '', id: '' }
-  const specific = categories.find(
+  const specificOnes = categories.filter(
     (c) => c?.handle && !SPORT_CATEGORY_SLUGS.has(c.handle),
   )
-  const chosen = specific ?? categories[0]
+  // Some products end up linked to more than one specific sub-category — a
+  // known data issue where re-detecting a product's category leaves a stale
+  // "Rackets" link attached alongside the real, more specific one (e.g. a
+  // shoe that's also still tagged "Squash Rackets" from an earlier import
+  // pass). "Rackets" is the least-informative default sub-category, so if
+  // something more specific is also present, trust that one instead of
+  // whichever happens to come first in Medusa's unordered array.
+  const preferred =
+    specificOnes.find((c) => !/rackets?$/i.test(c.handle ?? '')) ??
+    specificOnes[0]
+  const chosen = preferred ?? categories[0]
   return { handle: chosen?.handle ?? '', id: chosen?.id ?? '' }
 }
 export function normalizeProduct(p: any): Product {
@@ -275,6 +285,7 @@ export async function getProducts(params?: {
   offset?: number
   q?: string
   category_id?: string[]
+  category_handle?: string
   light?: boolean
 }): Promise<{
   products: any[]
@@ -286,6 +297,7 @@ export async function getProducts(params?: {
       offset: String(params?.offset ?? 0),
       q: params?.q,
       category_id: params?.category_id?.join(','),
+      category_handle: params?.category_handle,
     },
     params?.light,
   )
@@ -305,6 +317,7 @@ const PRODUCTS_PAGE_SIZE = 100
 export async function getAllProducts(params?: {
   q?: string
   category_id?: string[]
+  category_handle?: string
 }): Promise<{
   products: any[]
   count: number
@@ -355,6 +368,7 @@ export async function getAllProductsProgressive(
     | {
         q?: string
         category_id?: string[]
+        category_handle?: string
       }
     | undefined,
   handlers: {

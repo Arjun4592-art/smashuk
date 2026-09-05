@@ -4,7 +4,10 @@ import { useSearchParams } from 'next/navigation'
 import { useMemo, useState, useCallback, useEffect } from 'react'
 import { useAllStoreProductsProgressive } from '@/hooks/useProducts'
 import { normalizeProduct, matchesBadgeFilter } from '@/lib/api/store'
-import { canonicalizeSpecLabel } from '@/lib/spec-filters'
+import {
+  canonicalizeSpecLabel,
+  resolveSpecFilterValue,
+} from '@/lib/spec-filters'
 import ProductGrid from '@/components/website/ProductGrid'
 import ShopFilterSidebar, {
   DEFAULT_FILTERS,
@@ -15,7 +18,7 @@ function countActiveFilters(f: FilterState): number {
   let n = 0
   if (f.brands.length) n += f.brands.length
   if (f.badges.length) n += f.badges.length
-  if (f.inStockOnly) n += 1
+  if (f.inStockOnly !== DEFAULT_FILTERS.inStockOnly) n += 1
   if (f.minRating) n += 1
   if (
     f.priceRange[0] !== DEFAULT_FILTERS.priceRange[0] ||
@@ -25,16 +28,30 @@ function countActiveFilters(f: FilterState): number {
   n += Object.values(f.specs).reduce((sum, values) => sum + values.length, 0)
   return n
 }
-export default function ShopClient() {
+export interface ShopClientOverrides {
+  sport?: string
+  badge?: string
+  q?: string
+  category?: string
+  brand?: string
+  gender?: string
+  level?: string
+  style?: string
+}
+export default function ShopClient({
+  overrides,
+}: {
+  overrides?: ShopClientOverrides
+} = {}) {
   const searchParams = useSearchParams()
-  const sport = searchParams.get('sport') ?? ''
-  const badge = searchParams.get('badge') ?? ''
-  const q = searchParams.get('q') ?? ''
-  const category = searchParams.get('category') ?? ''
-  const brandParam = searchParams.get('brand') ?? ''
-  const gender = searchParams.get('gender') ?? ''
-  const level = searchParams.get('level') ?? ''
-  const style = searchParams.get('style') ?? ''
+  const sport = overrides?.sport ?? searchParams.get('sport') ?? ''
+  const badge = overrides?.badge ?? searchParams.get('badge') ?? ''
+  const q = overrides?.q ?? searchParams.get('q') ?? ''
+  const category = overrides?.category ?? searchParams.get('category') ?? ''
+  const brandParam = overrides?.brand ?? searchParams.get('brand') ?? ''
+  const gender = overrides?.gender ?? searchParams.get('gender') ?? ''
+  const level = overrides?.level ?? searchParams.get('level') ?? ''
+  const style = overrides?.style ?? searchParams.get('style') ?? ''
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
   const [mobileOpen, setMobileOpen] = useState(false)
   useEffect(() => {
@@ -49,17 +66,61 @@ export default function ShopClient() {
       categories: category ? [category] : [],
     }))
   }, [category])
+  // NOTE: we deliberately do NOT push a bare `sport` down to Medusa as a
+  // server-side category filter, even though that would cut fetch size a
+  // lot. Tried it — and on this catalog, most products are linked ONLY to
+  // their specific sub-category in Medusa (e.g. "Tennis Rackets"), not also
+  // to the parent sport category ("Tennis"), even though the admin
+  // dashboard's per-sport rollup count (580 for Tennis) makes it look that
+  // way — that number is a sum of the sub-category counts, not a count of
+  // products directly linked to "Tennis" itself. Filtering by the sport's
+  // top-level id server-side only returned the handful of products directly
+  // tagged to that parent node (39, instead of the real ~580) — a silent
+  // under-count.
+  //
+  // `sport` + `category` TOGETHER are a different story: that resolves to
+  // one specific LEAF sub-category handle (e.g. "squash-rackets"), which
+  // products link to directly — no parent/descendant recursion involved, so
+  // there's no under-count risk. Without this, a page like
+  // /shop?sport=squash&category=rackets had to progressively fetch and
+  // filter through all ~1700 products client-side before every matching
+  // racket had actually loaded in, showing "0 products found" for a while
+  // and then the real results a good deal later once enough batches had
+  // come in. Resolving the exact category server-side fixes that — and it's
+  // safe specifically because whenever `category` is set from the URL/route,
+  // the sidebar's category chips are hidden (hideCategorySection below), so
+  // there's no client interaction that could ask for a different category
+  // out from under this narrowed fetch.
+  //
+  // Forwarding the typed search text (and, failing that, a selected brand)
+  // as a server-side search hint is still safe and kept: it only narrows the
+  // fetch, and the exact brand/text match is re-checked client-side below
+  // regardless, so it can't cause an under-count the way category_id can.
+  const searchHint = q || brandParam || undefined
+  const categoryHandleHint =
+    sport && category ? `${sport}-${category}` : undefined
   const {
     products: rawProducts,
     isLoading,
     isError,
-  } = useAllStoreProductsProgressive()
+  } = useAllStoreProductsProgressive({
+    q: searchHint,
+    category_handle: categoryHandleHint,
+  })
   const products = useMemo(
     () => rawProducts.map(normalizeProduct),
     [rawProducts],
   )
   const filtered = useMemo(() => {
-    let result = products.filter((p) => p.inStock)
+    // BUGFIX: this used to unconditionally start from products.filter(p =>
+    // p.inStock), which made the "In Stock Only" sidebar toggle a no-op —
+    // every out-of-stock product was already gone before that toggle (line
+    // below, `filters.inStockOnly`) ever ran. That's why some products never
+    // turned up in /shop search or sport/category browsing at all, even
+    // though they existed, were published, and were correctly tagged: they
+    // were simply out of stock. Now inStockOnly (default: off) is the only
+    // thing that hides them, same as every other filter here.
+    let result = products
     if (badge) result = result.filter((p) => matchesBadgeFilter(p, badge))
     if (brandParam)
       result = result.filter(
@@ -86,9 +147,21 @@ export default function ShopClient() {
           p.brand.toLowerCase().includes(q.toLowerCase()) ||
           p.sport.toLowerCase().includes(q.toLowerCase()),
       )
-    if (filters.sports.length)
+    // A collection page's own sport/category (e.g. /collections/badminton-rackets)
+    // must always win, on every handle — it's the page's identity, not a
+    // togglable preference. Enforcing it here (instead of only seeding
+    // filters.sports/categories once on mount) means it can't be lost by
+    // clicking the matching sidebar chip again, or by "Clear all filters".
+    if (sport) result = result.filter((p) => p.sport === sport)
+    else if (filters.sports.length)
       result = result.filter((p) => filters.sports.includes(p.sport))
-    if (filters.categories.length)
+    if (category)
+      result = result.filter(
+        (p) =>
+          !!p.category &&
+          (p.category.includes(category) || category.includes(p.category)),
+      )
+    else if (filters.categories.length)
       result = result.filter(
         (p) =>
           !!p.category &&
@@ -115,11 +188,21 @@ export default function ShopClient() {
       result = result.filter((p) =>
         specEntries.every(([label, values]) =>
           values.some((v) =>
-            p.specs?.some(
-              (s) =>
-                canonicalizeSpecLabel(p.sport, p.category, s.label) === label &&
-                norm(s.value) === norm(v),
-            ),
+            p.specs?.some((s) => {
+              const canonicalLabel = canonicalizeSpecLabel(
+                p.sport,
+                p.category,
+                s.label,
+              )
+              if (canonicalLabel !== label) return false
+              const resolvedValue = resolveSpecFilterValue(
+                p.sport,
+                p.category,
+                canonicalLabel,
+                s.value,
+              )
+              return resolvedValue !== null && norm(resolvedValue) === norm(v)
+            }),
           ),
         ),
       )
@@ -127,15 +210,25 @@ export default function ShopClient() {
     return result
   }, [products, sport, badge, brandParam, gender, level, style, q, filters])
   const categoryScopedProducts = useMemo(() => {
-    let result = products.filter((p) => p.inStock)
+    // Same fix as `filtered` above — no blanket inStock filter here either,
+    // otherwise this list (used for the sidebar's per-category counts) would
+    // undercount and hide out-of-stock products from those counts too.
+    let result = products
     if (badge) result = result.filter((p) => matchesBadgeFilter(p, badge))
     if (brandParam)
       result = result.filter(
         (p) => p.brand?.toLowerCase() === brandParam.toLowerCase(),
       )
-    if (filters.sports.length)
+    if (sport) result = result.filter((p) => p.sport === sport)
+    else if (filters.sports.length)
       result = result.filter((p) => filters.sports.includes(p.sport))
-    if (filters.categories.length)
+    if (category)
+      result = result.filter(
+        (p) =>
+          !!p.category &&
+          (p.category.includes(category) || category.includes(p.category)),
+      )
+    else if (filters.categories.length)
       result = result.filter(
         (p) =>
           !!p.category &&
@@ -143,12 +236,33 @@ export default function ShopClient() {
             (c) => p.category!.includes(c) || c.includes(p.category!),
           ),
       )
+    if (filters.inStockOnly) result = result.filter((p) => p.inStock)
     return result
-  }, [products, badge, brandParam, filters.sports, filters.categories])
+  }, [
+    products,
+    badge,
+    brandParam,
+    sport,
+    category,
+    filters.sports,
+    filters.categories,
+    filters.inStockOnly,
+  ])
   const effectiveSports = filters.sports.length
     ? filters.sports
     : sport
       ? [sport]
+      : []
+  // Same idea as effectiveSports: a page-level badge (e.g. the "Sale" nav
+  // link, ?badge=SALE) is enforced directly in `filtered`/`categoryScopedProducts`
+  // above, but was never reflected in the sidebar's own counts — so "Rackets
+  // (21)" was counting ALL in-stock padel rackets while the grid below only
+  // showed the 7 that are actually on sale. Passing it through explicitly
+  // keeps every count in the sidebar in sync with what's really on screen.
+  const effectiveBadges = filters.badges.length
+    ? filters.badges
+    : badge
+      ? [badge]
       : []
   const activeCount = useMemo(() => countActiveFilters(filters), [filters])
   const handleClear = useCallback(() => setFilters(DEFAULT_FILTERS), [])
@@ -277,8 +391,10 @@ export default function ShopClient() {
               activeCount={activeCount}
               allProducts={products}
               activeSports={effectiveSports}
+              activeBadges={effectiveBadges}
               categoryProducts={categoryScopedProducts}
               hideSportSection={!!sport}
+              hideCategorySection={!!category}
             />
           </div>
 
@@ -319,8 +435,10 @@ export default function ShopClient() {
                   activeCount={activeCount}
                   allProducts={products}
                   activeSports={effectiveSports}
+                  activeBadges={effectiveBadges}
                   categoryProducts={categoryScopedProducts}
                   hideSportSection={!!sport}
+                  hideCategorySection={!!category}
                 />
               </div>
             </>

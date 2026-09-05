@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import ImageCropModal from './ImageCropModal'
+import { compressImageForUpload } from '@/lib/image-compress'
 interface Props {
   value: string
   onChange: (url: string) => void
@@ -18,18 +19,26 @@ export default function CoverImageUpload({ value, onChange }: Props) {
   const handleFile = async (file: File) => {
     setUploading(true)
     try {
+      const compressed = await compressImageForUpload(file)
       const formData = new FormData()
-      formData.append('files', file)
+      formData.append('files', compressed)
       const res = await fetch('/api/admin/uploads', {
         method: 'POST',
         body: formData,
       })
-      if (!res.ok) throw new Error('Upload failed')
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        const msg =
+          res.status === 413
+            ? 'Image is too large — please try a smaller photo'
+            : (err.error ?? 'Upload failed')
+        throw new Error(msg)
+      }
       const data = await res.json()
       const url: string = data.files?.[0]?.url ?? data.uploads?.[0]?.url ?? ''
       if (url) onChange(url)
-    } catch {
-      toast.error('Image upload failed')
+    } catch (err: any) {
+      toast.error(err.message ?? 'Image upload failed')
     } finally {
       setUploading(false)
     }

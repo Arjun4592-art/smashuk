@@ -569,12 +569,6 @@ export default function CartPage() {
                     {shipping > 0 ? formatCurrency(shipping) : 'Free'}
                   </span>
                 </div>
-                <div className='flex justify-between text-gray-600'>
-                  <span>VAT ({Math.round(taxRate * 100)}%)</span>
-                  <span className='font-medium text-[#0A1F44]'>
-                    {formatCurrency(tax)}
-                  </span>
-                </div>
               </div>
 
               <div className='flex items-baseline justify-between border-t border-gray-100 mt-3 pt-3'>
@@ -588,6 +582,10 @@ export default function CartPage() {
                   </span>
                 </span>
               </div>
+              <p className='text-xs text-gray-400 font-lato text-right -mt-1'>
+                Including {formatCurrency(tax)} in VAT (
+                {Math.round(taxRate * 100)}%)
+              </p>
 
               {totalSaved > 0 && (
                 <p className='text-sm font-lato font-bold text-[#E8553A] mt-1'>

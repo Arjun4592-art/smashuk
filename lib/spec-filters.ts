@@ -7,12 +7,16 @@
 //
 // Reference (smashuk.co) filter sets this mirrors:
 //   Badminton rackets  -> Racket Model, Balance, Weight, Stiffness, Color, Player Level
-//   Tennis rackets     -> Grip Size, Color
+//   Tennis rackets     -> Size (grip), Color
 //   Padel rackets      -> Weight, Balance, Material, Player Level
-//   Squash rackets     -> Weight, Balance, Grip Size, Color
+//   Squash rackets     -> Weight, Balance, Size (grip), Color
 //   Shoes (any sport)  -> Gender, Color, Size
 //   Clothing           -> Gender, Apparel, Color, Size
 //   Balls              -> none (brand/price/availability only)
+//
+// "Size" is a single unified canonical filter that covers grip size on
+// rackets (tennis/squash) and shoe size — the raw label differs but they
+// mean "which size do I need" from the shopper's point of view.
 
 export interface SpecFilterDef {
   /** Canonical display label shown in the sidebar (and used as the filter key). */
@@ -39,7 +43,7 @@ const BADMINTON_RACKET_SPEC_FILTERS: SpecFilterDef[] = [
 ]
 
 const TENNIS_RACKET_SPEC_FILTERS: SpecFilterDef[] = [
-  { label: 'Grip Size', matchers: ['grip'] },
+  { label: 'Size', matchers: ['grip'] },
   { label: 'Color', matchers: ['colour', 'color'] },
 ]
 
@@ -56,7 +60,7 @@ const PADEL_RACKET_SPEC_FILTERS: SpecFilterDef[] = [
 const SQUASH_RACKET_SPEC_FILTERS: SpecFilterDef[] = [
   { label: 'Weight', matchers: ['weight'] },
   { label: 'Balance', matchers: ['balance'] },
-  { label: 'Grip Size', matchers: ['grip'] },
+  { label: 'Size', matchers: ['grip'] },
   { label: 'Color', matchers: ['colour', 'color'] },
 ]
 
@@ -91,11 +95,13 @@ const DEFAULT_SPEC_FILTERS: SpecFilterDef[] = [
   { label: 'Balance', matchers: ['balance'] },
   { label: 'Weight', matchers: ['weight'] },
   { label: 'Stiffness', matchers: ['stiffness', 'flex'] },
-  { label: 'Grip Size', matchers: ['grip'] },
   { label: 'Material', matchers: ['material'] },
   { label: 'Color', matchers: ['colour', 'color'] },
   { label: 'Gender', matchers: ['gender'] },
   { label: 'Apparel', matchers: ['apparel'] },
+  // Grip size (rackets) and shoe/clothing size both roll up into one
+  // "Size" filter — see note above.
+  { label: 'Size', matchers: ['grip'] },
   { label: 'Size', matchers: ['size'] },
   {
     label: 'Player Level',
@@ -159,4 +165,231 @@ export function canonicalizeSpecLabel(
   const defs = getAllowedSpecFilters(sport, category)
   const hit = defs.find((d) => d.matchers.some((m) => matchesKeyword(key, m)))
   return hit ? hit.label : null
+}
+
+// ---------------------------------------------------------------------------
+// Weight buckets
+// ---------------------------------------------------------------------------
+// Raw scraped weight specs are messy (e.g. "355-360g", ">300g", "4U
+// (80-84.9g)") and, shown as-is, produce a huge wall of near-duplicate
+// filter pills. The reference site instead groups weight into a handful of
+// fixed bands per sport (badminton's classic 2U-6U scale, tennis/padel's own
+// gram bands). Every sport below gets that fixed band list; any sport not
+// listed here (currently squash) simply keeps the old behaviour — raw,
+// auto-detected distinct values — via resolveSpecFilterValue's fallback.
+
+export interface WeightBucket {
+  /** Label shown in the sidebar and used as the filter value. */
+  label: string
+  /** Inclusive lower bound in grams. */
+  min: number
+  /** Exclusive upper bound in grams, or null for "and above". */
+  max: number | null
+}
+
+const BADMINTON_WEIGHT_BUCKETS: WeightBucket[] = [
+  { label: 'Under 75g (6U+)', min: 0, max: 75 },
+  { label: '75-79g (5U)', min: 75, max: 80 },
+  { label: '80-84g (4U)', min: 80, max: 85 },
+  { label: '85-89g (3U)', min: 85, max: 90 },
+  { label: '90g+ (2U+)', min: 90, max: null },
+]
+
+const TENNIS_WEIGHT_BUCKETS: WeightBucket[] = [
+  { label: 'Under 260g', min: 0, max: 260 },
+  { label: '260-279g', min: 260, max: 280 },
+  { label: '280-299g', min: 280, max: 300 },
+  { label: '300-314g', min: 300, max: 315 },
+  { label: '315-329g', min: 315, max: 330 },
+  { label: '330g+', min: 330, max: null },
+]
+
+const PADEL_WEIGHT_BUCKETS: WeightBucket[] = [
+  { label: 'Under 345g', min: 0, max: 345 },
+  { label: '345-359g', min: 345, max: 360 },
+  { label: '360-369g', min: 360, max: 370 },
+  { label: '370-379g', min: 370, max: 380 },
+  { label: '380g+', min: 380, max: null },
+]
+
+// Only sports listed here get fixed weight bands. Squash is intentionally
+// left out — its Weight filter keeps showing raw, auto-detected values.
+const WEIGHT_BUCKETS_BY_SPORT: Record<string, WeightBucket[]> = {
+  badminton: BADMINTON_WEIGHT_BUCKETS,
+  tennis: TENNIS_WEIGHT_BUCKETS,
+  padel: PADEL_WEIGHT_BUCKETS,
+}
+
+function getWeightBuckets(
+  sport: string,
+  category: string,
+): WeightBucket[] | null {
+  const cat = (category || '').toLowerCase()
+  if (!cat.includes('racket')) return null
+  return WEIGHT_BUCKETS_BY_SPORT[(sport || '').toLowerCase()] ?? null
+}
+
+/** Fixed display order for a sport's weight bands, or null if it has none. */
+export function getWeightBucketOrder(
+  sport: string,
+  category: string,
+): string[] | null {
+  const buckets = getWeightBuckets(sport, category)
+  return buckets ? buckets.map((b) => b.label) : null
+}
+
+// Pulls out the number(s) in a raw weight string and returns a representative
+// gram figure. Handles plain values ("88g"), ranges ("355-360g", "271g -
+// 285g") by averaging, and open-ended values (">300g") by using the number
+// present. Returns null if nothing numeric could be found.
+function parseWeightGrams(raw: string): number | null {
+  const matches = raw.match(/\d+(\.\d+)?/g)
+  if (!matches || matches.length === 0) return null
+  const nums = matches.map(Number).filter((n) => !Number.isNaN(n))
+  if (nums.length === 0) return null
+  if (nums.length === 1) return nums[0]
+  // Range like "355-360g" — use the midpoint.
+  return (nums[0] + nums[1]) / 2
+}
+
+function weightBucketLabelFor(
+  sport: string,
+  category: string,
+  rawValue: string,
+): string | null {
+  const buckets = getWeightBuckets(sport, category)
+  if (!buckets) return null
+  const grams = parseWeightGrams(rawValue)
+  if (grams === null) return null
+  for (const b of buckets) {
+    if (grams >= b.min && (b.max === null || grams < b.max)) return b.label
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Balance / Stiffness / Color de-duplication
+// ---------------------------------------------------------------------------
+// Raw scraped values for these specs are inconsistent in two ways that make
+// the exact same option show up multiple times in the sidebar:
+//   1. Formatting drift — "Head Heavy" vs "Head-Heavy", "Light Beige" vs
+//      "Light-Beige" — same value, different spacing/hyphenation.
+//   2. Some products carry a full descriptive sentence instead of the short
+//      value — e.g. "Medium – ideal for a blend of power and control"
+//      instead of just "Medium" — which then never groups with the plain
+//      "Medium" entries even though it means the same thing.
+// The helpers below collapse both cases down to one canonical label per
+// distinct value, matched against a small known vocabulary per spec.
+
+// Turns hyphen/dash variants into spaces and collapses whitespace, so
+// "Head-Heavy" and "Head Heavy" normalize to the same string for comparison.
+function normalizeSpacing(s: string): string {
+  return s
+    .replace(/[-\u2010-\u2015]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function titleCase(s: string): string {
+  return s
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+}
+
+// Canonical display forms, longest first so a more specific phrase (e.g.
+// "Slightly Head Heavy") is preferred over a shorter one it also starts
+// with ("Head Heavy") when matching a raw value's prefix.
+const BALANCE_VOCAB = [
+  'Slightly Head Heavy',
+  'Slightly Head Light',
+  'Head Heavy',
+  'Head Light',
+  'Even Balanced',
+].sort((a, b) => b.length - a.length)
+
+const STIFFNESS_VOCAB = [
+  'Extra Stiff',
+  'Slightly Stiff',
+  'Medium Flex',
+  'Hi-Flex',
+  'Stiff',
+  'Flexible',
+  'Medium',
+].sort((a, b) => b.length - a.length)
+
+// If a raw value (once spacing-normalized) starts with one of the known
+// short terms for this spec, return that term's canonical display form —
+// this turns a full descriptive sentence back into just the value it's
+// describing. Returns null if nothing matches, so the caller can fall back
+// to showing the value as-is.
+function matchDescriptiveVocab(
+  vocab: string[],
+  normalizedInput: string,
+): string | null {
+  const lower = normalizedInput.toLowerCase()
+  for (const term of vocab) {
+    if (lower.startsWith(normalizeSpacing(term).toLowerCase())) return term
+  }
+  return null
+}
+
+/**
+ * Resolves the raw value of a spec that has already been canonicalised to
+ * `canonicalLabel` into the value that should actually be shown/filtered on.
+ * For "Weight" on a sport with fixed bands, this is the band label (e.g.
+ * "85-89g (3U)"). For "Balance"/"Stiffness"/"Color" it's normalized so
+ * formatting variants and overly-descriptive text merge into one canonical
+ * option (see the de-duplication helpers above). For everything else it's
+ * just the trimmed raw value. Sidebar option-building and product filtering
+ * both go through this so they can never drift apart.
+ */
+export function resolveSpecFilterValue(
+  sport: string,
+  category: string,
+  canonicalLabel: string,
+  rawValue: string,
+): string | null {
+  const trimmed = rawValue.trim()
+  if (!trimmed) return null
+  if (canonicalLabel === 'Weight') {
+    const bucket = weightBucketLabelFor(sport, category, trimmed)
+    return bucket ?? trimmed
+  }
+  if (
+    canonicalLabel === 'Balance' ||
+    canonicalLabel === 'Stiffness' ||
+    canonicalLabel === 'Color'
+  ) {
+    const spaced = normalizeSpacing(trimmed)
+    if (canonicalLabel === 'Balance') {
+      const short = matchDescriptiveVocab(BALANCE_VOCAB, spaced)
+      if (short) return short
+    }
+    if (canonicalLabel === 'Stiffness') {
+      const short = matchDescriptiveVocab(STIFFNESS_VOCAB, spaced)
+      if (short) return short
+    }
+    return titleCase(spaced)
+  }
+  return trimmed
+}
+
+// Sort comparator for values inside a "Weight" filter group. Fixed-band
+// labels sort by their band's natural order; anything else (e.g. squash's
+// raw values) falls back to a numeric-then-alphabetical sort.
+export function compareWeightValues(a: string, b: string): number {
+  const rank = (v: string): number => {
+    for (const buckets of Object.values(WEIGHT_BUCKETS_BY_SPORT)) {
+      const idx = buckets.findIndex((bkt) => bkt.label === v)
+      if (idx !== -1) return idx
+    }
+    const grams = parseWeightGrams(v)
+    return grams !== null ? 1000 + grams : Infinity
+  }
+  const ra = rank(a)
+  const rb = rank(b)
+  if (ra !== rb) return ra - rb
+  return a.localeCompare(b)
 }

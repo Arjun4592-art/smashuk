@@ -22,6 +22,7 @@ async function getCroppedFile(
   fileName: string,
   fileType: string,
   outputType: string,
+  maxDimension = 2000,
 ): Promise<File> {
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image()
@@ -30,9 +31,18 @@ async function getCroppedFile(
     img.onerror = reject
     img.src = imageSrc
   })
+  // Actually resize down, not just crop: cap the OUTPUT canvas to maxDimension
+  // even if the cropped region itself is much larger (e.g. a 6000x4000 photo
+  // cropped to "just" 4000x3000 was still being written out at full size).
+  const scale = Math.min(
+    1,
+    maxDimension / Math.max(cropPixels.width, cropPixels.height),
+  )
+  const outWidth = Math.max(1, Math.round(cropPixels.width * scale))
+  const outHeight = Math.max(1, Math.round(cropPixels.height * scale))
   const canvas = document.createElement('canvas')
-  canvas.width = Math.round(cropPixels.width)
-  canvas.height = Math.round(cropPixels.height)
+  canvas.width = outWidth
+  canvas.height = outHeight
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas not supported')
   ctx.drawImage(
@@ -43,15 +53,15 @@ async function getCroppedFile(
     cropPixels.height,
     0,
     0,
-    cropPixels.width,
-    cropPixels.height,
+    outWidth,
+    outHeight,
   )
   const mime = outputType || fileType || 'image/jpeg'
   const blob: Blob = await new Promise((resolve, reject) => {
     canvas.toBlob(
       (b) => (b ? resolve(b) : reject(new Error('Crop failed'))),
       mime,
-      0.92,
+      0.85,
     )
   })
   const ext = mime.split('/')[1] ?? 'jpg'

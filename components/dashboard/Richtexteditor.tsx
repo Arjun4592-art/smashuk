@@ -17,6 +17,7 @@ import ProductCardNode from '@/components/dashboard/editor-extensions/ProductCar
 import ProductGridNode from '@/components/dashboard/editor-extensions/ProductGridNode'
 import IndentExtension from '@/components/dashboard/editor-extensions/IndentExtension'
 import ImageCropModal from '@/components/dashboard/ImageCropModal'
+import { compressImageForUpload } from '@/lib/image-compress'
 import ProductPickerModal, {
   PickedProduct,
 } from '@/components/dashboard/ProductPickerModal'
@@ -776,13 +777,21 @@ export default function RichTextEditor({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
   const uploadFile = useCallback(async (file: File) => {
+    const compressed = await compressImageForUpload(file)
     const formData = new FormData()
-    formData.append('files', file)
+    formData.append('files', compressed)
     const res = await fetch('/api/admin/uploads', {
       method: 'POST',
       body: formData,
     })
-    if (!res.ok) throw new Error('Upload failed')
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      const msg =
+        res.status === 413
+          ? 'Image is too large — please try a smaller photo'
+          : (err.error ?? 'Upload failed')
+      throw new Error(msg)
+    }
     const data = await res.json()
     return (data.files?.[0]?.url ?? data.uploads?.[0]?.url ?? '') as string
   }, [])
@@ -798,8 +807,8 @@ export default function RichTextEditor({
               src: url,
             })
             .run()
-      } catch {
-        toast.error('Image upload failed')
+      } catch (err: any) {
+        toast.error(err.message ?? 'Image upload failed')
       }
     },
     [editor, uploadFile],

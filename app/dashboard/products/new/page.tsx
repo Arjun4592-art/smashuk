@@ -12,6 +12,7 @@ import {
   upsertProductTags,
 } from '@/lib/api/dashboard'
 import { toast } from 'sonner'
+import { compressImageForUpload } from '@/lib/image-compress'
 function buildAutoMetaTitle(name: string, brand: string): string {
   const withBrand =
     brand && !name.toLowerCase().includes(brand.toLowerCase())
@@ -406,15 +407,20 @@ export default function AddProductPage() {
   }
   const uploadImage = async (img: UploadedImage) => {
     try {
+      const compressed = await compressImageForUpload(img.file)
       const formData = new FormData()
-      formData.append('files', img.file)
+      formData.append('files', compressed)
       const res = await fetch('/api/admin/uploads', {
         method: 'POST',
         body: formData,
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        throw new Error(err.error ?? 'Upload failed')
+        const msg =
+          res.status === 413
+            ? 'Image is too large — please try a smaller photo'
+            : (err.error ?? 'Upload failed')
+        throw new Error(msg)
       }
       const data = await res.json()
       const uploadedUrl: string =
