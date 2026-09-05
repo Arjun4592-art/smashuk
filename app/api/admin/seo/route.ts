@@ -5,8 +5,25 @@ import {
   invalidateSeoConfigCache,
   DEFAULT_SEO,
 } from '@/lib/seo-config'
+import { getAllCollectionHandles } from '@/lib/collections-data'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
+function isAllowedPage(page: string): boolean {
+  const ALLOWED_PAGES = [
+    'home',
+    'shop',
+    'collections',
+    'about',
+    'contact',
+    'local-store',
+    '_global',
+  ]
+  if (ALLOWED_PAGES.includes(page)) return true
+  if (page.startsWith('collection:')) {
+    return getAllCollectionHandles().includes(page.slice('collection:'.length))
+  }
+  return false
+}
 async function safeJson(res: Response) {
   const text = await res.text()
   if (!text) return {}
@@ -50,10 +67,10 @@ export async function POST(req: NextRequest) {
       'local-store',
       '_global',
     ]
-    if (!page || !ALLOWED_PAGES.includes(page)) {
+    if (!page || !isAllowedPage(page)) {
       return NextResponse.json(
         {
-          error: `page field must be one of: ${ALLOWED_PAGES.join(', ')}`,
+          error: `page field must be one of: ${ALLOWED_PAGES.join(', ')} or a collection:<handle> key`,
         },
         {
           status: 400,

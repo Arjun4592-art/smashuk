@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
+import { getAllCollections } from '@/lib/collections-data'
 const Icons = {
   search: (
     <svg
@@ -510,6 +511,27 @@ export default function DashboardSEOPage() {
             ogImage: seo.ogImage ?? '',
             canonical: seo.canonical ?? '',
             noIndex: seo.noIndex ?? false,
+            score: 0,
+          }
+          page.score = calcScore(page)
+          allPages.push(page)
+        }
+        for (const c of getAllCollections()) {
+          const pageKey = `collection:${c.handle}`
+          const saved = seoRes[pageKey] ?? {}
+          const page: SEOPage = {
+            id: `collection-${c.handle}`,
+            title: c.h1,
+            path: `/collections/${c.handle}`,
+            type: 'category',
+            storageType: 'static',
+            pageKey,
+            metaTitle: saved.metaTitle ?? c.metaTitle ?? '',
+            metaDescription: saved.metaDescription ?? c.metaDescription ?? '',
+            metaKeywords: saved.metaKeywords ?? c.metaKeywords ?? '',
+            ogImage: saved.ogImage ?? '',
+            canonical: saved.canonical ?? '',
+            noIndex: saved.noIndex ?? false,
             score: 0,
           }
           page.score = calcScore(page)

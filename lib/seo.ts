@@ -119,18 +119,24 @@ export async function generateCategoryMetadata(
     }
   }
 }
-export function generateCollectionMetadata(handle: string): Metadata {
+export async function generateCollectionMetadata(
+  handle: string,
+): Promise<Metadata> {
   const collection = getCollectionConfig(handle)
   if (!collection) {
     return {
       title: SITE_NAME,
     }
   }
+  const config = await readSeoConfig()
+  const saved = config[`collection:${handle}`] ?? {}
   return buildMetadata({
-    metaTitle: collection.metaTitle,
-    metaDescription: collection.metaDescription,
-    metaKeywords: collection.metaKeywords,
-    canonical: `${SITE_URL}/collections/${handle}`,
+    metaTitle: saved.metaTitle || collection.metaTitle,
+    metaDescription: saved.metaDescription || collection.metaDescription,
+    metaKeywords: saved.metaKeywords || collection.metaKeywords,
+    ogImage: saved.ogImage,
+    canonical: saved.canonical || `${SITE_URL}/collections/${handle}`,
+    noIndex: saved.noIndex,
     fallbackTitle: `${collection.h1} — ${SITE_NAME}`,
     fallbackDescription: collection.intro,
     fallbackCanonical: `${SITE_URL}/collections/${handle}`,
