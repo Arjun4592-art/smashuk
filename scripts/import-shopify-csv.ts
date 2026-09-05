@@ -889,7 +889,7 @@ async function main() {
     if (sportTopId) categoryIds.push(sportTopId)
     return {
       categoryIds: [...new Set(categoryIds)],
-      categoryName: canonicalName,
+      categoryName: canonicalName ?? "",
       sport,
     }
   }
