@@ -64,6 +64,9 @@ export function proxy(request: NextRequest) {
     '/api/admin/store-settings',
   ]
   if (pathname.startsWith('/api/admin')) {
+    if (pathname === '/api/admin/store-settings' && request.method === 'GET') {
+      return NextResponse.next()
+    }
     const isDashboardAuth =
       dashboardAuth?.isAuthenticated &&
       DASHBOARD_ROLES.includes(dashboardAuth.role as any)
