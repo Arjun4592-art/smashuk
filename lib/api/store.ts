@@ -85,7 +85,7 @@ export function normalizeProduct(p: any): Product {
     tags: p.tags?.map((t: any) => t.value) ?? [],
     createdAt: p.created_at,
     updatedAt: p.updated_at,
-    specs: extractSpecs(p.metadata),
+    specs: [...extractSpecs(p.metadata), ...extractOptionSpecs(p.options)],
     stringUpgradeAvailable: p.metadata?.string_upgrade_available === true,
     stringUpgradeType:
       p.metadata?.string_upgrade_type === 'paid' ? 'paid' : 'free',
@@ -186,6 +186,35 @@ function extractSpecs(metadata: any): {
       value:
         typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value),
     }))
+}
+// Real Shopify variant options (Size, Grip Size, Size (UK), Weight, Colour,
+// ...) come through the CSV import as genuine Medusa product options
+// (p.options[].title / .values[].value) — NOT as metadata.specifications.
+// extractSpecs() above only ever reads metadata, so this data was invisible
+// to the shop sidebar/filtering even though it's exactly what shoppers
+// expect to filter shoes and rackets by. One spec entry is emitted per
+// distinct option value (not just the first) so a product with several
+// selectable sizes/weights matches a filter on ANY of them — the existing
+// `.some()` based spec-matching in ShopClient already handles multiple
+// entries sharing the same label correctly. Labels that don't map to a
+// known canonical filter (e.g. "Title" on single-variant products,
+// "Denominations" on gift cards) are simply ignored later by
+// canonicalizeSpecLabel — no filtering needed here.
+function extractOptionSpecs(
+  options: { title?: string; values?: { value?: string }[] }[] | undefined,
+): { label: string; value: string }[] {
+  if (!Array.isArray(options)) return []
+  return options.flatMap((opt) => {
+    const label = opt?.title?.trim()
+    if (!label || !Array.isArray(opt.values)) return []
+    return opt.values
+      .map((v) => v?.value?.trim())
+      .filter((v): v is string => !!v)
+      .map((value) => ({
+        label,
+        value,
+      }))
+  })
 }
 let cachedRegionId: string | null | undefined
 async function getServerRegionId(): Promise<string | null> {

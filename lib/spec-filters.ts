@@ -43,7 +43,10 @@ const BADMINTON_RACKET_SPEC_FILTERS: SpecFilterDef[] = [
 ]
 
 const TENNIS_RACKET_SPEC_FILTERS: SpecFilterDef[] = [
-  { label: 'Size', matchers: ['grip'] },
+  // Reference CSV data uses "Size" (grip size, plain) far more than "Grip
+  // Size" as the variant option name (328 vs 202 products) — both, plus
+  // "Size (UK)", must resolve to this one canonical filter.
+  { label: 'Size', matchers: ['grip', 'size'] },
   { label: 'Color', matchers: ['colour', 'color'] },
 ]
 
@@ -60,7 +63,7 @@ const PADEL_RACKET_SPEC_FILTERS: SpecFilterDef[] = [
 const SQUASH_RACKET_SPEC_FILTERS: SpecFilterDef[] = [
   { label: 'Weight', matchers: ['weight'] },
   { label: 'Balance', matchers: ['balance'] },
-  { label: 'Size', matchers: ['grip'] },
+  { label: 'Size', matchers: ['grip', 'size'] },
   { label: 'Color', matchers: ['colour', 'color'] },
 ]
 

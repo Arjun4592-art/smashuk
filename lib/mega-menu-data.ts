@@ -9,23 +9,23 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'All Rackets',
-            href: '/shop?sport=badminton&category=rackets',
+            href: '/collections/badminton-rackets',
           },
           {
             label: 'Yonex',
-            href: '/shop?sport=badminton&brand=yonex',
+            href: '/collections/yonex-badminton-rackets',
           },
           {
             label: 'Victor',
-            href: '/shop?sport=badminton&brand=victor',
+            href: '/collections/victor-badminton-rackets',
           },
           {
             label: 'Li-Ning',
-            href: '/shop?sport=badminton&brand=li-ning',
+            href: '/collections/li-ning-badminton-rackets',
           },
           {
             label: 'Babolat',
-            href: '/shop?sport=badminton&brand=babolat',
+            href: '/collections/babolat-badminton-rackets',
           },
         ],
       },
@@ -34,27 +34,27 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'All Shoes',
-            href: '/shop?sport=badminton&category=shoes',
+            href: '/collections/badminton-shoes',
           },
           {
             label: 'Men',
-            href: '/shop?sport=badminton&category=shoes&gender=men',
+            href: '/collections/badminton-shoes-for-men',
           },
           {
             label: 'Women',
-            href: '/shop?sport=badminton&category=shoes&gender=women',
+            href: '/collections/women-badminton-shoes',
           },
           {
             label: 'Yonex',
-            href: '/shop?sport=badminton&category=shoes&brand=yonex',
+            href: '/collections/yonex-badminton-shoes',
           },
           {
             label: 'Victor',
-            href: '/shop?sport=badminton&category=shoes&brand=victor',
+            href: '/collections/victor-badminton-shoes',
           },
           {
             label: 'Li-Ning',
-            href: '/shop?sport=badminton&category=shoes&brand=li-ning',
+            href: '/collections/li-ning-badminton-shoes',
           },
         ],
       },
@@ -63,15 +63,15 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'Racket Bags',
-            href: '/shop?sport=badminton&category=bags',
+            href: '/collections/badminton-racket-bags',
           },
           {
             label: 'Shuttlecocks',
-            href: '/shop?sport=badminton&category=shuttlecocks',
+            href: '/collections/badminton-shuttlecocks',
           },
           {
             label: 'Racket Grips',
-            href: '/shop?sport=badminton&category=grips',
+            href: '/collections/badminton-racket-grips',
           },
         ],
       },
@@ -80,19 +80,19 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'Beginner Rackets',
-            href: '/shop?sport=badminton&level=beginner',
+            href: '/collections/beginner-badminton-rackets',
           },
           {
             label: 'Intermediate',
-            href: '/shop?sport=badminton&level=intermediate',
+            href: '/collections/intermediate-badminton-rackerts',
           },
           {
             label: 'Advanced',
-            href: '/shop?sport=badminton&level=advanced',
+            href: '/collections/advanced-badminton-rackets',
           },
           {
             label: 'Head Heavy',
-            href: '/shop?sport=badminton&style=head-heavy',
+            href: '/collections/head-heavy-badminton-racket',
           },
         ],
       },
@@ -100,7 +100,7 @@ export const MEGA_MENUS = {
     featured: {
       label: 'New Arrivals',
       description: 'Check out the latest badminton gear we just stocked.',
-      href: '/shop?sport=badminton&badge=NEW',
+      href: '/collections/2024-badminton-new-products',
       cta: 'Shop Now',
     },
     featured2: {
@@ -120,23 +120,23 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'All Rackets',
-            href: '/shop?sport=tennis&category=rackets',
+            href: '/collections/tennis-rackets',
           },
           {
             label: 'Babolat',
-            href: '/shop?sport=tennis&brand=babolat',
+            href: '/collections/babolat-tennis-rackets',
           },
           {
             label: 'HEAD',
-            href: '/shop?sport=tennis&brand=head',
+            href: '/collections/head-tennis-rackets',
           },
           {
             label: 'Yonex',
-            href: '/shop?sport=tennis&brand=yonex',
+            href: '/collections/yonex-tennis-rackets',
           },
           {
             label: 'Junior Rackets',
-            href: '/shop?sport=tennis&level=junior',
+            href: '/collections/junior-tennis-rackets',
           },
         ],
       },
@@ -145,27 +145,27 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'All Shoes',
-            href: '/shop?sport=tennis&category=shoes',
+            href: '/collections/tennis-shoes',
           },
           {
             label: 'Men',
-            href: '/shop?sport=tennis&category=shoes&gender=men',
+            href: '/collections/men-tennis-shoes',
           },
           {
             label: 'Women',
-            href: '/shop?sport=tennis&category=shoes&gender=women',
+            href: '/collections/women-tennis-shoes',
           },
           {
             label: 'Babolat',
-            href: '/shop?sport=tennis&category=shoes&brand=babolat',
+            href: '/collections/babolat-tennis-shoes',
           },
           {
             label: 'K-Swiss',
-            href: '/shop?sport=tennis&category=shoes&brand=k-swiss',
+            href: '/collections/k-swiss-tennis-shoes',
           },
           {
             label: 'Adidas',
-            href: '/shop?sport=tennis&category=shoes&brand=adidas',
+            href: '/collections/adidas-tennis-shoes',
           },
         ],
       },
@@ -174,15 +174,15 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'Tennis Balls',
-            href: '/shop?sport=tennis&category=balls',
+            href: '/collections/tennis-balls',
           },
           {
             label: 'Tennis Bags',
-            href: '/shop?sport=tennis&category=bags',
+            href: '/collections/tennis-bags',
           },
           {
             label: 'Racket Grips',
-            href: '/shop?sport=tennis&category=grips',
+            href: '/collections/tennis-racket-grips',
           },
         ],
       },
@@ -191,15 +191,15 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'Babolat Store',
-            href: '/shop?brand=babolat',
+            href: '/collections/babolat-tennis-store',
           },
           {
             label: 'Yonex Store',
-            href: '/shop?brand=yonex',
+            href: '/collections/yonex-tennis-store',
           },
           {
             label: 'HEAD Store',
-            href: '/shop?brand=head',
+            href: '/collections/head-tennis-store',
           },
           {
             label: 'Wilson Store',
@@ -211,7 +211,7 @@ export const MEGA_MENUS = {
     featured: {
       label: 'Tennis Clearance',
       description: "Limited stock — all must go. Grab before it's gone!",
-      href: '/shop?sport=tennis&badge=SALE',
+      href: '/collections/tennis-sale',
       cta: 'Shop Sale',
     },
   },
@@ -225,27 +225,27 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'Adidas',
-            href: '/shop?sport=padel&brand=adidas',
+            href: '/collections/adidas-padel-rackets',
           },
           {
             label: 'Babolat',
-            href: '/shop?sport=padel&brand=babolat',
+            href: '/collections/babolat-padel-rackets',
           },
           {
             label: 'Bullpadel',
-            href: '/shop?sport=padel&brand=bullpadel',
+            href: '/collections/bullpadel-padel-rackets',
           },
           {
             label: 'HEAD',
-            href: '/shop?sport=padel&brand=head',
+            href: '/collections/head-padel-rackets',
           },
           {
             label: 'Tecnifibre',
-            href: '/shop?sport=padel&brand=tecnifibre',
+            href: '/collections/tecnifibre-padel-rackets',
           },
           {
             label: 'Dunlop',
-            href: '/shop?sport=padel&brand=dunlop',
+            href: '/collections/dunlop-padel-rackets',
           },
         ],
       },
@@ -254,11 +254,11 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'Sale Rackets',
-            href: '/shop?sport=padel&badge=SALE',
+            href: '/collections/padel-tennis-racket-sale',
           },
           {
             label: 'Best Sellers',
-            href: '/shop?sport=padel&badge=BESTSELLER',
+            href: '/collections/best-padel-rackets',
           },
           {
             label: 'New Arrivals',
@@ -271,15 +271,15 @@ export const MEGA_MENUS = {
         links: [
           {
             label: 'Padel Balls',
-            href: '/shop?sport=padel&category=balls',
+            href: '/collections/padel-balls',
           },
           {
             label: 'Padel Shoes',
-            href: '/shop?sport=padel&category=shoes',
+            href: '/collections/padel-shoes',
           },
           {
             label: 'Padel Bags',
-            href: '/shop?sport=padel&category=bags',
+            href: '/collections/padel-bag',
           },
         ],
       },
@@ -352,19 +352,19 @@ export const MEGA_MENUS = {
         links: [
           {
             label: "All Men's",
-            href: '/shop?sport=clothing&gender=men',
+            href: '/collections/men-clothing',
           },
           {
             label: 'Tops',
-            href: '/shop?sport=clothing&gender=men&style=tops',
+            href: '/collections/men-tops',
           },
           {
             label: 'Bottoms',
-            href: '/shop?sport=clothing&gender=men&style=bottoms',
+            href: '/collections/men-bottoms',
           },
           {
             label: 'Socks',
-            href: '/shop?sport=clothing&style=socks',
+            href: '/collections/socks',
           },
         ],
       },
@@ -373,19 +373,19 @@ export const MEGA_MENUS = {
         links: [
           {
             label: "All Women's",
-            href: '/shop?sport=clothing&gender=women',
+            href: '/collections/women-clothing',
           },
           {
             label: 'Tops',
-            href: '/shop?sport=clothing&gender=women&style=tops',
+            href: '/collections/women-tops',
           },
           {
             label: 'Bottoms',
-            href: '/shop?sport=clothing&gender=women&style=bottoms',
+            href: '/collections/women-bottoms',
           },
           {
             label: 'Socks',
-            href: '/shop?sport=clothing&style=socks',
+            href: '/collections/socks',
           },
         ],
       },
@@ -417,6 +417,10 @@ export const MEGA_MENUS = {
             label: 'Visit Us',
             href: '/local-store',
           },
+          {
+            label: "Padel Store",
+            href:"/local-store/padel-store"
+          }
         ],
       },
       {

@@ -6,23 +6,17 @@ import {
   DEFAULT_SEO,
 } from '@/lib/seo-config'
 import { getAllCollectionHandles } from '@/lib/collections-data'
+import { discoverStaticPages, isDiscoveredPageKey } from '@/lib/discover-pages'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
+// New pages need zero manual registration here: any page.tsx added under
+// app/(website) is picked up automatically by discoverStaticPages().
 function isAllowedPage(page: string): boolean {
-  const ALLOWED_PAGES = [
-    'home',
-    'shop',
-    'collections',
-    'about',
-    'contact',
-    'local-store',
-    '_global',
-  ]
-  if (ALLOWED_PAGES.includes(page)) return true
+  if (page === '_global') return true
   if (page.startsWith('collection:')) {
     return getAllCollectionHandles().includes(page.slice('collection:'.length))
   }
-  return false
+  return isDiscoveredPageKey(page)
 }
 async function safeJson(res: Response) {
   const text = await res.text()
@@ -41,7 +35,9 @@ export async function GET(req: NextRequest) {
   if (page) {
     return NextResponse.json(config[page] ?? DEFAULT_SEO[page] ?? {})
   }
-  return NextResponse.json(config)
+  // _pages: every static route discovered under app/(website) right now —
+  // lets the dashboard list new pages without anyone editing this API.
+  return NextResponse.json({ ...config, _pages: discoverStaticPages() })
 }
 export async function POST(req: NextRequest) {
   const authHeader = await getAdminAuthHeader(req)
@@ -58,19 +54,13 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const { page, ...seoData } = body
-    const ALLOWED_PAGES = [
-      'home',
-      'shop',
-      'collections',
-      'about',
-      'contact',
-      'local-store',
-      '_global',
-    ]
     if (!page || !isAllowedPage(page)) {
+      const knownKeys = discoverStaticPages()
+        .map((p) => p.key)
+        .join(', ')
       return NextResponse.json(
         {
-          error: `page field must be one of: ${ALLOWED_PAGES.join(', ')} or a collection:<handle> key`,
+          error: `page field must be one of: ${knownKeys}, _global, or a collection:<handle> key`,
         },
         {
           status: 400,

@@ -293,14 +293,31 @@ function calcScore(page: Partial<SEOPage>): number {
     score += 5
   return score
 }
-const STATIC_SEED: SEOPage[] = [
-  {
-    id: 'static-home',
-    title: 'Home Page',
-    path: '/',
-    type: 'home',
+// The static page list itself is no longer hardcoded here — it comes from
+// `_pages` in the /api/admin/seo response, which is built by scanning
+// app/(website) on the server (see lib/discover-pages.ts). Adding a new
+// page.tsx anywhere under app/(website) makes it show up below with zero
+// changes needed in this file.
+interface DiscoveredPage {
+  key: string
+  label: string
+  path: string
+}
+function pageTypeFor(key: string, path: string): SEOPage['type'] {
+  if (key === 'home') return 'home'
+  if (key === 'shop') return 'shop'
+  if (key === 'collections' || path.startsWith('/collections'))
+    return 'category'
+  return 'other'
+}
+function seedFromDiscovered(d: DiscoveredPage): SEOPage {
+  return {
+    id: `static-${d.key}`,
+    title: d.label,
+    path: d.path,
+    type: pageTypeFor(d.key, d.path),
     storageType: 'static',
-    pageKey: 'home',
+    pageKey: d.key,
     metaTitle: '',
     metaDescription: '',
     metaKeywords: '',
@@ -308,83 +325,8 @@ const STATIC_SEED: SEOPage[] = [
     canonical: '',
     noIndex: false,
     score: 0,
-  },
-  {
-    id: 'static-collections',
-    title: 'Collections Page',
-    path: '/collections',
-    type: 'category',
-    storageType: 'static',
-    pageKey: 'collections',
-    metaTitle: '',
-    metaDescription: '',
-    metaKeywords: '',
-    ogImage: '',
-    canonical: '',
-    noIndex: false,
-    score: 0,
-  },
-  {
-    id: 'static-shop',
-    title: 'Shop Page',
-    path: '/shop',
-    type: 'shop',
-    storageType: 'static',
-    pageKey: 'shop',
-    metaTitle: '',
-    metaDescription: '',
-    metaKeywords: '',
-    ogImage: '',
-    canonical: '',
-    noIndex: false,
-    score: 0,
-  },
-  {
-    id: 'static-about',
-    title: 'About Page',
-    path: '/about',
-    type: 'home',
-    storageType: 'static',
-    pageKey: 'about',
-    metaTitle: '',
-    metaDescription: '',
-    metaKeywords: '',
-    ogImage: '',
-    canonical: '',
-    noIndex: false,
-    score: 0,
-  },
-  {
-    id: 'static-contact',
-    title: 'Contact Page',
-    path: '/contact',
-    type: 'home',
-    storageType: 'static',
-    pageKey: 'contact',
-    metaTitle: '',
-    metaDescription: '',
-    metaKeywords: '',
-    ogImage: '',
-    canonical: '',
-    noIndex: false,
-    score: 0,
-  },
-  {
-    id: 'static-local-store',
-    title: 'Local Store Page',
-    path: '/local-store',
-    type: 'home',
-    storageType: 'static',
-    pageKey: 'local-store',
-    metaTitle: '',
-    metaDescription: '',
-    metaKeywords: '',
-    ogImage: '',
-    canonical: '',
-    noIndex: false,
-    score: 0,
-  },
-]
+  }
+}
 function ScoreBadge({ score }: { score: number }) {
   const color =
     score >= 80
@@ -430,7 +372,7 @@ function CharBar({
   )
 }
 export default function DashboardSEOPage() {
-  const [pages, setPages] = useState<SEOPage[]>(STATIC_SEED)
+  const [pages, setPages] = useState<SEOPage[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('pages')
   const [editingPage, setEditingPage] = useState<SEOPage | null>(null)
@@ -447,13 +389,44 @@ export default function DashboardSEOPage() {
     facebookAppId: '',
   })
   useEffect(() => {
+    async function fetchAllProducts(): Promise<any[]> {
+      const limit = 100
+      let offset = 0
+      const all: any[] = []
+      // Safety cap so a backend bug can't spin this into an infinite loop.
+      for (let i = 0; i < 100; i++) {
+        const res = await fetch(
+          `/api/admin/products?limit=${limit}&offset=${offset}`,
+        ).then((r) => r.json())
+        const batch = res.products ?? []
+        all.push(...batch)
+        if (batch.length < limit) break
+        offset += limit
+      }
+      return all
+    }
+    async function fetchAllCategories(): Promise<any[]> {
+      const limit = 100
+      let offset = 0
+      const all: any[] = []
+      for (let i = 0; i < 50; i++) {
+        const res = await fetch(
+          `/api/admin/categories?limit=${limit}&offset=${offset}`,
+        ).then((r) => r.json())
+        const batch = res.product_categories ?? res.categories ?? []
+        all.push(...batch)
+        if (batch.length < limit) break
+        offset += limit
+      }
+      return all
+    }
     async function load() {
       setLoading(true)
       try {
-        const [seoRes, productsRes, categoriesRes] = await Promise.all([
+        const [seoRes, products, categories] = await Promise.all([
           fetch('/api/admin/seo').then((r) => r.json()),
-          fetch('/api/admin/products?limit=50').then((r) => r.json()),
-          fetch('/api/admin/categories?limit=100').then((r) => r.json()),
+          fetchAllProducts(),
+          fetchAllCategories(),
         ])
         if (seoRes._global) {
           setGlobalSettings((s) => ({
@@ -462,7 +435,9 @@ export default function DashboardSEOPage() {
           }))
         }
         const allPages: SEOPage[] = []
-        for (const seed of STATIC_SEED) {
+        const discoveredPages: DiscoveredPage[] = seoRes._pages ?? []
+        for (const d of discoveredPages) {
+          const seed = seedFromDiscovered(d)
           const saved = seoRes[seed.pageKey!] ?? {}
           allPages.push({
             ...seed,
@@ -473,7 +448,6 @@ export default function DashboardSEOPage() {
             }),
           })
         }
-        const products = productsRes.products ?? []
         for (const p of products) {
           const seo = p.metadata ?? {}
           const page: SEOPage = {
@@ -494,8 +468,6 @@ export default function DashboardSEOPage() {
           page.score = calcScore(page)
           allPages.push(page)
         }
-        const categories =
-          categoriesRes.product_categories ?? categoriesRes.categories ?? []
         for (const c of categories) {
           const seo = c.metadata ?? {}
           const page: SEOPage = {
