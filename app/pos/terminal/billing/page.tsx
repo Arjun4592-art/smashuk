@@ -109,15 +109,17 @@ export default function BillingPage() {
       });
       return;
     }
-    if (match.stock <= 0) {
-      toast.error(`${match.name} is out of stock`);
-      return;
-    }
     handleAdd(match);
     setSearch('');
-    toast.success(`${match.name} added`, {
-      duration: 1200
-    });
+    if (match.stock <= 0) {
+      toast(`${match.name} added — out of stock, selling anyway`, {
+        duration: 1800
+      });
+    } else {
+      toast.success(`${match.name} added`, {
+        duration: 1200
+      });
+    }
   };
   const handleAdd = useCallback((p: POSProduct) => {
     if (!p.variantId) {
@@ -219,7 +221,8 @@ export default function BillingPage() {
           }
           return {
             variant_id: variantId,
-            quantity: i.quantity
+            quantity: i.quantity,
+            product_id: (i.product as any).id
           };
         });
         const medusaOrder = await createPOSOrder({

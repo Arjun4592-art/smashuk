@@ -142,12 +142,14 @@ export async function processOrderReturn(
   }[],
   reason: string,
   note?: string,
+  refundAmount?: number,
 ) {
   return mutate(`/api/admin/orders/${id}`, 'PATCH', {
     action: 'return',
     items,
     reason,
     note,
+    refund_amount: refundAmount,
   })
 }
 export async function approveOrderReturn(id: string, returnId: string) {

@@ -128,7 +128,7 @@ const StripeCardBlock = forwardRef(function StripeCardBlock(
           applePay: 'never',
           googlePay: 'never',
         },
-        paymentMethodOrder: ['card', 'amazon_pay', 'revolut_pay'],
+        paymentMethodOrder: ['card'],
       }}
     />
   )
@@ -1085,19 +1085,9 @@ export default function CheckoutPage() {
               </div>
 
               <div className='flex items-center gap-3 p-4 rounded-xl border-2 border-[#E8553A] bg-[#E8553A]/5'>
-                <span className='text-2xl'>
-                  {selectedPaymentType === 'amazon_pay'
-                    ? '🅰️'
-                    : selectedPaymentType === 'revolut_pay'
-                      ? '💠'
-                      : '💳'}
-                </span>
+                <span className='text-2xl'>💳</span>
                 <span className='font-lato font-semibold text-sm text-[#E8553A]'>
-                  {selectedPaymentType === 'amazon_pay'
-                    ? 'Amazon Pay (Stripe — secure checkout)'
-                    : selectedPaymentType === 'revolut_pay'
-                      ? 'Revolut Pay (Stripe — secure checkout)'
-                      : 'Card (Stripe — secure checkout)'}
+                  Card (Stripe — secure checkout)
                 </span>
               </div>
 

@@ -25,6 +25,7 @@ export interface CreatePOSOrderPayload {
   items: {
     variant_id: string
     quantity: number
+    product_id?: string
   }[]
   customer_id?: string
   customer_email?: string
