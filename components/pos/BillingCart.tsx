@@ -17,8 +17,7 @@ interface Props {
   onCharge: () => void
   onClear: () => void
 }
-const fmt = (n: number) =>
-  CURRENCY_SYMBOL + Math.round(n).toLocaleString('en-GB')
+const fmt = (n: number) => CURRENCY_SYMBOL + (Number(n) || 0).toFixed(2)
 export default function BillingCart({
   items,
   discountAmount,

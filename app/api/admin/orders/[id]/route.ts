@@ -15,10 +15,12 @@ import {
   updateReturnRecord,
 } from '@/lib/api/medusa-returns'
 import { randomUUID } from 'crypto'
-import { sendMail, notifyAdmin } from '@/lib/email'
+import { sendMail, notifyOwner } from '@/lib/email'
 import {
   shippingConfirmationEmail,
   refundConfirmationEmail,
+  adminShippingEmail,
+  adminRefundEmail,
 } from '@/lib/email-templates'
 export async function GET(
   req: NextRequest,
@@ -298,10 +300,11 @@ export async function PATCH(
                 html,
                 text,
               })
-              notifyAdmin({
-                subject,
-                html,
-                text,
+              const adminEmail = adminShippingEmail(fullOrder)
+              notifyOwner({
+                subject: adminEmail.subject,
+                html: adminEmail.html,
+                text: adminEmail.text,
                 customerEmail: fullOrder.email,
               }).catch(() => {})
             }
@@ -449,10 +452,11 @@ export async function PATCH(
                 html,
                 text,
               })
-              notifyAdmin({
-                subject,
-                html,
-                text,
+              const adminEmail = adminRefundEmail(order, refund_amount)
+              notifyOwner({
+                subject: adminEmail.subject,
+                html: adminEmail.html,
+                text: adminEmail.text,
                 customerEmail: order.email,
               }).catch(() => {})
             } catch (refundEmailErr) {
@@ -539,10 +543,11 @@ export async function PATCH(
                 html,
                 text,
               })
-              notifyAdmin({
-                subject,
-                html,
-                text,
+              const adminEmail = adminRefundEmail(order, record.refund_amount)
+              notifyOwner({
+                subject: adminEmail.subject,
+                html: adminEmail.html,
+                text: adminEmail.text,
                 customerEmail: order.email,
               }).catch(() => {})
             } catch (refundEmailErr) {

@@ -90,7 +90,7 @@ export function buildReturnLines(order: any, lines: ReturnLineInput[]) {
   }
   return {
     items: built,
-    refund_amount: Math.round(refund_amount),
+    refund_amount: Math.round(refund_amount * 100) / 100,
   }
 }
 export async function refundOrderAmount(
@@ -107,7 +107,7 @@ export async function refundOrderAmount(
       sum + (p.amount - (p.refunded_amount ?? p.amount_refunded ?? 0)),
     0,
   )
-  if (amount > totalRefundable) {
+  if (amount > totalRefundable + 0.005) {
     throw new Error(
       `Refund amount exceeds what's left to refund on this order (max ${totalRefundable}).`,
     )

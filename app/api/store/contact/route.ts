@@ -1,83 +1,180 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { sendMail, notifyAdmin } from '@/lib/email'
-import { SITE_NAME, CONTACT_EMAIL } from '@/lib/constants'
+import { setSurfaceCookies } from '@/lib/api/auth-cookie'
+import { sendMail, notifyOwner } from '@/lib/email'
+import { welcomeEmail, adminWelcomeEmail } from '@/lib/email-templates'
+const MEDUSA_URL =
+  process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
+const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
+const STORE_HEADERS = {
+  'Content-Type': 'application/json',
+  'x-publishable-api-key': PUBLISHABLE_KEY,
+}
 export async function POST(req: NextRequest) {
   try {
-    const { name, email, subject, message } = await req.json()
-    if (!name?.trim() || !email?.trim() || !message?.trim()) {
+    const { name, email, password } = await req.json()
+    if (!name || !email || !password) {
       return NextResponse.json(
         {
-          error: 'Name, email and message are required',
+          error: 'Name, email and password required.',
         },
         {
           status: 400,
         },
       )
     }
-    const result = await sendMail({
-      to: CONTACT_EMAIL,
-      subject: `[${SITE_NAME} Contact] ${subject || 'New enquiry'} — from ${name}`,
-      html: `
-        <div style="font-family: sans-serif;">
-          <p><strong>From:</strong> ${name} (${email})</p>
-          <p><strong>Subject:</strong> ${subject || '(none)'}</p>
-          <p><strong>Message:</strong></p>
-          <p>${String(message).replace(/\n/g, '<br/>')}</p>
-        </div>
-      `,
-      text: `From: ${name} (${email})\nSubject: ${subject || '(none)'}\n\n${message}`,
-      replyTo: email,
-    })
-    if (!result.sent) {
-      const notConfigured = result.error === 'Resend not configured'
+    if (password.length < 8) {
       return NextResponse.json(
         {
-          error: notConfigured
-            ? 'Email is not configured on the server yet — set RESEND_API_KEY in .env.local'
-            : `Could not send the email (${result.error ?? 'unknown error'})`,
+          error: 'Password must be at least 8 characters.',
+        },
+        {
+          status: 400,
+        },
+      )
+    }
+    const regRes = await fetch(
+      `${MEDUSA_URL}/auth/customer/emailpass/register`,
+      {
+        method: 'POST',
+        headers: STORE_HEADERS,
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+      },
+    )
+    const regData = await regRes.json().catch(() => ({}))
+    if (!regRes.ok) {
+      const msg = regData?.message ?? regData?.error ?? 'Registration failed.'
+      if (regRes.status === 409 || msg.toLowerCase().includes('exist')) {
+        return NextResponse.json(
+          {
+            error: 'This email is already registered. Please login.',
+          },
+          {
+            status: 409,
+          },
+        )
+      }
+      return NextResponse.json(
+        {
+          error: msg,
+        },
+        {
+          status: regRes.status,
+        },
+      )
+    }
+    const registrationToken = regData.token as string
+    if (!registrationToken) {
+      return NextResponse.json(
+        {
+          error: 'Registration failed. Please try again.',
         },
         {
           status: 500,
         },
       )
     }
-    if (
-      process.env.MEDUSA_ADMIN_EMAIL &&
-      process.env.MEDUSA_ADMIN_EMAIL !== CONTACT_EMAIL
-    ) {
-      notifyAdmin({
-        subject: `[${SITE_NAME} Contact] ${subject || 'New enquiry'} — from ${name}`,
-        html: `
-          <div style="font-family: sans-serif;">
-            <p><strong>From:</strong> ${name} (${email})</p>
-            <p><strong>Subject:</strong> ${subject || '(none)'}</p>
-            <p><strong>Message:</strong></p>
-            <p>${String(message).replace(/\n/g, '<br/>')}</p>
-          </div>
-        `,
-        text: `From: ${name} (${email})\nSubject: ${subject || '(none)'}\n\n${message}`,
+    const [firstName, ...rest] = name.trim().split(' ')
+    const createCustomerRes = await fetch(`${MEDUSA_URL}/store/customers`, {
+      method: 'POST',
+      headers: {
+        ...STORE_HEADERS,
+        Authorization: `Bearer ${registrationToken}`,
+      },
+      body: JSON.stringify({
+        email,
+        first_name: firstName,
+        last_name: rest.join(' ') || '',
+      }),
+    })
+    const createCustomerData = await createCustomerRes.json().catch(() => ({}))
+    if (!createCustomerRes.ok) {
+      const msg =
+        createCustomerData?.message ?? 'Could not create customer profile.'
+      return NextResponse.json(
+        {
+          error: msg,
+        },
+        {
+          status: createCustomerRes.status,
+        },
+      )
+    }
+    try {
+      const newCustomer = createCustomerData.customer ?? {
+        first_name: firstName,
+        last_name: rest.join(' ') || '',
+        email,
+      }
+      const { subject, html, text } = welcomeEmail(newCustomer)
+      sendMail({ to: email, subject, html, text }).catch(() => {})
+      const adminEmail = adminWelcomeEmail(newCustomer)
+      notifyOwner({
+        subject: adminEmail.subject,
+        html: adminEmail.html,
+        text: adminEmail.text,
         customerEmail: email,
       }).catch(() => {})
+    } catch (welcomeErr) {
+      console.error('[customer-register] welcome email failed:', welcomeErr)
     }
-    sendMail({
-      to: email,
-      subject: `We've received your message — ${SITE_NAME}`,
-      html: `
-        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-          <h2 style="color:#E8553A;">Thanks for reaching out, ${name}!</h2>
-          <p>We've received your message and someone from the ${SITE_NAME} team will get back to you shortly.</p>
-          <p style="color:#8C9196; font-size:12px; margin-top:24px;">Your message: "${String(message).slice(0, 200)}${message.length > 200 ? '…' : ''}"</p>
-        </div>
-      `,
-      text: `Thanks for reaching out, ${name}! We've received your message and someone from the ${SITE_NAME} team will get back to you shortly.`,
-    }).catch(() => {})
-    return NextResponse.json({
-      success: true,
+    const loginRes = await fetch(`${MEDUSA_URL}/auth/customer/emailpass`, {
+      method: 'POST',
+      headers: STORE_HEADERS,
+      body: JSON.stringify({
+        email,
+        password,
+      }),
     })
+    const loginData = await loginRes.json()
+    if (!loginRes.ok || !loginData.token) {
+      return NextResponse.json(
+        {
+          error:
+            'Registration successful but login failed. Please login manually.',
+        },
+        {
+          status: 201,
+        },
+      )
+    }
+    const token = loginData.token as string
+    const customer = createCustomerData.customer
+    const user = {
+      id: customer?.id ?? email,
+      name:
+        `${customer?.first_name ?? ''} ${customer?.last_name ?? ''}`.trim() ||
+        name,
+      email,
+      role: 'customer' as const,
+      createdAt: customer?.created_at ?? new Date().toISOString(),
+    }
+    const response = NextResponse.json(
+      {
+        user,
+      },
+      {
+        status: 201,
+      },
+    )
+    setSurfaceCookies(
+      response.cookies,
+      'website',
+      {
+        isAuthenticated: true,
+        role: 'customer',
+      },
+      token,
+      'lax',
+    )
+    return response
   } catch (err: any) {
+    console.error('[customer-register]', err)
     return NextResponse.json(
       {
-        error: err.message ?? 'Failed to send message',
+        error: 'Registration failed. Please try again.',
       },
       {
         status: 500,

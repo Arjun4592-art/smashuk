@@ -9,10 +9,12 @@ import {
   refundOrderAmount,
   appendReturnRecord,
 } from '@/lib/api/medusa-returns'
-import { sendMail, notifyAdmin } from '@/lib/email'
+import { sendMail, notifyOwner } from '@/lib/email'
 import {
   refundConfirmationEmail,
   shippingConfirmationEmail,
+  adminRefundEmail,
+  adminShippingEmail,
 } from '@/lib/email-templates'
 const isSyntheticEmail = (email?: string) =>
   !email || /^(walkin@|pos-)/i.test(email)
@@ -71,18 +73,39 @@ export async function PATCH(
       : undefined
   try {
     const body = await req.json().catch(() => ({}))
-    const { reason, items } = body as {
+    const {
+      reason,
+      items,
+      refundAmount: refundAmountOverride,
+    } = body as {
       reason?: string
       items?: {
         item_id: string
         quantity: number
       }[]
+      refundAmount?: number
     }
     const order = await getOrderForReturn(id, medusaServiceFetch)
-    const { items: builtItems, refund_amount } = buildReturnLines(
-      order,
-      items ?? [],
-    )
+    const { items: builtItems, refund_amount: computedRefundAmount } =
+      buildReturnLines(order, items ?? [])
+    let refund_amount = computedRefundAmount
+    if (refundAmountOverride !== undefined && refundAmountOverride !== null) {
+      if (
+        typeof refundAmountOverride !== 'number' ||
+        !Number.isFinite(refundAmountOverride) ||
+        refundAmountOverride <= 0
+      ) {
+        return NextResponse.json(
+          {
+            error: 'Custom refund amount must be a positive number',
+          },
+          {
+            status: 400,
+          },
+        )
+      }
+      refund_amount = refundAmountOverride
+    }
     await refundOrderAmount(order, refund_amount, medusaServiceFetch)
     const res = await appendReturnRecord(
       id,
@@ -116,10 +139,11 @@ export async function PATCH(
           html,
           text,
         })
-        notifyAdmin({
-          subject,
-          html,
-          text,
+        const adminEmail = adminRefundEmail(order, refund_amount)
+        notifyOwner({
+          subject: adminEmail.subject,
+          html: adminEmail.html,
+          text: adminEmail.text,
           customerEmail: order.email,
         }).catch(() => {})
       } catch (refundEmailErr) {
@@ -188,10 +212,11 @@ export async function PUT(
             html,
             text,
           })
-          notifyAdmin({
-            subject,
-            html,
-            text,
+          const adminEmail = adminShippingEmail(fullOrder)
+          notifyOwner({
+            subject: adminEmail.subject,
+            html: adminEmail.html,
+            text: adminEmail.text,
             customerEmail: fullOrder.email,
           }).catch(() => {})
         }

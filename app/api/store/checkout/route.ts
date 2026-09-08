@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
 import { sendMail } from '@/lib/email'
-import { orderConfirmationEmail } from '@/lib/email-templates'
+import {
+  orderConfirmationEmail,
+  adminNewOrderEmail,
+} from '@/lib/email-templates'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 const PUB_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
-const fmt = (n: number) => '£' + (Number(n) || 0).toFixed(2)
 async function notifyNewOrder(order: any) {
   const { medusaServiceFetch } = await import('@/lib/api/medusa-service-token')
   const storeRes = await medusaServiceFetch(
@@ -31,32 +33,16 @@ async function notifyNewOrder(order: any) {
   const emailEnabled = notificationSettings?.settings?.new_order?.email ?? true
   if (!emailEnabled) return
   const to =
-    notificationSettings?.channels?.email || process.env.MEDUSA_ADMIN_EMAIL
+    notificationSettings?.channels?.email ||
+    process.env.STORE_OWNER_EMAIL ||
+    process.env.MEDUSA_ADMIN_EMAIL
   if (!to) return
-  const orderNumber = order.display_id ? `#${order.display_id}` : order.id
-  const customerName =
-    (order.customer
-      ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
-      : '') ||
-    order.email ||
-    'Guest'
-  const items = (order.items ?? [])
-    .map(
-      (i: any) =>
-        `<tr><td style="padding:4px 8px">${i.quantity} × ${i.product_title ?? i.title ?? 'Item'}</td><td style="padding:4px 8px;text-align:right">${fmt(i.unit_price * i.quantity)}</td></tr>`,
-    )
-    .join('')
+  const { subject, html, text } = adminNewOrderEmail(order, 'website')
   await sendMail({
     to,
-    subject: `New order ${orderNumber} — ${fmt(order.total)}`,
-    html: `
-      <h2>New order ${orderNumber}</h2>
-      <p><strong>Customer:</strong> ${customerName}${order.email ? ` (${order.email})` : ''}</p>
-      <table style="border-collapse:collapse;width:100%;max-width:480px">${items}</table>
-      <p style="margin-top:12px"><strong>Total: ${fmt(order.total)}</strong></p>
-      <p style="color:#6D7175;font-size:12px">Placed on the website — view it in the dashboard Orders page or on the POS Orders tab.</p>
-    `,
-    text: `New order ${orderNumber} — ${customerName} — Total ${fmt(order.total)}`,
+    subject,
+    html,
+    text,
   })
 }
 function storeHeaders(token?: string) {

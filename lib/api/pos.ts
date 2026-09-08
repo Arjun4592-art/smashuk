@@ -279,6 +279,7 @@ export async function markPOSOrderReturned(
     item_id: string
     quantity: number
   }[],
+  refundAmount?: number,
 ): Promise<{
   refund_amount: number
 }> {
@@ -292,6 +293,7 @@ export async function markPOSOrderReturned(
       body: JSON.stringify({
         reason,
         items,
+        ...(refundAmount !== undefined ? { refundAmount } : {}),
       }),
     })
     const data = await res.json().catch(() => ({}))

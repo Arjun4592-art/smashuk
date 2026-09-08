@@ -5,8 +5,8 @@ import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { getRemainingReturnableQty } from '@/lib/api/medusa-returns'
 import { fulfillOrder } from '@/lib/api/medusa-fulfillment'
 import { requireStripe } from '@/lib/stripe-server'
-import { notifyAdmin } from '@/lib/email'
-import { orderConfirmationEmail } from '@/lib/email-templates'
+import { notifyOwner } from '@/lib/email'
+import { adminNewOrderEmail } from '@/lib/email-templates'
 // Synthetic emails we generate ourselves for walk-in / no-email customers —
 // never send a "confirmation" to these, they're not real inboxes.
 const isSyntheticEmail = (email?: string) =>
@@ -799,8 +799,8 @@ export async function POST(request: NextRequest) {
         // "Email Receipt" action when the cashier chooses to send one.
         // Auto-sending a second "order confirmed" email here duplicated
         // that receipt for the customer, so it's admin-only now.
-        const { html, text } = orderConfirmationEmail(fullOrder ?? order)
-        notifyAdmin({
+        const { html, text } = adminNewOrderEmail(fullOrder ?? order, 'pos')
+        notifyOwner({
           subject: `New POS order ${orderNumber}`,
           html,
           text,
