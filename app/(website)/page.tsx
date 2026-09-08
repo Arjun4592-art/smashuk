@@ -30,7 +30,7 @@ const TRUST_FEATURES = [
   {
     icon: <RefreshIcon size={24} />,
     title: 'Easy Returns',
-    desc: '7-day hassle-free returns',
+    desc: '30-days hassle-free returns',
   },
   {
     icon: <HeartIcon size={24} />,
