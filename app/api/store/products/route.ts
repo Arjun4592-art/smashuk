@@ -87,11 +87,22 @@ export async function GET(req: NextRequest) {
     }
     const url = `${MEDUSA_URL}/store/products?${params.toString()}`
     const medusaStart = Date.now()
+    // A single-product lookup (handle set) drives the PDP's "In Stock" /
+    // "Only N left" copy — that must reflect the current inventory, not a
+    // snapshot from up to 60s (or longer, if the page wasn't hit again to
+    // trigger ISR revalidation) ago. Listing/search calls (no handle) keep
+    // the 60s cache since browse-page staleness doesn't risk overselling.
     const res = await fetch(url, {
       headers: STORE_HEADERS,
-      next: {
-        revalidate: 60,
-      },
+      ...(handle
+        ? {
+            cache: 'no-store' as const,
+          }
+        : {
+            next: {
+              revalidate: 60,
+            },
+          }),
     })
     const medusaMs = Date.now() - medusaStart
     if (!res.ok) {

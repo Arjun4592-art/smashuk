@@ -40,6 +40,18 @@ export interface BTPrinterHandle {
 let cachedDevice: BluetoothDevice | null = null
 let cachedChar: BluetoothRemoteGATTCharacteristic | null = null
 
+// cachedDevice/cachedChar only live for the current page session — a reload
+// wipes them even though connectionType + btHandle survive in localStorage
+// (see printerStore's persist middleware). To avoid forcing a manual
+// reconnect every reload, track disconnects and re-derive the device from
+// navigator.bluetooth.getDevices(), which returns devices the user has
+// already granted permission for in this origin.
+function trackDisconnect(device: BluetoothDevice) {
+  device.addEventListener('gattserverdisconnected', () => {
+    if (cachedDevice === device) cachedChar = null
+  })
+}
+
 // Must be called from a user gesture (click).
 export async function requestBluetoothPrinter(): Promise<BTPrinterHandle> {
   assertSupported()
@@ -48,7 +60,28 @@ export async function requestBluetoothPrinter(): Promise<BTPrinterHandle> {
     optionalServices: PRINTER_SERVICE_CANDIDATES,
   })
   cachedDevice = device
+  cachedChar = null
+  trackDisconnect(device)
   return { id: device.id, name: device.name }
+}
+
+// Recovers the BluetoothDevice for an already-granted handle without
+// prompting the user again — either the in-memory cache from this session,
+// or (if the browser supports it) a previously-granted device returned by
+// navigator.bluetooth.getDevices().
+async function getGrantedDevice(
+  handle: BTPrinterHandle,
+): Promise<BluetoothDevice | null> {
+  if (cachedDevice && cachedDevice.id === handle.id) return cachedDevice
+  if (!navigator.bluetooth.getDevices) return null
+  const devices = await navigator.bluetooth.getDevices()
+  const match = devices.find((d) => d.id === handle.id) ?? null
+  if (match) {
+    cachedDevice = match
+    cachedChar = null
+    trackDisconnect(match)
+  }
+  return match
 }
 
 async function resolveCharacteristic(
@@ -87,13 +120,14 @@ export async function printViaBluetooth(
   data: Uint8Array,
 ): Promise<void> {
   assertSupported()
-  if (!cachedDevice || cachedDevice.id !== handle.id) {
+  const device = await getGrantedDevice(handle)
+  if (!device) {
     throw new Error(
-      'Bluetooth printer needs to be reconnected — tap "Connect" in Settings → Printer (browser permission does not persist across restarts).',
+      'Bluetooth printer needs to be reconnected — tap "Connect" in Settings → Printer (this browser doesn\u2019t support silent reconnect, or the permission was revoked).',
     )
   }
   if (!cachedChar) {
-    cachedChar = await resolveCharacteristic(cachedDevice)
+    cachedChar = await resolveCharacteristic(device)
   }
   // BLE has a small MTU (~20 bytes default, up to ~512 negotiated); chunk
   // conservatively so we don't overflow on printers that don't negotiate up.

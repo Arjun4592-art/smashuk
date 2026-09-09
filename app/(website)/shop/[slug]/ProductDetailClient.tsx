@@ -94,15 +94,40 @@ function sortOptionValues(values: string[]): string[] {
   return values
 }
 
-/** Builds option groups from a product, with values sorted into a natural order. */
+/**
+ * Builds option groups from a product, with values sorted into a natural order.
+ *
+ * `product.options[].values` from Medusa lists every value that has ever
+ * been created for that option (including stale/duplicate ones left behind
+ * by CSV imports or admin edits), not just the ones this product's variants
+ * actually use. The admin "variants" view only ever shows variant-linked
+ * values, so we filter down to the same set here to keep the storefront in
+ * sync with what's really purchasable.
+ */
 function buildOptionGroups(product: any) {
-  return (product.options ?? []).map((opt: any) => ({
-    id: opt.id,
-    title: opt.title,
-    values: sortOptionValues(
-      (opt.values?.map((v: any) => v.value) ?? []) as string[],
-    ),
-  }))
+  const variants: any[] = product.variants ?? []
+
+  return (product.options ?? []).map((opt: any) => {
+    const usedValues = new Set<string>()
+    for (const v of variants) {
+      const entry = v.options?.find((o: any) => o.option_id === opt.id)
+      if (entry?.value) usedValues.add(entry.value)
+    }
+
+    const allValues = (opt.values?.map((v: any) => v.value) ?? []) as string[]
+    // Fall back to the unfiltered list if we couldn't match anything against
+    // variants (e.g. malformed data), so we never render an empty selector.
+    const values =
+      usedValues.size > 0
+        ? allValues.filter((v) => usedValues.has(v))
+        : allValues
+
+    return {
+      id: opt.id,
+      title: opt.title,
+      values: sortOptionValues(values),
+    }
+  })
 }
 
 /**

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   usePrinterStore,
@@ -17,27 +17,50 @@ import {
   BluetoothPrinterNotSupportedError,
 } from '@/lib/printer/bluetooth-transport'
 import {
+  requestSerialPrinter,
+  disconnectSerialPrinter,
+  SerialPrinterNotSupportedError,
+} from '@/lib/printer/serial-transport'
+import {
   printTestPage,
   NoPrinterConnectedError,
 } from '@/lib/printer/print-receipt'
+import { printTestPageViaBrowser } from '@/lib/printer/browser-print'
 
-const OPTIONS: {
+interface PrinterOption {
   type: PrinterConnectionType
   label: string
   icon: string
   desc: string
-}[] = [
+  recommended?: boolean
+  unsupportedReason?: string
+}
+
+const ALL_OPTIONS: PrinterOption[] = [
+  {
+    type: 'browser',
+    label: 'Browser / System',
+    icon: '🖨️',
+    desc: 'Uses your device’s normal print dialog. Works on every OS — the right choice for Mac/iPad, or for a printer paired in OS Bluetooth settings (e.g. Star TSP100).',
+    recommended: true,
+  },
   {
     type: 'usb',
     label: 'USB',
     icon: '🔌',
-    desc: 'Plugged in directly with a cable',
+    desc: 'Plugged in directly with a cable. Chrome or Edge only.',
   },
   {
     type: 'bluetooth',
-    label: 'Bluetooth',
+    label: 'Bluetooth (BLE)',
     icon: '📶',
-    desc: 'BLE printers only — classic Bluetooth (SPP) printers aren\u2019t supported by the browser',
+    desc: 'BLE printers only, Chrome/Edge only. Most budget thermal printers (incl. Star TSP100) use classic Bluetooth (SPP) instead — use Pair (Serial) or Browser/System for those.',
+  },
+  {
+    type: 'serial',
+    label: 'Pair (Serial)',
+    icon: '🔗',
+    desc: 'Pairs directly with a classic Bluetooth (SPP) printer like the Star TSP100 — pick its port once, prints go straight through after. Chrome/Edge on Windows/macOS/Linux only.',
   },
   {
     type: 'network',
@@ -47,6 +70,43 @@ const OPTIONS: {
   },
 ]
 
+// WebUSB and Web Bluetooth are Chrome/Edge-only APIs — Safari (macOS and
+// iPadOS alike) implements neither, so those tiles would just fail every
+// time on a Mac or iPad. Detect support and grey them out with an
+// explanation instead of letting the person tap into a dead end.
+function useSupportedOptions(): PrinterOption[] {
+  return useMemo(() => {
+    const hasUSB = typeof navigator !== 'undefined' && 'usb' in navigator
+    const hasBluetooth =
+      typeof navigator !== 'undefined' && 'bluetooth' in navigator
+    const hasSerial = typeof navigator !== 'undefined' && 'serial' in navigator
+    return ALL_OPTIONS.map((opt) => {
+      if (opt.type === 'usb' && !hasUSB) {
+        return {
+          ...opt,
+          unsupportedReason:
+            'Not supported in this browser — try Chrome/Edge, or use Browser/System instead.',
+        }
+      }
+      if (opt.type === 'bluetooth' && !hasBluetooth) {
+        return {
+          ...opt,
+          unsupportedReason:
+            'Not supported in this browser — try Chrome/Edge, or use Browser/System instead.',
+        }
+      }
+      if (opt.type === 'serial' && !hasSerial) {
+        return {
+          ...opt,
+          unsupportedReason:
+            'Not supported in this browser (or on Mac/iPad Safari) — use Browser/System instead.',
+        }
+      }
+      return opt
+    })
+  }, [])
+}
+
 export default function PrinterSetup() {
   const {
     connectionType,
@@ -54,12 +114,14 @@ export default function PrinterSetup() {
     usbHandle,
     btHandle,
     networkHandle,
+    serialHandle,
     openDrawerOnPrint,
     setConnectionType,
     setPaperWidth,
     setUSBHandle,
     setBTHandle,
     setNetworkHandle,
+    setSerialHandle,
     setOpenDrawerOnPrint,
     disconnect,
   } = usePrinterStore()
@@ -68,6 +130,7 @@ export default function PrinterSetup() {
   const [usbOk, setUsbOk] = useState<boolean | null>(null)
   const [host, setHost] = useState(networkHandle?.host ?? '')
   const [port, setPort] = useState(String(networkHandle?.port ?? 9100))
+  const options = useSupportedOptions()
 
   useEffect(() => {
     if (connectionType === 'usb' && usbHandle) {
@@ -124,6 +187,67 @@ export default function PrinterSetup() {
     }
   }
 
+  // Same picker shape as USB/Bluetooth above, but for a serial/COM port —
+  // this is what reaches a classic Bluetooth (SPP) printer, since it shows
+  // up as a virtual port once paired in the OS's own Bluetooth settings.
+  const connectSerial = async () => {
+    setBusy(true)
+    try {
+      const handle = await requestSerialPrinter()
+      setSerialHandle(handle)
+      setConnectionType('serial')
+      toast.success(`Paired with ${handle.label}`)
+    } catch (err: unknown) {
+      if (err instanceof SerialPrinterNotSupportedError) {
+        toast.error('Not supported', { description: err.message })
+      } else if (err instanceof Error && err.name === 'NotFoundError') {
+        // user cancelled the picker
+      } else {
+        toast.error('Could not pair printer', {
+          description: err instanceof Error ? err.message : 'Unknown error',
+        })
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Unlike USB/Bluetooth, there's no browser API that can confirm a real
+  // printer is present before we "connect" — the OS print dialog is the
+  // only place that ever shows an actual printer list. So selecting this
+  // option immediately opens that dialog (via a test page) instead of
+  // just flipping a switch to "Connected" on faith. If the dialog can't
+  // even be opened, we roll the selection back rather than claim success.
+  const connectBrowser = async () => {
+    setBusy(true)
+    try {
+      // Opening the dialog only proves the dialog opened — it doesn't
+      // prove the person picked the right destination or that paper
+      // actually came out. There's no browser API that can tell us that,
+      // so we ask directly instead of assuming success. Only a "yes" here
+      // marks it connected.
+      await printTestPageViaBrowser(paperWidth)
+      const confirmed = window.confirm(
+        'Did the test page print correctly on your receipt printer?\n\nClick OK only if it actually printed. Click Cancel to try again.',
+      )
+      if (!confirmed) {
+        toast.error('Not connected', {
+          description:
+            'Pick your printer as the destination in the print dialog, then try again.',
+        })
+        return
+      }
+      setConnectionType('browser')
+      toast.success('Printer connected')
+    } catch (err: unknown) {
+      toast.error('Could not open the print dialog', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const saveNetwork = () => {
     const trimmedHost = host.trim()
     const portNum = parseInt(port, 10)
@@ -142,6 +266,7 @@ export default function PrinterSetup() {
 
   const handleDisconnect = () => {
     if (connectionType === 'bluetooth') disconnectBluetoothPrinter()
+    if (connectionType === 'serial') disconnectSerialPrinter()
     disconnect()
     toast.success('Printer disconnected')
   }
@@ -173,7 +298,11 @@ export default function PrinterSetup() {
         ? btHandle?.name || 'Bluetooth printer'
         : connectionType === 'network'
           ? `${networkHandle?.host}:${networkHandle?.port}`
-          : null
+          : connectionType === 'browser'
+            ? 'System print dialog'
+            : connectionType === 'serial'
+              ? serialHandle?.label || 'Paired serial printer'
+              : null
 
   return (
     <div className='rounded-xl overflow-hidden bg-white border border-gray-200'>
@@ -211,29 +340,44 @@ export default function PrinterSetup() {
             </button>
           </div>
         ) : (
-          <div className='grid grid-cols-1 sm:grid-cols-3 gap-2'>
-            {OPTIONS.map((opt) => (
-              <button
-                key={opt.type}
-                disabled={busy}
-                onClick={() =>
-                  opt.type === 'usb'
-                    ? connectUSB()
-                    : opt.type === 'bluetooth'
-                      ? connectBluetooth()
-                      : setConnectionType('network')
-                }
-                className='flex flex-col items-start text-left px-4 py-3 rounded-lg border border-gray-200 hover:border-[#008060] hover:bg-[#F2F7F5] transition-colors disabled:opacity-50'
-              >
-                <span className='text-lg'>{opt.icon}</span>
-                <span className='text-sm font-semibold text-gray-800 mt-1'>
-                  {opt.label}
-                </span>
-                <span className='text-[11px] text-gray-500 mt-0.5 leading-snug'>
-                  {opt.desc}
-                </span>
-              </button>
-            ))}
+          <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2'>
+            {options.map((opt) => {
+              const disabled = busy || !!opt.unsupportedReason
+              return (
+                <button
+                  key={opt.type}
+                  disabled={disabled}
+                  title={opt.unsupportedReason}
+                  onClick={() =>
+                    opt.type === 'usb'
+                      ? connectUSB()
+                      : opt.type === 'bluetooth'
+                        ? connectBluetooth()
+                        : opt.type === 'serial'
+                          ? connectSerial()
+                          : opt.type === 'browser'
+                            ? connectBrowser()
+                            : setConnectionType('network')
+                  }
+                  className='flex flex-col items-start text-left px-4 py-3 rounded-lg border border-gray-200 hover:border-[#008060] hover:bg-[#F2F7F5] transition-colors disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:bg-transparent'
+                >
+                  <span className='flex items-center gap-1.5 w-full'>
+                    <span className='text-lg'>{opt.icon}</span>
+                    {opt.recommended && (
+                      <span className='text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#F2F7F5] text-[#008060]'>
+                        Recommended
+                      </span>
+                    )}
+                  </span>
+                  <span className='text-sm font-semibold text-gray-800 mt-1'>
+                    {opt.label}
+                  </span>
+                  <span className='text-[11px] text-gray-500 mt-0.5 leading-snug'>
+                    {opt.unsupportedReason ?? opt.desc}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         )}
 

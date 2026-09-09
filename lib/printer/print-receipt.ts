@@ -7,6 +7,8 @@ import {
 import { printViaUSB, isUSBPrinterAvailable } from './usb-transport'
 import { printViaBluetooth } from './bluetooth-transport'
 import { printViaNetwork } from './network-transport'
+import { printTestPageViaBrowser } from './browser-print'
+import { printViaSerial, isSerialPrinterAvailable } from './serial-transport'
 
 export class NoPrinterConnectedError extends Error {
   constructor() {
@@ -20,7 +22,7 @@ export class NoPrinterConnectedError extends Error {
 // fall back to window.print() in that case), or the transport's own error
 // (with a human-readable message) if the configured printer can't be reached.
 async function sendToConfiguredPrinter(bytes: Uint8Array): Promise<void> {
-  const { connectionType, usbHandle, btHandle, networkHandle } =
+  const { connectionType, usbHandle, btHandle, networkHandle, serialHandle } =
     usePrinterStore.getState()
 
   switch (connectionType) {
@@ -45,6 +47,17 @@ async function sendToConfiguredPrinter(bytes: Uint8Array): Promise<void> {
       await printViaNetwork(networkHandle, bytes)
       return
     }
+    case 'serial': {
+      if (!serialHandle) throw new NoPrinterConnectedError()
+      const available = await isSerialPrinterAvailable(serialHandle)
+      if (!available) {
+        throw new Error(
+          'Serial printer not detected. Check the pairing, or reconnect it in Settings → Printer.',
+        )
+      }
+      await printViaSerial(serialHandle, bytes)
+      return
+    }
     default:
       throw new NoPrinterConnectedError()
   }
@@ -57,7 +70,14 @@ export async function printReceipt(data: ReceiptData): Promise<void> {
 }
 
 export async function printTestPage(): Promise<void> {
-  const { paperWidth } = usePrinterStore.getState()
+  const { connectionType, paperWidth } = usePrinterStore.getState()
+  // Browser/OS printing doesn't take raw ESC/POS bytes — it prints an HTML
+  // page through window.print(), so it's handled separately here rather
+  // than in sendToConfiguredPrinter (which only ever sees Uint8Array).
+  if (connectionType === 'browser') {
+    await printTestPageViaBrowser(paperWidth)
+    return
+  }
   const bytes = buildTestPrintEscPos(paperWidth)
   await sendToConfiguredPrinter(bytes)
 }

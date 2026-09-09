@@ -1,8 +1,3 @@
-// Minimal ambient declarations for the WebUSB and Web Bluetooth APIs.
-// These browser APIs aren't part of TypeScript's default DOM lib. If you
-// later install `@types/w3c-web-usb` and/or `@types/web-bluetooth`, remove
-// this file (or the relevant half of it) to avoid duplicate declarations.
-
 interface USBEndpoint {
   endpointNumber: number
   direction: 'in' | 'out'
@@ -63,6 +58,7 @@ interface USB {
 interface Navigator {
   usb: USB
   bluetooth: Bluetooth
+  serial: Serial
 }
 
 interface Bluetooth {
@@ -104,4 +100,40 @@ interface BluetoothRemoteGATTCharacteristic {
   writeValueWithoutResponse?(value: BufferSource): Promise<void>
   writeValueWithResponse?(value: BufferSource): Promise<void>
   writeValue(value: BufferSource): Promise<void>
+}
+// --- Web Serial ---------------------------------------------------------
+// Lets the person explicitly *pair* with a serial (or Bluetooth-classic
+// SPP, which Windows/macOS/Linux expose as a virtual serial/COM port once
+// paired in OS Bluetooth settings) printer via a native picker — the same
+// kind of one-time "pick the device" flow as WebUSB/Web Bluetooth above,
+// just for ports instead of USB/BLE devices. Chrome/Edge desktop only.
+
+interface SerialPortInfo {
+  usbVendorId?: number
+  usbProductId?: number
+}
+
+interface SerialOptions {
+  baudRate: number
+}
+
+interface SerialPort {
+  writable: WritableStream<Uint8Array> | null
+  open(options: SerialOptions): Promise<void>
+  close(): Promise<void>
+  getInfo(): SerialPortInfo
+}
+
+interface SerialPortFilter {
+  usbVendorId?: number
+  usbProductId?: number
+}
+
+interface SerialPortRequestOptions {
+  filters?: SerialPortFilter[]
+}
+
+interface Serial {
+  requestPort(options?: SerialPortRequestOptions): Promise<SerialPort>
+  getPorts(): Promise<SerialPort[]>
 }

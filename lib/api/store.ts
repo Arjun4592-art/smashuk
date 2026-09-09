@@ -271,6 +271,7 @@ function buildProductUrl(
 async function fetchProducts(
   params: Record<string, string | undefined>,
   light?: boolean,
+  fresh?: boolean,
 ) {
   const isServer = typeof window === 'undefined'
   const headers: Record<string, string> = {
@@ -282,16 +283,29 @@ async function fetchProducts(
   }
   const regionId = isServer ? await getServerRegionId() : null
   const url = buildProductUrl(params, regionId, light)
-  const label = `[fetchProducts] ${params.handle ?? params.id ?? params.q ?? 'list'} offset=${params.offset ?? '0'} limit=${params.limit ?? '?'} light=${!!light}`
+  const label = `[fetchProducts] ${params.handle ?? params.id ?? params.q ?? 'list'} offset=${params.offset ?? '0'} limit=${params.limit ?? '?'} light=${!!light} fresh=${!!fresh}`
   const t0 = Date.now()
   const res = await fetch(url, {
     headers,
+    // Single-product lookups (PDP, gift card page, add-to-cart validation)
+    // drive the "In Stock" / "Only N left" copy and the max-quantity cap the
+    // customer can actually check out with. A 60s ISR window means a page
+    // that isn't re-visited for a while can keep serving a stock number from
+    // *before* the last sale or a manual admin adjustment — e.g. showing
+    // "4 units left" when the variant now has only 2 units in stock (well
+    // below the required_quantity of 10, i.e. genuinely 0 sellable). Product
+    // *listing/browse* pages stay on the 60s cache for speed since a couple
+    // of req/min lag there doesn't cause overselling.
     ...(isServer
-      ? {
-          next: {
-            revalidate: 60,
-          },
-        }
+      ? fresh
+        ? {
+            cache: 'no-store' as const,
+          }
+        : {
+            next: {
+              revalidate: 60,
+            },
+          }
       : {}),
   })
   if (!res.ok) {
@@ -336,10 +350,14 @@ export async function getProducts(params?: {
   }
 }
 export async function getProduct(handle: string) {
-  const data = await fetchProducts({
-    handle,
-    limit: '1',
-  })
+  const data = await fetchProducts(
+    {
+      handle,
+      limit: '1',
+    },
+    false,
+    true, // fresh: single-product stock/price must never be served stale
+  )
   return data.products?.[0] ?? null
 }
 const PRODUCTS_PAGE_SIZE = 100
