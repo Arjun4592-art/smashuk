@@ -153,6 +153,45 @@ export function setLocalStorage<T>(key: string, value: T): void {
     console.error('Failed to save to localStorage')
   }
 }
+/**
+ * The receipt's QR/tracking code is loaded from an external image URL. If
+ * window.print() fires before that image finishes loading, Chrome prints
+ * the receipt with the QR code missing (blank space, no barcode). Call this
+ * right before window.print() to make sure every image inside the given
+ * selector has actually loaded (or failed) first.
+ */
+export function waitForPrintImages(
+  selector = '.print-receipt',
+  timeoutMs = 3000,
+): Promise<void> {
+  if (typeof document === 'undefined') return Promise.resolve()
+  const container = document.querySelector(selector)
+  if (!container) return Promise.resolve()
+  const images = Array.from(container.querySelectorAll('img'))
+  const pending = images.filter((img) => !img.complete)
+  if (pending.length === 0) return Promise.resolve()
+  return new Promise((resolve) => {
+    let remaining = pending.length
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    const timer = setTimeout(done, timeoutMs)
+    pending.forEach((img) => {
+      const onSettle = () => {
+        remaining -= 1
+        if (remaining <= 0) {
+          clearTimeout(timer)
+          done()
+        }
+      }
+      img.addEventListener('load', onSettle, { once: true })
+      img.addEventListener('error', onSettle, { once: true })
+    })
+  })
+}
 export function playScanBeep(): void {
   if (typeof window === 'undefined') return
   try {

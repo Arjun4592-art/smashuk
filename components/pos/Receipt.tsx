@@ -8,6 +8,7 @@ import {
   SITE_LOGO,
   VAT_RATE,
 } from '@/lib/constants'
+import qrcodegen from 'qrcode-generator'
 import type { CartDisplayItem } from '@/types'
 interface ShippingAddress {
   first_name: string
@@ -55,6 +56,19 @@ const PAY_LABELS: Record<string, string> = {
 }
 function cashRounding(total: number) {
   return Math.ceil(total) - total
+}
+/**
+ * Generates the tracking QR code locally (no network call). The receipt used
+ * to fetch this from an external API (api.qrserver.com), which meant the
+ * QR code silently went missing from prints whenever that request was slow,
+ * blocked (ad blockers/offline tills), or simply hadn't finished before
+ * window.print() fired.
+ */
+function qrDataUrl(text: string): string {
+  const qr = qrcodegen(0, 'M')
+  qr.addData(text)
+  qr.make()
+  return qr.createDataURL(4, 0)
 }
 export default function Receipt({
   orderId,
@@ -314,6 +328,12 @@ export default function Receipt({
             padding: 0;
             background: #fff !important;
           }
+          .pos-terminal-shell,
+          .pos-terminal-main {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+          }
           body * {
             visibility: hidden;
           }
@@ -331,7 +351,7 @@ export default function Receipt({
     </div>
   )
 }
-function ReceiptBody({
+export function ReceiptBody({
   orderId,
   items,
   subtotal,
@@ -388,7 +408,7 @@ function ReceiptBody({
     : ''
   const showShipTo = fulfillmentType === 'ship' && !!shippingAddress?.address_1
   const trackingUrl = `${SITE_URL}/orders/${encodeURIComponent(orderId)}`
-  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=0&data=${encodeURIComponent(trackingUrl)}`
+  const qrSrc = qrDataUrl(trackingUrl)
   if (printMode) {
     return (
       <div
@@ -416,6 +436,11 @@ function ReceiptBody({
               height: '9mm',
               width: 'auto',
               margin: '0 auto',
+              // Receipts print in black only (thermal printers, B&W print
+              // settings). The logo file has brand colours (navy + red)
+              // which render as a muddy grey blob in mono printing —
+              // force it to solid black so it stays crisp.
+              filter: 'brightness(0)',
             }}
           />
           <div

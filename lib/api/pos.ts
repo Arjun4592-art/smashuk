@@ -239,6 +239,7 @@ export interface PosOrderRecord {
   customer: {
     name: string
     phone?: string
+    email?: string
   } | null
   subtotal: number
   discountTotal: number

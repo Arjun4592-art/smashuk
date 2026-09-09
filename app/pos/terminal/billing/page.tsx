@@ -22,7 +22,11 @@ import VoidModal from '@/components/pos/VoidModal'
 import SavedCarts from '@/components/pos/SavedCarts'
 import ReturnModal from '@/components/pos/ReturnModal'
 import EmailReceiptModal from '@/components/pos/EmailReceiptModal'
-import { generateOrderNumber, playScanBeep } from '@/lib/utils'
+import {
+  generateOrderNumber,
+  playScanBeep,
+  waitForPrintImages,
+} from '@/lib/utils'
 import type { CartDisplayItem } from '@/types'
 import { toast } from 'sonner'
 import {
@@ -365,6 +369,7 @@ export default function BillingPage() {
     const { connectionType } = usePrinterStore.getState()
     if (connectionType === 'none') {
       // No hardware printer configured — use the browser's print dialog.
+      await waitForPrintImages()
       window.print()
       return
     }
@@ -424,6 +429,7 @@ export default function BillingPage() {
       })
     } catch (err: unknown) {
       if (err instanceof NoPrinterConnectedError) {
+        await waitForPrintImages()
         window.print()
         return
       }
@@ -433,6 +439,7 @@ export default function BillingPage() {
             ? err.message
             : 'Unknown error — falling back to browser print.',
       })
+      await waitForPrintImages()
       window.print()
     }
   }, [

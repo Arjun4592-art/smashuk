@@ -1,7 +1,24 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { CURRENCY_SYMBOL, SITE_NAME } from '@/lib/constants'
+import { toast } from 'sonner'
+import {
+  CURRENCY_SYMBOL,
+  SITE_NAME,
+  STORE_DISPLAY_NAME,
+  STORE_ADDRESS_LINE1,
+  STORE_ADDRESS_LINE2,
+  CONTACT_PHONE,
+  VAT_RATE,
+} from '@/lib/constants'
+import { usePrinterStore } from '@/store/printerStore'
+import {
+  printReceipt,
+  NoPrinterConnectedError,
+} from '@/lib/printer/print-receipt'
+import { ReceiptBody } from './Receipt'
+import { waitForPrintImages } from '@/lib/utils'
+import type { CartDisplayItem } from '@/types'
 const fmt = (n: number) => CURRENCY_SYMBOL + (Number(n) || 0).toFixed(2)
 const PAY_LABELS: Record<string, string> = {
   cash: 'Cash',
@@ -27,6 +44,7 @@ export interface OrderDetailData {
   customer: {
     name: string
     phone?: string
+    email?: string
   } | null
   subtotal: number
   discountTotal: number
@@ -130,12 +148,82 @@ export default function OrderDetailModal({
     hour: '2-digit',
     minute: '2-digit',
   })
-  const handlePrint = () => window.print()
+  const receiptItems: CartDisplayItem[] = order.items.map((i) => ({
+    id: i.id,
+    name: i.name,
+    brand: i.brand ?? '',
+    price: i.price,
+    quantity: i.quantity,
+    sku: '',
+    stock: 0,
+    category: '',
+  }))
+  const rounding =
+    order.paymentMethod === 'cash' ? Math.ceil(order.total) - order.total : 0
+  const adjustedTotal = order.total + rounding
+  const change = order.paymentMethod === 'cash' ? rounding : 0
+  const canPrintReceipt = !!(order.medusaOrderId || order.id)
+  const handlePrintReceipt = async () => {
+    const { connectionType } = usePrinterStore.getState()
+    if (connectionType === 'none') {
+      // No hardware printer configured — use the browser's print dialog.
+      await waitForPrintImages()
+      window.print()
+      return
+    }
+    try {
+      await printReceipt({
+        storeName: STORE_DISPLAY_NAME,
+        addressLine1: STORE_ADDRESS_LINE1,
+        addressLine2: STORE_ADDRESS_LINE2,
+        phone: CONTACT_PHONE,
+        orderId: order.medusaOrderId ?? order.id,
+        dateStr,
+        timeStr,
+        cashier: order.cashier,
+        items: order.items.map((i) => ({
+          name: i.name,
+          quantity: i.quantity,
+          lineTotal: i.price * i.quantity,
+        })),
+        subtotal: order.subtotal,
+        discountAmount: order.discountTotal,
+        discountLabel: 'Discount',
+        giftCardAmount: 0,
+        tax: order.tax,
+        vatPct: Math.round(VAT_RATE * 100),
+        total: order.total,
+        rounding: 0,
+        payMethodLabel: PAY_LABELS[order.paymentMethod] || order.paymentMethod,
+        change: 0,
+        splitPayments: order.splitPayments?.map((s) => ({
+          label: PAY_LABELS[s.method] || s.method,
+          amount: s.amount,
+        })),
+        orderNote: order.note,
+        currencySymbol: CURRENCY_SYMBOL,
+      })
+    } catch (err: unknown) {
+      if (err instanceof NoPrinterConnectedError) {
+        await waitForPrintImages()
+        window.print()
+        return
+      }
+      toast.error('Could not print to receipt printer', {
+        description:
+          err instanceof Error
+            ? err.message
+            : 'Unknown error — falling back to browser print.',
+      })
+      await waitForPrintImages()
+      window.print()
+    }
+  }
   return (
     <>
       {}
       <div
-        className='fixed inset-0 z-50'
+        className='order-detail-backdrop fixed inset-0 z-50'
         style={{
           background: 'rgba(0,0,0,0.4)',
           opacity: mounted ? 1 : 0,
@@ -176,6 +264,43 @@ export default function OrderDetailModal({
               padding: 12px !important;
               padding-bottom: max(16px, env(safe-area-inset-bottom, 16px)) !important;
             }
+            @media print {
+              @page {
+                size: 80mm auto;
+                margin: 0;
+              }
+              html, body {
+                width: 80mm;
+                margin: 0;
+                padding: 0;
+                background: #fff !important;
+              }
+              /* The POS shell locks itself to 100dvh with overflow hidden so
+                 the app fits the screen — that fixed height confuses Chrome's
+                 print pagination and forces a full Letter/A4 page even though
+                 @page above says 80mm. Free it up during print. */
+              .pos-terminal-shell,
+              .pos-terminal-main {
+                height: auto !important;
+                min-height: 0 !important;
+                overflow: visible !important;
+              }
+              #pos-orders-scroll-area {
+                display: none !important;
+              }
+              body * {
+                visibility: hidden;
+              }
+              .print-receipt, .print-receipt * {
+                visibility: visible;
+              }
+              .print-receipt {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 80mm;
+              }
+            }
           `}</style>
 
           {}
@@ -190,7 +315,7 @@ export default function OrderDetailModal({
 
           {}
           <div
-            className='flex items-center justify-between px-4 py-3 shrink-0'
+            className='order-detail-header flex items-center justify-between px-4 py-3 shrink-0'
             style={{
               borderBottom: '1px solid #E1E3E5',
             }}
@@ -775,8 +900,9 @@ export default function OrderDetailModal({
 
             <div className='flex gap-2'>
               <button
-                onClick={handlePrint}
-                className='flex-1 min-w-0 py-3 rounded-lg text-sm font-medium border transition-colors hover:bg-[#F6F6F7] flex items-center justify-center gap-2'
+                onClick={handlePrintReceipt}
+                disabled={!canPrintReceipt}
+                className='flex-1 min-w-0 py-3 rounded-lg text-sm font-medium border transition-colors hover:bg-[#F6F6F7] disabled:opacity-50 flex items-center justify-center gap-2'
                 style={{
                   borderColor: '#E1E3E5',
                   color: '#202223',
@@ -790,13 +916,14 @@ export default function OrderDetailModal({
                   stroke='currentColor'
                   strokeWidth='1.8'
                   strokeLinecap='round'
+                  strokeLinejoin='round'
                   className='shrink-0'
                 >
                   <polyline points='6 9 6 2 18 2 18 9' />
                   <path d='M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2' />
                   <rect x='6' y='14' width='12' height='8' />
                 </svg>
-                <span className='truncate'>Send receipt</span>
+                <span className='truncate'>Print receipt</span>
               </button>
 
               {!order.returned && !isAwaitingPickup(order) && !canFulfill && (
@@ -827,6 +954,27 @@ export default function OrderDetailModal({
             </div>
           </div>
         </div>
+      </div>
+
+      {}
+      <div className='hidden print:block print-receipt'>
+        <ReceiptBody
+          orderId={order.medusaOrderId ?? order.id}
+          items={receiptItems}
+          subtotal={order.subtotal}
+          discountAmount={order.discountTotal}
+          gst={order.tax}
+          total={order.total}
+          payMethod={order.paymentMethod}
+          splitPayments={order.splitPayments}
+          cashier={order.cashier}
+          dateStr={dateStr}
+          timeStr={timeStr}
+          rounding={rounding}
+          adjustedTotal={adjustedTotal}
+          change={change}
+          printMode
+        />
       </div>
     </>
   )

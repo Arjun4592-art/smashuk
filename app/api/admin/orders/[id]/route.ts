@@ -18,8 +18,14 @@ import { randomUUID } from 'crypto'
 import { sendMail, notifyOwner } from '@/lib/email'
 import {
   shippingConfirmationEmail,
+  outForDeliveryEmail,
+  deliveryConfirmationEmail,
+  orderCancelledEmail,
   refundConfirmationEmail,
   adminShippingEmail,
+  adminOutForDeliveryEmail,
+  adminDeliveryEmail,
+  adminCancelledEmail,
   adminRefundEmail,
 } from '@/lib/email-templates'
 export async function GET(
@@ -199,6 +205,34 @@ export async function PATCH(
             },
           )
         }
+        try {
+          const orderRes = await fetcher(
+            `/admin/orders/${id}?fields=id,display_id,email,*items`,
+          )
+          const orderData = await orderRes.json().catch(() => ({}))
+          const fullOrder = orderData?.order
+          if (fullOrder?.email) {
+            const { subject, html, text } = orderCancelledEmail(fullOrder)
+            await sendMail({
+              to: fullOrder.email,
+              subject,
+              html,
+              text,
+            })
+            const adminEmail = adminCancelledEmail(fullOrder)
+            notifyOwner({
+              subject: adminEmail.subject,
+              html: adminEmail.html,
+              text: adminEmail.text,
+              customerEmail: fullOrder.email,
+            }).catch(() => {})
+          }
+        } catch (cancelEmailErr) {
+          console.error(
+            `[order cancel] cancellation email failed for ${id}:`,
+            cancelEmailErr,
+          )
+        }
         break
       }
       case 'archive': {
@@ -317,6 +351,68 @@ export async function PATCH(
         }
         break
       }
+      case 'out-for-delivery': {
+        const orderRes = await fetcher(
+          `/admin/orders/${id}?fields=id,display_id,email,metadata,*items,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
+        )
+        const orderData = await orderRes.json().catch(() => ({}))
+        const fullOrder = orderData?.order
+        if (!orderRes.ok || !fullOrder) {
+          return NextResponse.json(
+            {
+              error: 'Order not found',
+            },
+            {
+              status: 404,
+            },
+          )
+        }
+        if (fullOrder.metadata?.out_for_delivery_notified_at) {
+          data = { alreadyNotified: true }
+          break
+        }
+        if (fullOrder.email) {
+          try {
+            const { subject, html, text } = outForDeliveryEmail(fullOrder)
+            await sendMail({
+              to: fullOrder.email,
+              subject,
+              html,
+              text,
+            })
+            const adminEmail = adminOutForDeliveryEmail(fullOrder)
+            notifyOwner({
+              subject: adminEmail.subject,
+              html: adminEmail.html,
+              text: adminEmail.text,
+              customerEmail: fullOrder.email,
+            }).catch(() => {})
+          } catch (outForDeliveryEmailErr) {
+            console.error(
+              `[order out-for-delivery] email failed for ${id}:`,
+              outForDeliveryEmailErr,
+            )
+          }
+        }
+        try {
+          await fetcher(`/admin/orders/${id}`, {
+            method: 'POST',
+            body: JSON.stringify({
+              metadata: {
+                ...(fullOrder.metadata ?? {}),
+                out_for_delivery_notified_at: new Date().toISOString(),
+              },
+            }),
+          })
+        } catch (metaErr) {
+          console.error(
+            `[order out-for-delivery] metadata flag update failed for ${id}:`,
+            metaErr,
+          )
+        }
+        data = { notified: true }
+        break
+      }
       case 'deliver': {
         try {
           data = await markOrderDelivered(id, fetcher)
@@ -329,6 +425,37 @@ export async function PATCH(
               status: 400,
             },
           )
+        }
+        if (!data?.alreadyDelivered) {
+          try {
+            const orderRes = await fetcher(
+              `/admin/orders/${id}?fields=id,display_id,email,*items`,
+            )
+            const orderData = await orderRes.json().catch(() => ({}))
+            const fullOrder = orderData?.order
+            if (fullOrder?.email) {
+              const { subject, html, text } =
+                deliveryConfirmationEmail(fullOrder)
+              await sendMail({
+                to: fullOrder.email,
+                subject,
+                html,
+                text,
+              })
+              const adminEmail = adminDeliveryEmail(fullOrder)
+              notifyOwner({
+                subject: adminEmail.subject,
+                html: adminEmail.html,
+                text: adminEmail.text,
+                customerEmail: fullOrder.email,
+              }).catch(() => {})
+            }
+          } catch (deliverEmailErr) {
+            console.error(
+              `[order deliver] delivery confirmation email failed for ${id}:`,
+              deliverEmailErr,
+            )
+          }
         }
         break
       }

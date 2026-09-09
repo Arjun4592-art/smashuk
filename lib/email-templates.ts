@@ -22,6 +22,9 @@ function statusBadge(
   kind:
     | 'confirmed'
     | 'shipped'
+    | 'out_for_delivery'
+    | 'delivered'
+    | 'cancelled'
     | 'refunded'
     | 'welcome'
     | 'admin'
@@ -32,6 +35,13 @@ function statusBadge(
   const map = {
     confirmed: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'ORDER CONFIRMED' },
     shipped: { bg: '#ECFDF5', fg: GREEN, label: 'ORDER SHIPPED' },
+    out_for_delivery: {
+      bg: '#FFF7ED',
+      fg: '#C2410C',
+      label: 'OUT FOR DELIVERY',
+    },
+    delivered: { bg: '#ECFDF5', fg: GREEN, label: 'ORDER DELIVERED' },
+    cancelled: { bg: '#FDF0ED', fg: CORAL, label: 'ORDER CANCELLED' },
     refunded: { bg: '#FDF0ED', fg: CORAL, label: 'REFUND PROCESSED' },
     welcome: { bg: '#ECFDF5', fg: GREEN, label: 'ACCOUNT CREATED' },
     admin: { bg: '#F3F4F6', fg: MUTED, label: 'STORE NOTIFICATION' },
@@ -147,10 +157,10 @@ export function orderConfirmationEmail(order: any) {
   const subject = `Order confirmed ${orderNumber} — ${SITE_NAME}`
   const html = shell(
     statusBadge('confirmed'),
-    `Thanks for your order, ${(order.customer?.first_name || '').trim() || 'there'}!`,
+    `Thank you for your order, ${(order.customer?.first_name || '').trim() || 'there'}`,
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        We've received order <strong style="color:${TEXT};">${orderNumber}</strong> and we're getting it ready. You'll get another email the moment it ships.
+        We have received order <strong style="color:${TEXT};">${orderNumber}</strong> and it is being prepared. You will receive a further email once it has shipped.
       </p>
       ${itemsTable(order.items ?? [])}
       <div style="margin-top:8px;padding-top:8px;border-top:2px solid ${BORDER};">
@@ -159,7 +169,7 @@ export function orderConfirmationEmail(order: any) {
       ${ctaButton('View your order', `${SITE_URL}/orders`)}
     `,
   )
-  const text = `Order confirmed ${orderNumber} — Total ${fmt(order.total)}. We'll email you again once it ships.`
+  const text = `Order confirmed ${orderNumber} — Total ${fmt(order.total)}. We will email you again once it has shipped.`
   return { subject, html, text }
 }
 
@@ -180,10 +190,10 @@ export function shippingConfirmationEmail(order: any) {
     : ''
   const html = shell(
     statusBadge('shipped'),
-    'Your order is on its way!',
+    'Your order has shipped',
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Good news — order <strong style="color:${TEXT};">${orderNumber}</strong> has left the building and is headed your way.
+        Order <strong style="color:${TEXT};">${orderNumber}</strong> has left our warehouse and is on its way to you.
       </p>
       ${itemsTable(order.items ?? [])}
       ${
@@ -202,6 +212,85 @@ export function shippingConfirmationEmail(order: any) {
   return { subject, html, text }
 }
 
+// Sent to the customer once the courier has the parcel out for delivery.
+export function outForDeliveryEmail(order: any) {
+  const orderNumber = orderNumberOf(order)
+  const subject = `Out for delivery: order ${orderNumber} — ${SITE_NAME}`
+  const address = order.shipping_address
+  const addressLine = address
+    ? [
+        address.address_1,
+        address.address_2,
+        address.city,
+        address.postal_code,
+        address.country_code,
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : ''
+  const html = shell(
+    statusBadge('out_for_delivery'),
+    'Your order is out for delivery',
+    `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Order <strong style="color:${TEXT};">${orderNumber}</strong> is out for delivery and is expected to arrive today.
+      </p>
+      ${
+        addressLine
+          ? `
+        <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
+          <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Delivering to</p>
+          <p style="margin:0;font-size:14px;color:${TEXT};">${addressLine}</p>
+        </div>`
+          : ''
+      }
+      ${ctaButton('Track your order', `${SITE_URL}/orders`)}
+    `,
+  )
+  const text = `Order ${orderNumber} is out for delivery and should arrive today.${addressLine ? ` Delivering to: ${addressLine}` : ''}`
+  return { subject, html, text }
+}
+
+// Sent to the customer once the order is marked delivered.
+export function deliveryConfirmationEmail(order: any) {
+  const orderNumber = orderNumberOf(order)
+  const subject = `Your order ${orderNumber} has been delivered — ${SITE_NAME}`
+  const html = shell(
+    statusBadge('delivered'),
+    'Your order has been delivered',
+    `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Order <strong style="color:${TEXT};">${orderNumber}</strong> has been delivered. If anything is missing or not as expected, please reply to this email and we will assist.
+      </p>
+      ${itemsTable(order.items ?? [])}
+      ${ctaButton('View your order', `${SITE_URL}/orders`)}
+    `,
+  )
+  const text = `Order ${orderNumber} has been delivered. If anything is missing or not as expected, please reply to this email and we will assist.`
+  return { subject, html, text }
+}
+
+// Sent to the customer when their order is cancelled.
+export function orderCancelledEmail(order: any) {
+  const orderNumber = orderNumberOf(order)
+  const subject = `Order ${orderNumber} has been cancelled — ${SITE_NAME}`
+  const html = shell(
+    statusBadge('cancelled'),
+    'Your order has been cancelled',
+    `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Order <strong style="color:${TEXT};">${orderNumber}</strong> has been cancelled. If payment had already been taken, the amount will be refunded to your original payment method within a few business days.
+      </p>
+      ${itemsTable(order.items ?? [])}
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+        If you did not request this cancellation, or have any questions, please reply to this email.
+      </p>
+    `,
+  )
+  const text = `Order ${orderNumber} has been cancelled. If payment had already been taken, the amount will be refunded to your original payment method within a few business days.`
+  return { subject, html, text }
+}
+
 export function refundConfirmationEmail(
   order: any,
   refundAmount: number,
@@ -214,7 +303,7 @@ export function refundConfirmationEmail(
     'Your refund has been processed',
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        We've processed a refund for order <strong style="color:${TEXT};">${orderNumber}</strong>. It can take a few business days to appear on your original payment method.
+        A refund has been processed for order <strong style="color:${TEXT};">${orderNumber}</strong>. Please allow a few business days for it to appear on your original payment method.
       </p>
       ${items && items.length ? itemsTable(items) : ''}
       <div style="margin-top:8px;padding-top:8px;border-top:2px solid ${BORDER};">
@@ -222,7 +311,7 @@ export function refundConfirmationEmail(
       </div>
     `,
   )
-  const text = `Refund of ${fmt(refundAmount)} processed for order ${orderNumber}. It can take a few business days to appear on your original payment method.`
+  const text = `Refund of ${fmt(refundAmount)} processed for order ${orderNumber}. Please allow a few business days for it to appear on your original payment method.`
   return { subject, html, text }
 }
 
@@ -233,13 +322,13 @@ export function welcomeEmail(customer: {
   email: string
 }) {
   const firstName = (customer.first_name || '').trim() || 'there'
-  const subject = `Welcome to ${SITE_NAME}, ${firstName}!`
+  const subject = `Welcome to ${SITE_NAME}, ${firstName}`
   const html = shell(
     statusBadge('welcome'),
-    `Welcome aboard, ${firstName}!`,
+    `Welcome, ${firstName}`,
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Your ${SITE_NAME} account has been created with <strong style="color:${TEXT};">${customer.email}</strong>. You can now check out faster, track every order and view your full order history from your account.
+        Your ${SITE_NAME} account has been created with <strong style="color:${TEXT};">${customer.email}</strong>. You can now check out faster, track your orders and view your full order history from your account.
       </p>
       <ul style="margin:20px 0 0;padding:0 0 0 18px;font-size:14px;line-height:1.9;color:${TEXT};">
         <li>Track your orders in real time</li>
@@ -249,7 +338,7 @@ export function welcomeEmail(customer: {
       ${ctaButton('Start shopping', `${SITE_URL}/shop`)}
     `,
   )
-  const text = `Welcome to ${SITE_NAME}, ${firstName}! Your account (${customer.email}) has been created. Visit ${SITE_URL}/shop to start shopping.`
+  const text = `Welcome to ${SITE_NAME}, ${firstName}. Your account (${customer.email}) has been created. Visit ${SITE_URL}/shop to start shopping.`
   return { subject, html, text }
 }
 
@@ -260,10 +349,10 @@ export function contactAutoReplyEmail(opts: { name: string; message: string }) {
     opts.message.length > 200 ? opts.message.slice(0, 200) + '…' : opts.message
   const html = shell(
     statusBadge('admin'),
-    `Thanks for reaching out, ${opts.name}!`,
+    `Thank you for contacting us, ${opts.name}`,
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        We've received your message and someone from the ${SITE_NAME} team will get back to you shortly.
+        We have received your message and a member of the ${SITE_NAME} team will respond shortly.
       </p>
       <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
         <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Your message</p>
@@ -271,7 +360,7 @@ export function contactAutoReplyEmail(opts: { name: string; message: string }) {
       </div>
     `,
   )
-  const text = `Thanks for reaching out, ${opts.name}! We've received your message and someone from the ${SITE_NAME} team will get back to you shortly.`
+  const text = `Thank you for contacting us, ${opts.name}. We have received your message and a member of the ${SITE_NAME} team will respond shortly.`
   return { subject, html, text }
 }
 
@@ -336,6 +425,78 @@ export function adminShippingEmail(order: any) {
     `,
   )
   const text = `Order ${orderNumber} marked as shipped. Customer: ${customerName} (${order.email ?? 'no email'}). Shipping confirmation email sent.`
+  return { subject, html, text }
+}
+
+// Sent to the store owner/admin inbox when a customer is notified the order is out for delivery.
+export function adminOutForDeliveryEmail(order: any) {
+  const orderNumber = orderNumberOf(order)
+  const customerName =
+    (order.customer
+      ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
+      : '') || 'Guest'
+  const subject = `Order ${orderNumber} marked out for delivery`
+  const html = shell(
+    statusBadge('admin'),
+    `Order ${orderNumber} out for delivery`,
+    `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:4px;">
+        ${infoRow('Customer', `${customerName} (${order.email ?? 'no email'})`)}
+      </table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+        An out-for-delivery email has been sent to the customer.
+      </p>
+    `,
+  )
+  const text = `Order ${orderNumber} marked out for delivery. Customer: ${customerName} (${order.email ?? 'no email'}). Out-for-delivery email sent.`
+  return { subject, html, text }
+}
+
+// Sent to the store owner/admin inbox when an order is marked delivered.
+export function adminDeliveryEmail(order: any) {
+  const orderNumber = orderNumberOf(order)
+  const customerName =
+    (order.customer
+      ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
+      : '') || 'Guest'
+  const subject = `Order ${orderNumber} marked as delivered`
+  const html = shell(
+    statusBadge('admin'),
+    `Order ${orderNumber} delivered`,
+    `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:4px;">
+        ${infoRow('Customer', `${customerName} (${order.email ?? 'no email'})`)}
+      </table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+        A delivery confirmation email has been sent to the customer.
+      </p>
+    `,
+  )
+  const text = `Order ${orderNumber} marked as delivered. Customer: ${customerName} (${order.email ?? 'no email'}). Delivery confirmation email sent.`
+  return { subject, html, text }
+}
+
+// Sent to the store owner/admin inbox when an order is cancelled.
+export function adminCancelledEmail(order: any) {
+  const orderNumber = orderNumberOf(order)
+  const customerName =
+    (order.customer
+      ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
+      : '') || 'Guest'
+  const subject = `Order ${orderNumber} cancelled`
+  const html = shell(
+    statusBadge('admin'),
+    `Order ${orderNumber} cancelled`,
+    `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:4px;">
+        ${infoRow('Customer', `${customerName} (${order.email ?? 'no email'})`)}
+      </table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+        A cancellation email has been sent to the customer.
+      </p>
+    `,
+  )
+  const text = `Order ${orderNumber} cancelled. Customer: ${customerName} (${order.email ?? 'no email'}). Cancellation email sent.`
   return { subject, html, text }
 }
 
@@ -427,15 +588,15 @@ export function stockNotifyCustomerEmail(productName: string) {
   const subject = `We'll email you when "${productName}" is back in stock`
   const html = shell(
     statusBadge('welcome'),
-    `You're on the list!`,
+    `You're on the list`,
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        We'll email you at this address as soon as <strong style="color:${TEXT};">${productName}</strong> is back in stock.
+        We will email you at this address as soon as <strong style="color:${TEXT};">${productName}</strong> is back in stock.
       </p>
       ${ctaButton('Keep browsing', `${SITE_URL}/shop`)}
     `,
   )
-  const text = `We'll email you as soon as "${productName}" is back in stock.`
+  const text = `We will email you as soon as "${productName}" is back in stock.`
   return { subject, html, text }
 }
 
@@ -461,18 +622,18 @@ export function stockNotifyAdminEmail(opts: {
 }
 // Sent to a customer immediately after they subscribe to the newsletter.
 export function newsletterWelcomeEmail(email: string) {
-  const subject = `Welcome to ${SITE_NAME}!`
+  const subject = `Welcome to ${SITE_NAME}`
   const html = shell(
     statusBadge('subscribed'),
-    `You're subscribed!`,
+    `You're subscribed`,
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Thanks for signing up with <strong style="color:${TEXT};">${email}</strong> — keep an eye on your inbox for exclusive offers, new arrivals and restock alerts.
+        Thank you for signing up with <strong style="color:${TEXT};">${email}</strong>. Keep an eye on your inbox for offers, new arrivals and restock alerts.
       </p>
       ${ctaButton('Start shopping', `${SITE_URL}/shop`)}
     `,
   )
-  const text = `Welcome to ${SITE_NAME}! Thanks for subscribing with ${email}. Keep an eye on your inbox for exclusive offers and new arrivals.`
+  const text = `Welcome to ${SITE_NAME}. Thank you for subscribing with ${email}. Keep an eye on your inbox for offers and new arrivals.`
   return { subject, html, text }
 }
 
@@ -486,7 +647,7 @@ export function staffInviteEmail(opts: {
   const subject = `You've been added to ${SITE_NAME} POS`
   const html = shell(
     statusBadge('staff'),
-    `Welcome to the team, ${opts.firstName}!`,
+    `Welcome to the team, ${opts.firstName}`,
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
         You've been added as <strong style="color:${TEXT};">${roleLabel}</strong> on the ${SITE_NAME} POS system${opts.shift ? ` for the <strong style="color:${TEXT};">${opts.shift}</strong> shift` : ''}.
@@ -503,7 +664,7 @@ export function staffInviteEmail(opts: {
       </p>
     `,
   )
-  const text = `Welcome to ${SITE_NAME}! You've been added as ${roleLabel}${opts.shift ? ` for the ${opts.shift} shift` : ''}. Ask your manager for your PIN to log in at the POS terminal.`
+  const text = `Welcome to ${SITE_NAME}. You've been added as ${roleLabel}${opts.shift ? ` for the ${opts.shift} shift` : ''}. Ask your manager for your PIN to log in at the POS terminal.`
   return { subject, html, text }
 }
 // Sent to the customer from the POS when a staff member emails them their
@@ -517,10 +678,10 @@ export function invoiceEmail(opts: {
   const subject = `Your invoice ${opts.invoiceNumber} — ${SITE_NAME}`
   const html = shell(
     statusBadge('invoice'),
-    'Thanks for shopping with us!',
+    'Thank you for shopping with us',
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Here's your invoice <strong style="color:${TEXT};">${opts.invoiceNumber}</strong> for order <strong style="color:${TEXT};">${opts.orderNumber}</strong> — it's attached to this email as a PDF.
+        Please find attached invoice <strong style="color:${TEXT};">${opts.invoiceNumber}</strong> for order <strong style="color:${TEXT};">${opts.orderNumber}</strong>.
       </p>
       ${ctaButton('Download invoice', opts.pdfUrl)}
       <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${TEXT};">
@@ -528,6 +689,6 @@ export function invoiceEmail(opts: {
       </p>
     `,
   )
-  const text = `Your invoice ${opts.invoiceNumber} for order ${opts.orderNumber} is attached to this email as a PDF. You can also download it here: ${opts.pdfUrl}`
+  const text = `Please find attached invoice ${opts.invoiceNumber} for order ${opts.orderNumber}. You can also download it here: ${opts.pdfUrl}`
   return { subject, html, text }
 }

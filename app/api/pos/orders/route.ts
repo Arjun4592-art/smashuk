@@ -41,6 +41,7 @@ function toPosOrderRecord(o: any) {
     ''
   const customerPhone =
     o.metadata?.customer_phone || o.shipping_address?.phone || ''
+  const customerEmail = !isSyntheticEmail(o.email) ? o.email : undefined
   return {
     medusaOrderId: o.id as string,
     id: o.display_id ? `SR-${o.display_id}` : (o.id as string),
@@ -49,6 +50,7 @@ function toPosOrderRecord(o: any) {
       ? {
           name: customerName,
           phone: customerPhone,
+          email: customerEmail,
         }
       : null,
     subtotal: o.subtotal ?? 0,
@@ -772,7 +774,7 @@ export async function POST(request: NextRequest) {
     }
     try {
       const invoiceOrderRes = await medusaServiceFetch(
-        `/admin/orders/${order.id}?fields=id,currency_code,*items,*shipping_methods,customer.first_name,customer.last_name,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
+        `/admin/orders/${order.id}?fields=id,display_id,created_at,currency_code,metadata,*items,*shipping_methods,*payment_collections.payments,customer.first_name,customer.last_name,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
       )
       if (invoiceOrderRes.ok) {
         const { order: fullOrderForInvoice } = await invoiceOrderRes.json()

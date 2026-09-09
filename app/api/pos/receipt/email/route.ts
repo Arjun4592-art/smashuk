@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const orderRes = await medusaServiceFetch(
-      `/admin/orders/${orderId}?fields=id,display_id,currency_code,*items,*shipping_methods,customer.first_name,customer.last_name,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
+      `/admin/orders/${orderId}?fields=id,display_id,created_at,currency_code,metadata,*items,*shipping_methods,*payment_collections.payments,customer.first_name,customer.last_name,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
     )
     if (!orderRes.ok) {
       return NextResponse.json(
