@@ -121,6 +121,7 @@ export interface POSCatalogProduct {
   posPrice?: number
   variantId?: string
   size?: string
+  sizeOptionTitle?: string
 }
 interface POSState {
   session: POSSession | null
