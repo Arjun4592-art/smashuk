@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/authStore'
 import ProductSearch from '@/components/pos/ProductSearch'
 import CategoryFilter from '@/components/pos/CategoryFilter'
 import ProductGrid, { POSProduct } from '@/components/pos/ProductGrid'
+import { sortSizeValues } from '@/lib/pos-size-sort'
 import BillingCart from '@/components/pos/BillingCart'
 import PaymentModal, {
   type PaymentResult,
@@ -60,6 +61,9 @@ export default function BillingPage() {
   )
   const [search, setSearch] = useState('')
   const [cat, setCat] = useState('All')
+  const [size, setSize] = useState('All sizes')
+  const [sizeTitle, setSizeTitle] = useState<string | null>(null)
+  const [sizeGroup, setSizeGroup] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [showEmailReceipt, setShowEmailReceipt] = useState(false)
   const [splitPayments, setSplitPayments] = useState<SplitPayment[] | null>(
@@ -110,6 +114,7 @@ export default function BillingPage() {
     completeOrder,
     addRevenueEntry,
     syncMedusaProducts,
+    loadMedusaProducts,
   } = usePOSStore()
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 50)
@@ -122,8 +127,12 @@ export default function BillingPage() {
       }
     : null
   useEffect(() => {
-    syncMedusaProducts()
-  }, [syncMedusaProducts])
+    // Only fetches if products aren't already loaded — avoids re-pulling the
+    // full ~1700-product catalog (with heavy inventory fields) every time
+    // this page mounts/is navigated back to. Use the retry/refresh button
+    // (syncMedusaProducts) for an explicit forced resync.
+    loadMedusaProducts()
+  }, [loadMedusaProducts])
   const CATEGORIES = Array.from(
     new Set(
       products
@@ -131,14 +140,47 @@ export default function BillingPage() {
         .filter((c): c is string => Boolean(c) && c !== 'Uncategorized'),
     ),
   ).sort((a, b) => a.localeCompare(b))
+  // Sizes are scoped to the selected category so the chip row only ever
+  // shows sizes that actually exist among the products currently in view.
+  // Grouped by their source option (Size / Size (UK) / Weight / Grip Size
+  // ...) so unrelated units don't get mixed into one flat list.
+  const productsInCat = products.filter(
+    (p) => cat === 'All' || p.category === cat,
+  )
+  const SIZE_TITLES = Array.from(
+    new Set(
+      productsInCat
+        .map((p) => p.sizeOptionTitle)
+        .filter((t): t is string => Boolean(t)),
+    ),
+  ).sort((a, b) => a.localeCompare(b))
+  const sizeValuesForTitle = (title: string) =>
+    sortSizeValues(
+      Array.from(
+        new Set(
+          productsInCat
+            .filter((p) => p.sizeOptionTitle === title)
+            .map((p) => p.size)
+            .filter((s): s is string => Boolean(s)),
+        ),
+      ),
+    )
+  useEffect(() => {
+    if (sizeGroup && !SIZE_TITLES.includes(sizeGroup)) {
+      setSizeGroup(null)
+    }
+  }, [SIZE_TITLES.join(','), sizeGroup])
   const filtered = products.filter((p) => {
     const matchCat = cat === 'All' || p.category === cat
+    const matchSize =
+      size === 'All sizes' ||
+      (p.size === size && p.sizeOptionTitle === sizeTitle)
     const q = search.trim().toLowerCase()
     const matchSearch =
       !q ||
       (p.name ?? '').toLowerCase().includes(q) ||
       (p.sku ?? '').toLowerCase().includes(q)
-    return matchCat && matchSearch
+    return matchCat && matchSize && matchSearch
   })
   const handleScanSubmit = (raw: string) => {
     const q = raw.trim().toLowerCase()
@@ -207,6 +249,7 @@ export default function BillingPage() {
         1,
         {
           id: p.variantId,
+          title: p.size,
         } as any,
       )
       if (soundOnScan) playScanBeep()
@@ -215,6 +258,7 @@ export default function BillingPage() {
   )
   const cartDisplayItems: CartDisplayItem[] = items.map((i) => ({
     id: i.product.id,
+    lineId: `${i.product.id}::${i.variant?.id ?? ''}`,
     name: i.product.name,
     brand: i.product.brand ?? '',
     price: i.product.price,
@@ -226,24 +270,34 @@ export default function BillingPage() {
     originalPrice: i.product.originalPrice,
     discount: i.discount,
   }))
+  // Cart lines are looked up by lineId (product id + variant id combined),
+  // not just product id — the same shoe can be in the cart multiple times
+  // as different sizes, and matching on product id alone would always hit
+  // the first matching line regardless of which size's +/- was tapped.
+  const findByLineId = (lineId: string) =>
+    usePOSStore
+      .getState()
+      .items.find((i) => `${i.product.id}::${i.variant?.id ?? ''}` === lineId)
   const handleIncrease = useCallback(
-    (id: string) => {
-      const item = usePOSStore.getState().items.find((i) => i.product.id === id)
-      if (item) updateQuantity(id, item.quantity + 1, item.variant?.id)
+    (lineId: string) => {
+      const item = findByLineId(lineId)
+      if (item)
+        updateQuantity(item.product.id, item.quantity + 1, item.variant?.id)
     },
     [updateQuantity],
   )
   const handleDecrease = useCallback(
-    (id: string) => {
-      const item = usePOSStore.getState().items.find((i) => i.product.id === id)
-      if (item) updateQuantity(id, item.quantity - 1, item.variant?.id)
+    (lineId: string) => {
+      const item = findByLineId(lineId)
+      if (item)
+        updateQuantity(item.product.id, item.quantity - 1, item.variant?.id)
     },
     [updateQuantity],
   )
   const handleRemove = useCallback(
-    (id: string) => {
-      const item = usePOSStore.getState().items.find((i) => i.product.id === id)
-      removeItem(id, item?.variant?.id)
+    (lineId: string) => {
+      const item = findByLineId(lineId)
+      if (item) removeItem(item.product.id, item.variant?.id)
     },
     [removeItem],
   )
@@ -584,11 +638,69 @@ export default function BillingPage() {
         <CategoryFilter
           categories={CATEGORIES}
           selected={cat}
-          onChange={setCat}
+          onChange={(next) => {
+            setCat(next)
+            setSize('All sizes')
+            setSizeTitle(null)
+            setSizeGroup(null)
+          }}
         />
+        {SIZE_TITLES.length > 0 && (
+          <div className='flex gap-1.5'>
+            {SIZE_TITLES.map((title) => {
+              const isSelected = sizeTitle === title && size !== 'All sizes'
+              const isOpen = sizeGroup === title
+              return (
+                <button
+                  key={title}
+                  onClick={() =>
+                    setSizeGroup((g) => (g === title ? null : title))
+                  }
+                  className='flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap border transition-all'
+                  style={{
+                    background: isOpen || isSelected ? '#008060' : '#FFFFFF',
+                    color: isOpen || isSelected ? '#FFFFFF' : '#6D7175',
+                    borderColor: isOpen || isSelected ? '#008060' : '#E1E3E5',
+                  }}
+                >
+                  {isSelected ? `${title}: ${size}` : title}
+                  {isSelected && (
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSize('All sizes')
+                        setSizeTitle(null)
+                      }}
+                      className='ml-0.5'
+                    >
+                      ✕
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {sizeGroup && (
+          <CategoryFilter
+            categories={sizeValuesForTitle(sizeGroup)}
+            selected={sizeTitle === sizeGroup ? size : 'All'}
+            onChange={(next) => {
+              if (next === 'All') {
+                setSize('All sizes')
+                setSizeTitle(null)
+              } else {
+                setSize(next)
+                setSizeTitle(sizeGroup)
+              }
+              setSizeGroup(null)
+            }}
+          />
+        )}
         <div className='flex-1 min-h-0 overflow-y-auto'>
           <ProductGrid
             products={filtered}
+            isLoading={medusaLoading}
             onAdd={(p) => {
               handleAdd(p)
               setMobileCartOpen(true)

@@ -34,6 +34,11 @@ export interface AuthCookiePayload {
 }
 export interface CartDisplayItem {
   id: string
+  // Unique per cart line (product id + variant id). Falls back to `id` when
+  // a variant isn't involved. Use this — not `id` — for line-level actions
+  // (increase/decrease/remove), since the same product can appear as
+  // multiple lines when different variants (e.g. sizes) are in the cart.
+  lineId?: string
   name: string
   brand: string
   price: number

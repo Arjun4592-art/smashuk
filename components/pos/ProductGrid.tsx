@@ -13,13 +13,49 @@ export interface POSProduct {
   channel?: 'both' | 'online_only' | 'pos_only'
   posPrice?: number
   variantId?: string
+  size?: string
+  sizeOptionTitle?: string
 }
 interface Props {
   products: POSProduct[]
   onAdd: (product: POSProduct) => void
+  isLoading?: boolean
 }
-export default function ProductGrid({ products, onAdd }: Props) {
+export default function ProductGrid({ products, onAdd, isLoading }: Props) {
   const showStockCount = usePOSStore((s) => s.showStockCount)
+  if (isLoading && products.length === 0) {
+    return (
+      <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2'>
+        {Array.from({ length: 15 }).map((_, i) => (
+          <div
+            key={i}
+            className='flex flex-col p-3 rounded-lg border'
+            style={{
+              background: '#FFFFFF',
+              borderColor: '#E1E3E5',
+            }}
+          >
+            <div
+              className='w-full aspect-square rounded-md mb-2 animate-pulse'
+              style={{ background: '#F0F1F2' }}
+            />
+            <div
+              className='h-3 rounded mb-1.5 animate-pulse'
+              style={{ background: '#F0F1F2', width: '85%' }}
+            />
+            <div
+              className='h-2.5 rounded mb-2 animate-pulse'
+              style={{ background: '#F0F1F2', width: '50%' }}
+            />
+            <div
+              className='h-3.5 rounded animate-pulse'
+              style={{ background: '#F0F1F2', width: '40%' }}
+            />
+          </div>
+        ))}
+      </div>
+    )
+  }
   if (products.length === 0) {
     return (
       <div className='flex flex-col items-center justify-center py-16 gap-3'>
@@ -51,10 +87,12 @@ export default function ProductGrid({ products, onAdd }: Props) {
         const isLow = p.stock > 0 && p.stock <= 3
         return (
           <button
-            key={p.id}
+            key={p.variantId ?? p.id}
             onClick={() => onAdd(p)}
             title={
-              isOut ? `${p.name} (out of stock — will still be sold)` : p.name
+              isOut
+                ? `${p.name}${p.size ? ` — ${p.size}` : ''} (out of stock — will still be sold)`
+                : `${p.name}${p.size ? ` — ${p.size}` : ''}`
             }
             className='flex flex-col p-3 rounded-lg border text-left transition-all'
             style={{
@@ -119,14 +157,27 @@ export default function ProductGrid({ products, onAdd }: Props) {
             </p>
 
             {}
-            <p
-              className='text-[11px] mb-1.5'
-              style={{
-                color: '#8C9196',
-              }}
-            >
-              {p.brand}
-            </p>
+            <div className='flex items-center gap-1 mb-1.5'>
+              <p
+                className='text-[11px]'
+                style={{
+                  color: '#8C9196',
+                }}
+              >
+                {p.brand}
+              </p>
+              {p.size && (
+                <span
+                  className='text-[10px] font-semibold px-1.5 py-[1px] rounded'
+                  style={{
+                    background: '#F2F7F5',
+                    color: '#008060',
+                  }}
+                >
+                  {p.size}
+                </span>
+              )}
+            </div>
 
             {}
             <p

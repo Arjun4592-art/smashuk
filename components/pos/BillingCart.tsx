@@ -141,131 +141,145 @@ export default function BillingCart({
           </div>
         ) : (
           <div className='space-y-0.5'>
-            {items.map((item) => (
-              <div
-                key={item.id}
-                className='flex items-center gap-2 py-2.5'
-                style={{
-                  borderBottom: '1px solid #F6F6F7',
-                }}
-              >
-                {}
-                <div className='flex-1 min-w-0'>
-                  <p
-                    className='text-xs font-medium truncate'
+            {items.map((item) => {
+              const lineId = item.lineId ?? item.id
+              return (
+                <div
+                  key={lineId}
+                  className='flex items-center gap-2 py-2.5'
+                  style={{
+                    borderBottom: '1px solid #F6F6F7',
+                  }}
+                >
+                  {}
+                  <div className='flex-1 min-w-0'>
+                    <p
+                      className='text-xs font-medium truncate'
+                      style={{
+                        color: '#202223',
+                      }}
+                    >
+                      {item.name}
+                      {item.variantTitle && (
+                        <span
+                          className='font-normal'
+                          style={{
+                            color: '#8C9196',
+                          }}
+                        >
+                          {' '}
+                          · {item.variantTitle}
+                        </span>
+                      )}
+                    </p>
+                    <p
+                      className='text-[11px]'
+                      style={{
+                        color: '#8C9196',
+                      }}
+                    >
+                      {fmt(item.price)} each
+                    </p>
+                  </div>
+
+                  {}
+                  <div
+                    className='flex items-center rounded overflow-hidden shrink-0'
+                    style={{
+                      border: '1px solid #E1E3E5',
+                    }}
+                  >
+                    <button
+                      onClick={() => onDecrease(lineId)}
+                      className='w-6 h-6 flex items-center justify-center transition-colors hover:bg-[#F6F6F7]'
+                      style={{
+                        color: '#6D7175',
+                      }}
+                    >
+                      <svg
+                        width='10'
+                        height='10'
+                        viewBox='0 0 24 24'
+                        fill='none'
+                        stroke='currentColor'
+                        strokeWidth='2.5'
+                        strokeLinecap='round'
+                      >
+                        <line x1='5' y1='12' x2='19' y2='12' />
+                      </svg>
+                    </button>
+                    <span
+                      className='w-7 h-6 flex items-center justify-center text-xs font-semibold'
+                      style={{
+                        borderLeft: '1px solid #E1E3E5',
+                        borderRight: '1px solid #E1E3E5',
+                        color: '#202223',
+                      }}
+                    >
+                      {item.quantity}
+                    </span>
+                    <button
+                      onClick={() => onIncrease(lineId)}
+                      className='w-6 h-6 flex items-center justify-center transition-colors hover:bg-[#F6F6F7]'
+                      style={{
+                        color: '#6D7175',
+                      }}
+                    >
+                      <svg
+                        width='10'
+                        height='10'
+                        viewBox='0 0 24 24'
+                        fill='none'
+                        stroke='currentColor'
+                        strokeWidth='2.5'
+                        strokeLinecap='round'
+                      >
+                        <line x1='12' y1='5' x2='12' y2='19' />
+                        <line x1='5' y1='12' x2='19' y2='12' />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {}
+                  <div
+                    className='text-xs font-semibold shrink-0 min-w-[52px] text-right'
                     style={{
                       color: '#202223',
                     }}
                   >
-                    {item.name}
-                  </p>
-                  <p
-                    className='text-[11px]'
+                    {fmt(item.price * item.quantity)}
+                  </div>
+
+                  {}
+                  <button
+                    onClick={() => onRemove(lineId)}
+                    className='shrink-0 p-1 rounded transition-colors hover:bg-[#FFF4F4]'
                     style={{
                       color: '#8C9196',
                     }}
-                  >
-                    {fmt(item.price)} each
-                  </p>
-                </div>
-
-                {}
-                <div
-                  className='flex items-center rounded overflow-hidden shrink-0'
-                  style={{
-                    border: '1px solid #E1E3E5',
-                  }}
-                >
-                  <button
-                    onClick={() => onDecrease(item.id)}
-                    className='w-6 h-6 flex items-center justify-center transition-colors hover:bg-[#F6F6F7]'
-                    style={{
-                      color: '#6D7175',
-                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.color = '#D82C0D')
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.color = '#8C9196')
+                    }
                   >
                     <svg
-                      width='10'
-                      height='10'
+                      width='13'
+                      height='13'
                       viewBox='0 0 24 24'
                       fill='none'
                       stroke='currentColor'
-                      strokeWidth='2.5'
+                      strokeWidth='2'
                       strokeLinecap='round'
                     >
-                      <line x1='5' y1='12' x2='19' y2='12' />
-                    </svg>
-                  </button>
-                  <span
-                    className='w-7 h-6 flex items-center justify-center text-xs font-semibold'
-                    style={{
-                      borderLeft: '1px solid #E1E3E5',
-                      borderRight: '1px solid #E1E3E5',
-                      color: '#202223',
-                    }}
-                  >
-                    {item.quantity}
-                  </span>
-                  <button
-                    onClick={() => onIncrease(item.id)}
-                    className='w-6 h-6 flex items-center justify-center transition-colors hover:bg-[#F6F6F7]'
-                    style={{
-                      color: '#6D7175',
-                    }}
-                  >
-                    <svg
-                      width='10'
-                      height='10'
-                      viewBox='0 0 24 24'
-                      fill='none'
-                      stroke='currentColor'
-                      strokeWidth='2.5'
-                      strokeLinecap='round'
-                    >
-                      <line x1='12' y1='5' x2='12' y2='19' />
-                      <line x1='5' y1='12' x2='19' y2='12' />
+                      <line x1='18' y1='6' x2='6' y2='18' />
+                      <line x1='6' y1='6' x2='18' y2='18' />
                     </svg>
                   </button>
                 </div>
-
-                {}
-                <div
-                  className='text-xs font-semibold shrink-0 min-w-[52px] text-right'
-                  style={{
-                    color: '#202223',
-                  }}
-                >
-                  {fmt(item.price * item.quantity)}
-                </div>
-
-                {}
-                <button
-                  onClick={() => onRemove(item.id)}
-                  className='shrink-0 p-1 rounded transition-colors hover:bg-[#FFF4F4]'
-                  style={{
-                    color: '#8C9196',
-                  }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.color = '#D82C0D')
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.color = '#8C9196')
-                  }
-                >
-                  <svg
-                    width='13'
-                    height='13'
-                    viewBox='0 0 24 24'
-                    fill='none'
-                    stroke='currentColor'
-                    strokeWidth='2'
-                    strokeLinecap='round'
-                  >
-                    <line x1='18' y1='6' x2='6' y2='18' />
-                    <line x1='6' y1='6' x2='18' y2='18' />
-                  </svg>
-                </button>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

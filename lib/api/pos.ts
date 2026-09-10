@@ -11,6 +11,8 @@ export interface POSProduct {
   channel: 'both' | 'online_only' | 'pos_only'
   variantId: string
   medusaVariantId: string
+  size?: string
+  sizeOptionTitle?: string
 }
 export interface POSCustomer {
   id: string
@@ -85,25 +87,80 @@ function extractStock(variant: any): number {
   }
   return variant?.inventory_quantity ?? 0
 }
-function mapProductToPOS(p: any): POSProduct | null {
-  const variant = p.variants?.[0]
-  if (!variant) return null
-  const price = extractPrice(variant, p.metadata)
-  const stock = extractStock(variant)
-  return {
-    id: p.id,
-    name: p.title ?? 'Unknown Product',
-    brand: p.metadata?.brand ?? 'Unknown',
-    sku: variant?.sku ?? `${p.id}-${variant.id}`,
-    price,
-    stock,
-    category: p.categories?.[0]?.name ?? 'Uncategorized',
-    image: p.thumbnail ?? p.images?.[0]?.url ?? undefined,
-    description: p.description ?? undefined,
-    channel: (p.metadata?.channel as any) ?? 'both',
-    variantId: variant.id,
-    medusaVariantId: variant.id,
-  }
+// Variant size (or grip/weight — whatever the product's distinguishing
+// dimension is) comes from the variant's own option values, e.g.
+// variant.options: [{ option: { title: 'Size (UK)' }, value: '8' }].
+// Only an option whose title actually describes a size-like dimension
+// counts — NOT just "whatever the one option happens to be". Gift cards
+// have a single option called "Denomination" (£10, £25...), overgrips and
+// strings have single options like "Colour" or a gauge number — treating
+// those as "the size" was dumping prices and stray numbers into the size
+// filter. So we only match titles that look like Size / Size (UK) / Weight
+// / Grip Size — the known vocabulary this catalog actually uses for sizing
+// (see the comment in lib/api/store.ts listing the real Shopify options:
+// Size, Grip Size, Size (UK), Weight, Colour, ...).
+const SIZE_LIKE_OPTION_TITLE = /size|weight|grip/i
+// Catalog data isn't consistently formatted — the same weight/size can be
+// entered as "4U (80-84g)" on one product and "4U(80-84g)" (no space before
+// the bracket) on another, most likely from CSV imports done at different
+// times. Left as-is, those become two separate filter chips for what a
+// customer would consider the same size. Normalize whitespace so they
+// collapse into one.
+function normalizeSizeLabel(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ').replace(/\s*\(/g, ' (')
+}
+function extractVariantSize(variant: any): string | undefined {
+  const options = variant?.options
+  if (!Array.isArray(options)) return undefined
+  const sizeOpt = options.find((o: any) =>
+    SIZE_LIKE_OPTION_TITLE.test(o?.option?.title ?? ''),
+  )
+  if (sizeOpt?.value) return normalizeSizeLabel(String(sizeOpt.value))
+  return undefined
+}
+// Same lookup as extractVariantSize, but also returns which option
+// (Size / Size (UK) / Weight / Grip Size...) the value came from, so the
+// POS filter can group values by their actual option type instead of
+// dumping UK shoe sizes, badminton racket weights and grip sizes into one
+// flat mixed list.
+function extractSizeOptionTitle(variant: any): string | undefined {
+  const options = variant?.options
+  if (!Array.isArray(options)) return undefined
+  const sizeOpt = options.find((o: any) =>
+    SIZE_LIKE_OPTION_TITLE.test(o?.option?.title ?? ''),
+  )
+  const title = sizeOpt?.option?.title
+  return title ? String(title).trim() : undefined
+}
+// One product can have several variants (e.g. one per shoe size) — each
+// becomes its own sellable POS card so staff can quick-filter and add the
+// exact size a customer wants, instead of only ever seeing/selling the
+// first variant Medusa happens to return.
+function mapProductToPOSVariants(p: any): POSProduct[] {
+  const variants = Array.isArray(p.variants) ? p.variants : []
+  return variants
+    .map((variant: any): POSProduct | null => {
+      if (!variant?.id) return null
+      const price = extractPrice(variant, p.metadata)
+      const stock = extractStock(variant)
+      return {
+        id: p.id,
+        name: p.title ?? 'Unknown Product',
+        brand: p.metadata?.brand ?? 'Unknown',
+        sku: variant?.sku ?? `${p.id}-${variant.id}`,
+        price,
+        stock,
+        category: p.categories?.[0]?.name ?? 'Uncategorized',
+        image: p.thumbnail ?? p.images?.[0]?.url ?? undefined,
+        description: p.description ?? undefined,
+        channel: (p.metadata?.channel as any) ?? 'both',
+        variantId: variant.id,
+        medusaVariantId: variant.id,
+        size: extractVariantSize(variant),
+        sizeOptionTitle: extractSizeOptionTitle(variant),
+      }
+    })
+    .filter((v: POSProduct | null): v is POSProduct => v !== null)
 }
 export async function fetchPOSProducts(): Promise<POSProduct[]> {
   try {
@@ -127,9 +184,7 @@ export async function fetchPOSProducts(): Promise<POSProduct[]> {
       console.warn('[POS] Invalid products response:', data)
       return []
     }
-    const mapped = (data.products as any[])
-      .map(mapProductToPOS)
-      .filter((p: POSProduct | null): p is POSProduct => p !== null)
+    const mapped = (data.products as any[]).flatMap(mapProductToPOSVariants)
     return mapped
   } catch (err: unknown) {
     console.error('[POS] fetchPOSProducts Error:', err)

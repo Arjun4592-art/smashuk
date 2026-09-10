@@ -89,12 +89,7 @@ export interface POSStaffMember {
   totalOrders: number
 }
 export type AuditAction =
-  | 'login'
-  | 'logout'
-  | 'pin_change'
-  | 'sale'
-  | 'void'
-  | 'return'
+  'login' | 'logout' | 'pin_change' | 'sale' | 'void' | 'return'
 export interface AuditLogEntry {
   id: string
   staffId: string
@@ -125,6 +120,7 @@ export interface POSCatalogProduct {
   channel?: SalesChannel
   posPrice?: number
   variantId?: string
+  size?: string
 }
 interface POSState {
   session: POSSession | null
@@ -1190,7 +1186,12 @@ export const usePOSStore = create<POSState>()(
         auditLog: state.auditLog,
         savedCarts: state.savedCarts,
         cashDrawer: state.cashDrawer,
-        products: state.products,
+        // `products` is intentionally NOT persisted — it's the full Medusa
+        // catalog, flattened to one row per variant, and always re-fetched
+        // fresh from /api/pos/products on load anyway (see
+        // syncMedusaProducts). Persisting it was redundant and — once the
+        // catalog grew past a couple hundred rows — started exceeding the
+        // browser's localStorage quota and crashing the sync entirely.
         soundOnScan: state.soundOnScan,
         autoPrintReceipt: state.autoPrintReceipt,
         showStockCount: state.showStockCount,
