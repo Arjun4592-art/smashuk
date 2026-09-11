@@ -491,6 +491,22 @@ export default function PrinterSetup() {
               The other tablet must have the print agent app open and be paired
               with the printer over Bluetooth.
             </p>
+            {agentHost.trim() && (
+              <p className='text-[11px] text-gray-400'>
+                First time only: the agent uses a self-signed certificate, so
+                this browser needs to accept it once. Open{' '}
+                <a
+                  href={`https://${agentHost.trim()}:${agentPort || '7777'}/status`}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='underline text-[#008060]'
+                >
+                  https://{agentHost.trim()}:{agentPort || '7777'}/status
+                </a>{' '}
+                and tap &ldquo;Advanced&rdquo; &rarr; &ldquo;Proceed anyway&rdquo; on the
+                warning, then come back and press Connect.
+              </p>
+            )}
           </div>
         )}
 

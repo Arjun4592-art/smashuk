@@ -2,7 +2,15 @@
 // on a tablet that's paired with the printer over classic Bluetooth (SPP).
 // Unlike network-transport.ts, this talks straight from the browser to the
 // agent's LAN IP — no server-side proxy needed, since the agent itself is
-// just a plain HTTP server on the local network (not a raw TCP printer).
+// an HTTPS server on the local network (not a raw TCP printer).
+//
+// HTTPS (not HTTP) is required here: this app is served over HTTPS, and
+// browsers block a HTTPS page from fetch()-ing plain http:// on the LAN
+// ("Mixed Content"). The agent serves a self-signed certificate, so the
+// first time a device talks to a given bridge tablet, the person needs to
+// open https://<bridge-ip>:<port>/status directly in the browser once and
+// click through the "connection is not private" warning — after that,
+// fetch() calls below succeed normally.
 
 export interface LanAgentHandle {
   host: string
@@ -22,7 +30,7 @@ export class LanAgentUnreachableError extends Error {
   constructor(detail?: string) {
     super(
       detail ??
-        'Could not reach the print agent. Make sure the Android agent app is open on the bridge tablet and both devices are on the same Wi-Fi.',
+        'Could not reach the print agent. Make sure the Android agent app is open on the bridge tablet, both devices are on the same Wi-Fi, and you\u2019ve accepted the certificate warning once at https://<bridge-ip>:<port>/status in this browser.',
     )
     this.name = 'LanAgentUnreachableError'
   }
@@ -32,7 +40,7 @@ export async function printViaLanAgent(
   handle: LanAgentHandle,
   data: Uint8Array,
 ): Promise<void> {
-  const url = `http://${handle.host}:${handle.port}/print`
+  const url = `https://${handle.host}:${handle.port}/print`
   let res: Response
   try {
     res = await fetch(url, {
@@ -58,7 +66,7 @@ export async function printViaLanAgent(
 
 export async function pingLanAgent(handle: LanAgentHandle): Promise<boolean> {
   try {
-    const res = await fetch(`http://${handle.host}:${handle.port}/status`, {
+    const res = await fetch(`https://${handle.host}:${handle.port}/status`, {
       signal: AbortSignal.timeout(3000),
     })
     return res.ok
