@@ -42,6 +42,8 @@ import {
   STORE_ADDRESS_LINE2,
   CONTACT_PHONE,
   VAT_RATE,
+  SITE_LOGO,
+  SITE_URL,
 } from '@/lib/constants'
 const PAY_LABELS: Record<string, string> = {
   cash: 'Cash',
@@ -480,6 +482,8 @@ export default function BillingPage() {
             : null,
         orderNote,
         currencySymbol: CURRENCY_SYMBOL,
+        logoUrl: SITE_LOGO,
+        trackingUrl: `${SITE_URL}/orders/${encodeURIComponent(orderId)}`,
       })
     } catch (err: unknown) {
       if (err instanceof NoPrinterConnectedError) {

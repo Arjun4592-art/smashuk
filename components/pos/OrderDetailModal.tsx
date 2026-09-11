@@ -10,6 +10,8 @@ import {
   STORE_ADDRESS_LINE2,
   CONTACT_PHONE,
   VAT_RATE,
+  SITE_LOGO,
+  SITE_URL,
 } from '@/lib/constants'
 import { usePrinterStore } from '@/store/printerStore'
 import {
@@ -202,6 +204,8 @@ export default function OrderDetailModal({
         })),
         orderNote: order.note,
         currencySymbol: CURRENCY_SYMBOL,
+        logoUrl: SITE_LOGO,
+        trackingUrl: `${SITE_URL}/orders/${encodeURIComponent(order.medusaOrderId ?? order.id)}`,
       })
     } catch (err: unknown) {
       if (err instanceof NoPrinterConnectedError) {

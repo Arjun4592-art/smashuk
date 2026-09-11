@@ -77,7 +77,7 @@ async function sendToConfiguredPrinter(bytes: Uint8Array): Promise<void> {
 
 export async function printReceipt(data: ReceiptData): Promise<void> {
   const { paperWidth, openDrawerOnPrint } = usePrinterStore.getState()
-  const bytes = buildReceiptEscPos(data, paperWidth, openDrawerOnPrint)
+  const bytes = await buildReceiptEscPos(data, paperWidth, openDrawerOnPrint)
   await sendToConfiguredPrinter(bytes)
 }
 

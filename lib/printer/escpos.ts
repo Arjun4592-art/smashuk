@@ -2,6 +2,8 @@
 // Produces raw bytes that any ESC/POS-compatible printer (USB, Bluetooth SPP,
 // or network/Ethernet on port 9100) understands — no vendor SDK required.
 
+import { imageUrlToMonochromeRaster } from './escpos-image'
+
 const ESC = 0x1b
 const GS = 0x1d
 
@@ -51,6 +53,9 @@ export interface ReceiptData {
   currencySymbol: string
   footerLine1?: string
   footerLine2?: string
+  // Optional extras — omit either to skip them on the printed receipt.
+  logoUrl?: string | null
+  trackingUrl?: string | null
 }
 
 class Builder {
@@ -124,6 +129,63 @@ class Builder {
     return this.raw(ESC, 0x70, 0, 25, 250)
   }
 
+  // ---- QR code ----
+  // Uses the printer's own built-in QR renderer (GS ( k function set) —
+  // we only send the text data, no pixel generation needed on our side.
+  qrCode(text: string, moduleSize = 6, ecLevel: 'L' | 'M' | 'Q' | 'H' = 'M') {
+    const EC: Record<string, number> = { L: 48, M: 49, Q: 50, H: 51 }
+
+    const gsK = (cn: number, fn: number, params: number[]) => {
+      const len = params.length + 2 // cn + fn + params
+      this.raw(GS, 0x28, 0x6b, len & 0xff, (len >> 8) & 0xff, cn, fn, ...params)
+    }
+
+    // Model 2 (standard QR), size 0
+    gsK(49, 65, [50, 0])
+    // Module size (dot size per QR "pixel", 1-16)
+    gsK(49, 67, [moduleSize])
+    // Error correction level
+    gsK(49, 69, [EC[ecLevel]])
+
+    // Store QR data: GS ( k pL pH cn(49) fn(80) m(48) d1..dk
+    const dataBytes = Array.from(new TextEncoder().encode(text))
+    const storeLen = dataBytes.length + 3
+    this.raw(
+      GS,
+      0x28,
+      0x6b,
+      storeLen & 0xff,
+      (storeLen >> 8) & 0xff,
+      49,
+      80,
+      48,
+      ...dataBytes,
+    )
+
+    // Print the stored QR code
+    gsK(49, 81, [48])
+    return this
+  }
+
+  // ---- Raster image (logo / bitmap) ----
+  // Expects a 1-bit-per-pixel raster already packed 8 pixels per byte
+  // (MSB = leftmost pixel), matching escpos-image.ts's toMonochromeRaster().
+  image(widthPx: number, heightPx: number, raster: Uint8Array) {
+    const widthBytes = Math.ceil(widthPx / 8)
+    this.raw(
+      GS,
+      0x76,
+      0x30,
+      0x00,
+      widthBytes & 0xff,
+      (widthBytes >> 8) & 0xff,
+      heightPx & 0xff,
+      (heightPx >> 8) & 0xff,
+    )
+    this.bytes.push(...Array.from(raster))
+    return this
+  }
+
   toBytes(): Uint8Array {
     return new Uint8Array(this.bytes)
   }
@@ -150,14 +212,31 @@ function wrapText(str: string, cols: number): string[] {
   return lines
 }
 
-export function buildReceiptEscPos(
+export async function buildReceiptEscPos(
   data: ReceiptData,
   width: PaperWidth = '80mm',
   openDrawer = false,
-): Uint8Array {
+): Promise<Uint8Array> {
   const b = new Builder(width)
   const fmt = (n: number) =>
     data.currencySymbol + (Math.round(n * 100) / 100).toFixed(2)
+
+  // Logo, if provided — printed before the store name, centered.
+  if (data.logoUrl) {
+    try {
+      const logoMaxWidth = width === '80mm' ? 300 : 200
+      const { widthPx, heightPx, raster } = await imageUrlToMonochromeRaster(
+        data.logoUrl,
+        logoMaxWidth,
+      )
+      b.align('center')
+      b.image(widthPx, heightPx, raster)
+      b.feed(1)
+    } catch {
+      // Logo fetch/convert failed (offline, CORS, bad URL, etc) — skip it
+      // rather than failing the whole receipt print.
+    }
+  }
 
   b.align('center')
   b.bold(true)
@@ -244,6 +323,14 @@ export function buildReceiptEscPos(
     b.line('Order note')
     b.bold(false)
     for (const ln of wrapText(data.orderNote, b.width)) b.line(ln)
+  }
+
+  if (data.trackingUrl) {
+    b.feed(1)
+    b.align('center')
+    b.qrCode(data.trackingUrl)
+    b.feed(1)
+    b.line('Scan to track your order')
   }
 
   b.feed(1)
