@@ -5,9 +5,10 @@ import type { USBPrinterHandle } from '@/lib/printer/usb-transport'
 import type { BTPrinterHandle } from '@/lib/printer/bluetooth-transport'
 import type { NetworkPrinterHandle } from '@/lib/printer/network-transport'
 import type { SerialPrinterHandle } from '@/lib/printer/serial-transport'
+import type { LanAgentHandle } from '@/lib/printer/lan-agent-transport'
 
 export type PrinterConnectionType =
-  'none' | 'usb' | 'bluetooth' | 'network' | 'browser' | 'serial'
+  'none' | 'usb' | 'bluetooth' | 'network' | 'browser' | 'serial' | 'lan-agent'
 
 interface PrinterState {
   connectionType: PrinterConnectionType
@@ -16,6 +17,7 @@ interface PrinterState {
   btHandle: BTPrinterHandle | null
   networkHandle: NetworkPrinterHandle | null
   serialHandle: SerialPrinterHandle | null
+  lanAgentHandle: LanAgentHandle | null
   openDrawerOnPrint: boolean
   setConnectionType: (t: PrinterConnectionType) => void
   setPaperWidth: (w: PaperWidth) => void
@@ -23,6 +25,7 @@ interface PrinterState {
   setBTHandle: (h: BTPrinterHandle | null) => void
   setNetworkHandle: (h: NetworkPrinterHandle | null) => void
   setSerialHandle: (h: SerialPrinterHandle | null) => void
+  setLanAgentHandle: (h: LanAgentHandle | null) => void
   setOpenDrawerOnPrint: (v: boolean) => void
   disconnect: () => void
 }
@@ -36,6 +39,7 @@ export const usePrinterStore = create<PrinterState>()(
       btHandle: null,
       networkHandle: null,
       serialHandle: null,
+      lanAgentHandle: null,
       openDrawerOnPrint: false,
       setConnectionType: (t) => set({ connectionType: t }),
       setPaperWidth: (w) => set({ paperWidth: w }),
@@ -43,6 +47,7 @@ export const usePrinterStore = create<PrinterState>()(
       setBTHandle: (h) => set({ btHandle: h }),
       setNetworkHandle: (h) => set({ networkHandle: h }),
       setSerialHandle: (h) => set({ serialHandle: h }),
+      setLanAgentHandle: (h) => set({ lanAgentHandle: h }),
       setOpenDrawerOnPrint: (v) => set({ openDrawerOnPrint: v }),
       disconnect: () =>
         set({
@@ -51,6 +56,7 @@ export const usePrinterStore = create<PrinterState>()(
           btHandle: null,
           networkHandle: null,
           serialHandle: null,
+          lanAgentHandle: null,
         }),
     }),
     { name: 'pos-printer-settings' },

@@ -26,6 +26,7 @@ import {
   NoPrinterConnectedError,
 } from '@/lib/printer/print-receipt'
 import { printTestPageViaBrowser } from '@/lib/printer/browser-print'
+import { pingLanAgent } from '@/lib/printer/lan-agent-transport'
 
 interface PrinterOption {
   type: PrinterConnectionType
@@ -67,6 +68,12 @@ const ALL_OPTIONS: PrinterOption[] = [
     label: 'Network',
     icon: '🌐',
     desc: 'WiFi/Ethernet printer on the same network',
+  },
+  {
+    type: 'lan-agent',
+    label: 'Bridge tablet',
+    icon: '🔁',
+    desc: 'Printer is paired over Bluetooth to another tablet running the print agent app. Enter that tablet\u2019s IP address.',
   },
 ]
 
@@ -115,6 +122,7 @@ export default function PrinterSetup() {
     btHandle,
     networkHandle,
     serialHandle,
+    lanAgentHandle,
     openDrawerOnPrint,
     setConnectionType,
     setPaperWidth,
@@ -122,6 +130,7 @@ export default function PrinterSetup() {
     setBTHandle,
     setNetworkHandle,
     setSerialHandle,
+    setLanAgentHandle,
     setOpenDrawerOnPrint,
     disconnect,
   } = usePrinterStore()
@@ -130,6 +139,11 @@ export default function PrinterSetup() {
   const [usbOk, setUsbOk] = useState<boolean | null>(null)
   const [host, setHost] = useState(networkHandle?.host ?? '')
   const [port, setPort] = useState(String(networkHandle?.port ?? 9100))
+  const [agentHost, setAgentHost] = useState(lanAgentHandle?.host ?? '')
+  const [agentPort, setAgentPort] = useState(
+    String(lanAgentHandle?.port ?? 7777),
+  )
+  const [agentBusy, setAgentBusy] = useState(false)
   const options = useSupportedOptions()
 
   useEffect(() => {
@@ -264,6 +278,36 @@ export default function PrinterSetup() {
     toast.success(`Saved printer at ${trimmedHost}:${portNum}`)
   }
 
+  const saveLanAgent = async () => {
+    const trimmedHost = agentHost.trim()
+    const portNum = parseInt(agentPort, 10)
+    if (!trimmedHost) {
+      toast.error('Enter the bridge tablet\u2019s IP address')
+      return
+    }
+    if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+      toast.error('Enter a valid port (default 7777)')
+      return
+    }
+    setAgentBusy(true)
+    try {
+      const handle = { host: trimmedHost, port: portNum }
+      const reachable = await pingLanAgent(handle)
+      if (!reachable) {
+        toast.error('Could not reach the print agent', {
+          description:
+            'Make sure the agent app is open on the bridge tablet and both devices are on the same Wi-Fi.',
+        })
+        return
+      }
+      setLanAgentHandle(handle)
+      setConnectionType('lan-agent')
+      toast.success(`Connected to bridge at ${trimmedHost}:${portNum}`)
+    } finally {
+      setAgentBusy(false)
+    }
+  }
+
   const handleDisconnect = () => {
     if (connectionType === 'bluetooth') disconnectBluetoothPrinter()
     if (connectionType === 'serial') disconnectSerialPrinter()
@@ -302,7 +346,9 @@ export default function PrinterSetup() {
             ? 'System print dialog'
             : connectionType === 'serial'
               ? serialHandle?.label || 'Paired serial printer'
-              : null
+              : connectionType === 'lan-agent'
+                ? `Bridge @ ${lanAgentHandle?.host}:${lanAgentHandle?.port}`
+                : null
 
   return (
     <div className='rounded-xl overflow-hidden bg-white border border-gray-200'>
@@ -357,7 +403,9 @@ export default function PrinterSetup() {
                           ? connectSerial()
                           : opt.type === 'browser'
                             ? connectBrowser()
-                            : setConnectionType('network')
+                            : opt.type === 'lan-agent'
+                              ? undefined // handled by the form below
+                              : setConnectionType('network')
                   }
                   className='flex flex-col items-start text-left px-4 py-3 rounded-lg border border-gray-200 hover:border-[#008060] hover:bg-[#F2F7F5] transition-colors disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:bg-transparent'
                 >
@@ -409,6 +457,39 @@ export default function PrinterSetup() {
             <p className='text-[11px] text-gray-400'>
               Port 9100 is the default raw print port on almost all network
               thermal printers.
+            </p>
+          </div>
+        )}
+
+        {connectionType === 'none' && (
+          <div className='space-y-2 pt-1'>
+            <label className='text-[11px] font-medium uppercase tracking-wide text-gray-500 block'>
+              Bridge tablet IP (if using Bridge tablet)
+            </label>
+            <div className='flex gap-2'>
+              <input
+                value={agentHost}
+                onChange={(e) => setAgentHost(e.target.value)}
+                placeholder='192.168.1.60'
+                className='flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-[#008060]'
+              />
+              <input
+                value={agentPort}
+                onChange={(e) => setAgentPort(e.target.value)}
+                placeholder='7777'
+                className='w-20 px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-[#008060]'
+              />
+              <button
+                onClick={saveLanAgent}
+                disabled={agentBusy}
+                className='px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[#008060] hover:bg-[#006e52] transition-colors shrink-0 disabled:opacity-50'
+              >
+                {agentBusy ? 'Checking\u2026' : 'Connect'}
+              </button>
+            </div>
+            <p className='text-[11px] text-gray-400'>
+              The other tablet must have the print agent app open and be paired
+              with the printer over Bluetooth.
             </p>
           </div>
         )}

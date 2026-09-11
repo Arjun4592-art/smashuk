@@ -58,7 +58,10 @@ export async function requestUSBPrinter(): Promise<USBPrinterHandle> {
   const device = await navigator.usb.requestDevice({
     filters: [
       { classCode: 7 }, // USB Printer class
-      // Fallback: some thermal printers report as vendor-specific class.
+      // Fallback: Star Micronics printers (incl. TSP100 series) often
+      // enumerate as vendor-specific class rather than printer class, so
+      // match on vendor ID too or they won't appear in the picker at all.
+      { vendorId: 0x0519 },
     ],
   })
   return {

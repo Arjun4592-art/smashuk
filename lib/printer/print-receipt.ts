@@ -9,6 +9,7 @@ import { printViaBluetooth } from './bluetooth-transport'
 import { printViaNetwork } from './network-transport'
 import { printTestPageViaBrowser } from './browser-print'
 import { printViaSerial, isSerialPrinterAvailable } from './serial-transport'
+import { printViaLanAgent } from './lan-agent-transport'
 
 export class NoPrinterConnectedError extends Error {
   constructor() {
@@ -22,8 +23,14 @@ export class NoPrinterConnectedError extends Error {
 // fall back to window.print() in that case), or the transport's own error
 // (with a human-readable message) if the configured printer can't be reached.
 async function sendToConfiguredPrinter(bytes: Uint8Array): Promise<void> {
-  const { connectionType, usbHandle, btHandle, networkHandle, serialHandle } =
-    usePrinterStore.getState()
+  const {
+    connectionType,
+    usbHandle,
+    btHandle,
+    networkHandle,
+    serialHandle,
+    lanAgentHandle,
+  } = usePrinterStore.getState()
 
   switch (connectionType) {
     case 'usb': {
@@ -56,6 +63,11 @@ async function sendToConfiguredPrinter(bytes: Uint8Array): Promise<void> {
         )
       }
       await printViaSerial(serialHandle, bytes)
+      return
+    }
+    case 'lan-agent': {
+      if (!lanAgentHandle) throw new NoPrinterConnectedError()
+      await printViaLanAgent(lanAgentHandle, bytes)
       return
     }
     default:
