@@ -283,17 +283,14 @@ export default function PrinterSetup() {
     }
   }
 
-  // Fires a real test print through PassPRNT rather than marking this
-  // "Connected" on faith — same reasoning as connectBrowser above. Unlike a
-  // real page navigation, triggering the starpassprnt:// / intent:// URI
-  // just backgrounds this tab while the PassPRNT app handles printing (this
-  // component doesn't unmount), so we can safely wait for the tab to regain
-  // focus and then ask. The timeout is a fallback for platforms where no
-  // app switch actually happens (e.g. bench-testing on desktop).
+  // Fires a real test print through PassPRNT. PassPRNT's own success/
+  // failure result comes back via consumePassPrntCallback() after the
+  // 'back' URL reloads this page (see POSTerminalLayout) — so there's
+  // nothing to resolve here; this just launches the app.
   const connectPassPRNT = async () => {
     setBusy(true)
     try {
-      await printTestPageViaPassPRNT(paperWidth)
+      await printTestPageViaPassPRNT(paperWidth, 'connect-test')
     } catch (err: unknown) {
       toast.error('Could not open Star PassPRNT', {
         description:
@@ -302,36 +299,9 @@ export default function PrinterSetup() {
             : 'Make sure the Star PassPRNT app is installed.',
       })
       setBusy(false)
-      return
     }
-
-    let settled = false
-    const ask = () => {
-      if (settled) return
-      settled = true
-      document.removeEventListener('visibilitychange', onVisible)
-      clearTimeout(fallback)
-      setBusy(false)
-      const confirmed = window.confirm(
-        'Did the test page print correctly on your Star printer?\n\nClick OK only if it actually printed. Click Cancel to try again.',
-      )
-      if (!confirmed) {
-        toast.error('Not connected', {
-          description:
-            'Check the printer is set up inside the PassPRNT app, then tap Star PassPRNT again.',
-        })
-        return
-      }
-      setConnectionType('star-passprnt')
-      toast.success('Printer connected')
-    }
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') ask()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    // Fallback for desktop/dev testing, where there's no app to switch to
-    // and away from, so visibilitychange never fires.
-    const fallback = setTimeout(ask, 4000)
+    // On success, the page navigates away to PassPRNT and this component
+    // unmounts — setBusy(false) here would be a no-op in that case.
   }
 
   const saveNetwork = () => {

@@ -2,8 +2,11 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import { toast } from 'sonner'
 import { usePOSStore } from '@/store/posStore'
 import { useAuthStore } from '@/store/authStore'
+import { usePrinterStore } from '@/store/printerStore'
+import { consumePassPrntCallback } from '@/lib/printer/passprnt-transport'
 import POSNavBar from '@/components/pos/POSNavBar'
 import POSBottomTabs from '@/components/pos/POSBottomTabs'
 import POSMoreDrawer from '@/components/pos/POSMoreDrawer'
@@ -47,6 +50,30 @@ export default function POSTerminalLayout({
   useEffect(() => {
     if (!storeSettingsLoaded) fetchStoreSettings()
   }, [storeSettingsLoaded, fetchStoreSettings])
+  // Star PassPRNT hands control back to us by reloading whichever page
+  // triggered it, with its real print/connect result appended to the URL
+  // (passprnt_code / passprnt_message) — this is the actual outcome, not
+  // a guess. Runs once per mount, which covers both the billing page's
+  // real receipt prints and the settings page's connection test.
+  useEffect(() => {
+    const result = consumePassPrntCallback()
+    if (!result) return
+    if (result.action === 'connect-test') {
+      if (result.success) {
+        usePrinterStore.getState().setConnectionType('star-passprnt')
+        toast.success('Printer connected')
+      } else {
+        toast.error('Not connected', { description: result.message })
+      }
+      return
+    }
+    const label = result.action === 'test-print' ? 'Test page' : 'Receipt'
+    if (result.success) {
+      toast.success(`${label} printed`)
+    } else {
+      toast.error(`${label} print failed`, { description: result.message })
+    }
+  }, [])
   useEffect(() => {
     if (!authUser || (authUser.role !== 'admin' && authUser.role !== 'staff')) {
       router.replace('/pos')
