@@ -11,9 +11,13 @@
 //
 // HOW PASSPRNT PRINTING WORKS (confirmed against Star's PassPRNT Web SDK /
 // "Data Specifications" manual, Sept 2026):
-//   - The receipt is passed as literal HTML in the `html` query param (URL
-//     encoded) — NOT a URL PassPRNT fetches. PassPRNT renders that HTML and
-//     rasterizes it for the printer, so no server round-trip is needed here.
+//   - PassPRNT accepts print content either as literal HTML in the `html`
+//     query param (URL encoded, embedded directly in the intent) or as a
+//     `url` param it fetches itself. The test page uses `html` since it's
+//     tiny; real receipts use `url` instead — see printViaPassPRNT below
+//     for why (short version: a real receipt's HTML is long enough to
+//     push the Android intent URI past a length where launching PassPRNT
+//     silently fails).
 //   - `back` is the URL PassPRNT returns to after printing (this is what
 //     sends the tablet back to the POS browser tab — plan step 6).
 //   - Path is always v1/print/nopreview (preview screen disabled).
@@ -189,8 +193,17 @@ function buildTestHtml(width: PaperWidth): string {
 
 // Builds both URI forms and picks the right one for the current platform —
 // see the module header for why Android needs the intent:// wrapper.
-function buildPassPrntUri(html: string, backUrl: string): string {
-  const query = `html=${encodeURIComponent(html)}&back=${encodeURIComponent(backUrl)}`
+// Accepts either `html` (used only for the small test page) or `url`
+// (used for real receipts — see printViaPassPRNT for why).
+function buildPassPrntUri(
+  content: { html: string } | { url: string },
+  backUrl: string,
+): string {
+  const contentParam =
+    'html' in content
+      ? `html=${encodeURIComponent(content.html)}`
+      : `url=${encodeURIComponent(content.url)}`
+  const query = `${contentParam}&back=${encodeURIComponent(backUrl)}`
 
   if (isAndroid()) {
     return (
@@ -216,7 +229,10 @@ function buildPassPrntUri(html: string, backUrl: string): string {
 // query param purely for telling apart *why* a print was triggered when
 // you're staring at a URL bar mid-debugging (e.g. "connect-test" from the
 // Settings screen vs a real receipt print) — PassPRNT itself never sees it.
-function launchPassPrnt(html: string, tag?: string): Promise<void> {
+function launchPassPrnt(
+  content: { html: string } | { url: string },
+  tag?: string,
+): Promise<void> {
   if (typeof window === 'undefined') {
     return Promise.reject(
       new Error('Star PassPRNT can only be triggered from the browser.'),
@@ -225,23 +241,46 @@ function launchPassPrnt(html: string, tag?: string): Promise<void> {
   const returnTo = window.location.pathname + window.location.search
   let backUrl = `${window.location.origin}/pos/print-return?returnTo=${encodeURIComponent(returnTo)}`
   if (tag) backUrl += `&reason=${encodeURIComponent(tag)}`
-  const uri = buildPassPrntUri(html, backUrl)
+  const uri = buildPassPrntUri(content, backUrl)
   window.location.href = uri
   return Promise.resolve()
 }
 
+// Real receipts (full header, every line item, tax/discount/split-payment
+// breakdown) produce far more HTML than the tiny test page. Embedding that
+// directly in the Android intent URI — like the test page does — can push
+// the whole URI past the point where Chrome/Android silently fails to
+// launch PassPRNT at all: no error, no popup, just nothing happens. So
+// this stashes the HTML server-side first (see
+// app/api/pos/print/receipt-html/route.ts) and gives PassPRNT a short
+// `url` to fetch instead, keeping the intent URI itself tiny regardless of
+// how long the receipt actually is.
 export async function printViaPassPRNT(
   data: ReceiptData,
   paperWidth: PaperWidth,
 ): Promise<void> {
-  await launchPassPrnt(buildReceiptHtml(data, paperWidth), 'receipt')
+  const html = buildReceiptHtml(data, paperWidth)
+  const res = await fetch('/api/pos/print/receipt-html', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ html }),
+  })
+  if (!res.ok) {
+    throw new Error('Could not prepare the receipt for printing.')
+  }
+  const { token } = (await res.json()) as { token: string }
+  const url = `${window.location.origin}/api/pos/print/receipt-html?token=${token}`
+  await launchPassPrnt({ url }, 'receipt')
 }
 
+// The test page is tiny, so it's safe (and simpler/one-less-network-call)
+// to keep sending it inline via `html` rather than round-tripping it
+// through the receipt-html endpoint too.
 export async function printTestPageViaPassPRNT(
   paperWidth: PaperWidth,
   tag: string = 'test-print',
 ): Promise<void> {
-  await launchPassPrnt(buildTestHtml(paperWidth), tag)
+  await launchPassPrnt({ html: buildTestHtml(paperWidth) }, tag)
 }
 
 export { isAndroid as isAndroidDevice }
