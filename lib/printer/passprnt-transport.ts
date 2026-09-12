@@ -1,3 +1,39 @@
+// Star PassPRNT transport.
+//
+// WHY THIS EXISTS: the Star TSP100III's Bluetooth models (TSP100IIIBI) pair
+// with Android as classic Bluetooth SPP, not BLE — so bluetooth-transport.ts
+// (Web Bluetooth, BLE-only) can never see it, and Web Serial
+// (serial-transport.ts) isn't implemented on Android Chrome at all. There is
+// no direct browser API path to this printer on an Android tablet. Star's
+// own PassPRNT app is the supported bridge: it holds the paired connection
+// to the printer, and a web page hands it a receipt via a URL scheme instead
+// of talking to the printer directly.
+//
+// HOW PASSPRNT PRINTING WORKS (confirmed against Star's PassPRNT Web SDK /
+// "Data Specifications" manual, Sept 2026):
+//   - The receipt is passed as literal HTML in the `html` query param (URL
+//     encoded) — NOT a URL PassPRNT fetches. PassPRNT renders that HTML and
+//     rasterizes it for the printer, so no server round-trip is needed here.
+//   - `back` is the URL PassPRNT returns to after printing (this is what
+//     sends the tablet back to the POS browser tab — plan step 6).
+//   - Path is always v1/print/nopreview (preview screen disabled).
+//   - On Android, Chrome will not navigate a plain `starpassprnt://` link
+//     reliably — it needs the `intent://...#Intent;...;end` wrapper
+//     (see https://developer.chrome.com/docs/android/intents). iOS Safari
+//     and desktop browsers (for bench-testing the HTML) can use the plain
+//     scheme directly.
+//   - Printer selection (which Bluetooth printer, paper width) lives inside
+//     the PassPRNT app itself, configured once during setup — this transport
+//     deliberately does not pass a `size` query override, so it always uses
+//     whatever printer profile the person configured in the app.
+//
+// CAVEAT: unlike the other transports, there is no callback that tells the
+// web page printing actually succeeded or failed — `back` just means
+// PassPRNT handed control back to the browser, not that paper came out. If
+// PassPRNT isn't installed, or no printer is configured inside it, Chrome's
+// "Open with" resolution can silently do nothing. Worth a real test print
+// (see printTestPageViaPassPRNT) before relying on this for live sales.
+
 import type { PaperWidth, ReceiptData } from './escpos'
 
 const PASSPRNT_ANDROID_PACKAGE = 'jp.star_m.passprnt'
@@ -7,100 +43,6 @@ const PASSPRNT_PLAY_STORE_URL =
 const PAPER_MM: Record<PaperWidth, number> = {
   '58mm': 58,
   '80mm': 80,
-}
-
-// PassPRNT's "size" query param (print width in dots). Star's TSP100III
-// table lists 406 (50.8mm) as "2" and 576 (72mm) as "3" — leaving this
-// unset defaults to 576, which is wrong for a 58mm-configured printer.
-const PASSPRNT_SIZE_PARAM: Record<PaperWidth, string> = {
-  '58mm': '2',
-  '80mm': '3',
-}
-
-// Star PassPRNT Android manual §3.4 — codes appended to the `back` URL
-// when PassPRNT hands control back to us. Code 0 is success.
-const PASSPRNT_ERROR_MESSAGES: Record<number, string> = {
-  1: 'PassPRNT rejected the request (invalid path).',
-  2: 'PassPRNT callback was not set correctly.',
-  3: 'Receipt is too long for one print job — try trimming it.',
-  4: 'Could not reach the printer. Check it is powered on and still paired.',
-  5: 'Printer is offline — check paper, and that the cover is closed.',
-  6: 'Timed out sending data to the printer.',
-  7: 'Printer went offline while printing — check paper and the cover.',
-  8: 'Printer connection error.',
-  9: 'No print data was sent.',
-  10: 'Printing was cancelled.',
-  11: 'PassPRNT failed to render the receipt.',
-  12: 'Printer ran out of memory rendering the receipt.',
-  13: 'Paper separation could not be detected.',
-  14: 'Unsupported file format sent to PassPRNT.',
-  15: 'PassPRNT printer settings are incomplete — open the PassPRNT app and pick the printer once.',
-  16: 'Failed to download print data.',
-  1000: 'Bluetooth permission was denied for Star PassPRNT — enable it in Android Settings → Apps → PassPRNT.',
-}
-
-// Bridges JS state across the hard page navigation PassPRNT's callback
-// causes (see consumePassPrntCallback below) — sessionStorage survives
-// that reload, in-memory state does not.
-const PENDING_KEY = 'pos_passprnt_pending'
-
-export type PassPrntAction = 'connect-test' | 'test-print' | 'receipt'
-
-function markPassPrntPending(action: PassPrntAction) {
-  if (typeof window === 'undefined') return
-  try {
-    sessionStorage.setItem(PENDING_KEY, action)
-  } catch {
-    // sessionStorage unavailable (private mode etc.) — callback handling
-    // will just fall back to a generic message with no action context.
-  }
-}
-
-export interface PassPrntCallbackResult {
-  action: PassPrntAction | null
-  success: boolean
-  code: number | null
-  message: string
-}
-
-// Reads and strips the `passprnt_code` / `passprnt_message` query params
-// PassPRNT appends to our `back` URL on its way back to us — this is the
-// actual print/connect result, not a guess. Call once on mount of any
-// page PassPRNT could return to. Returns null if this load isn't a
-// PassPRNT callback.
-export function consumePassPrntCallback(): PassPrntCallbackResult | null {
-  if (typeof window === 'undefined') return null
-  const params = new URLSearchParams(window.location.search)
-  if (!params.has('passprnt_code')) return null
-
-  const code = Number(params.get('passprnt_code'))
-  const rawMessage = params.get('passprnt_message') ?? ''
-  let action: PassPrntAction | null = null
-  try {
-    action = sessionStorage.getItem(PENDING_KEY) as PassPrntAction | null
-    sessionStorage.removeItem(PENDING_KEY)
-  } catch {
-    // ignore
-  }
-
-  params.delete('passprnt_code')
-  params.delete('passprnt_message')
-  const query = params.toString()
-  const cleanUrl =
-    window.location.pathname + (query ? `?${query}` : '') + window.location.hash
-  window.history.replaceState(window.history.state, '', cleanUrl)
-
-  return {
-    action,
-    success: code === 0,
-    code: Number.isNaN(code) ? null : code,
-    message:
-      code === 0
-        ? 'Success'
-        : (PASSPRNT_ERROR_MESSAGES[code] ??
-          rawMessage ??
-          'Unknown PassPRNT error'),
-  }
 }
 
 function isAndroid(): boolean {
@@ -166,7 +108,6 @@ function buildReceiptHtml(data: ReceiptData, width: PaperWidth): string {
 <html>
 <head>
 <meta charset="utf-8" />
-<meta name="format-detection" content="telephone=no" />
 <style>
   @page { size: ${mm}mm auto; margin: 2mm; }
   * { box-sizing: border-box; }
@@ -248,15 +189,8 @@ function buildTestHtml(width: PaperWidth): string {
 
 // Builds both URI forms and picks the right one for the current platform —
 // see the module header for why Android needs the intent:// wrapper.
-function buildPassPrntUri(
-  html: string,
-  backUrl: string,
-  paperWidth: PaperWidth,
-): string {
-  const query =
-    `html=${encodeURIComponent(html)}` +
-    `&back=${encodeURIComponent(backUrl)}` +
-    `&size=${PASSPRNT_SIZE_PARAM[paperWidth]}`
+function buildPassPrntUri(html: string, backUrl: string): string {
+  const query = `html=${encodeURIComponent(html)}&back=${encodeURIComponent(backUrl)}`
 
   if (isAndroid()) {
     return (
@@ -268,25 +202,30 @@ function buildPassPrntUri(
   return `starpassprnt://v1/print/nopreview?${query}`
 }
 
-// This hands off to PassPRNT and, on real Android hardware, the actual
-// print result comes back later as a fresh page load carrying
-// `passprnt_code`/`passprnt_message` on the `back` URL (see
-// consumePassPrntCallback) — not as a resolution of this promise. This
-// only rejects if we couldn't even launch the intent (e.g. app missing);
-// the caller should not treat a resolved promise as "printed".
-function launchPassPrnt(
-  html: string,
-  paperWidth: PaperWidth,
-  action: PassPrntAction,
-): Promise<void> {
+// Fire-and-forget, like browser-print's window.print(): there is no
+// PassPRNT API that reports success back into this promise, only the OS
+// handing off to (and eventually back from) the app.
+//
+// `back` intentionally points at /pos/print-return, not the page that
+// triggered the print. On Android, PassPRNT's handoff often opens a brand
+// new cold tab rather than resuming the original one — see
+// app/pos/print-return/page.tsx for why sending that cold tab straight
+// into /pos/terminal/* was hanging.
+//
+// `tag` is an optional label carried through to print-return's `reason`
+// query param purely for telling apart *why* a print was triggered when
+// you're staring at a URL bar mid-debugging (e.g. "connect-test" from the
+// Settings screen vs a real receipt print) — PassPRNT itself never sees it.
+function launchPassPrnt(html: string, tag?: string): Promise<void> {
   if (typeof window === 'undefined') {
     return Promise.reject(
       new Error('Star PassPRNT can only be triggered from the browser.'),
     )
   }
-  markPassPrntPending(action)
-  const backUrl = window.location.href
-  const uri = buildPassPrntUri(html, backUrl, paperWidth)
+  const returnTo = window.location.pathname + window.location.search
+  let backUrl = `${window.location.origin}/pos/print-return?returnTo=${encodeURIComponent(returnTo)}`
+  if (tag) backUrl += `&reason=${encodeURIComponent(tag)}`
+  const uri = buildPassPrntUri(html, backUrl)
   window.location.href = uri
   return Promise.resolve()
 }
@@ -295,18 +234,45 @@ export async function printViaPassPRNT(
   data: ReceiptData,
   paperWidth: PaperWidth,
 ): Promise<void> {
-  await launchPassPrnt(
-    buildReceiptHtml(data, paperWidth),
-    paperWidth,
-    'receipt',
-  )
+  await launchPassPrnt(buildReceiptHtml(data, paperWidth), 'receipt')
 }
 
 export async function printTestPageViaPassPRNT(
   paperWidth: PaperWidth,
-  action: PassPrntAction = 'test-print',
+  tag: string = 'test-print',
 ): Promise<void> {
-  await launchPassPrnt(buildTestHtml(paperWidth), paperWidth, action)
+  await launchPassPrnt(buildTestHtml(paperWidth), tag)
 }
 
 export { isAndroid as isAndroidDevice }
+
+// Reads the passprnt_code/passprnt_message/reason params that
+// /pos/print-return forwards onward once it redirects back into the real
+// app (see app/pos/print-return/page.tsx), so a page like
+// app/pos/terminal/layout.tsx can show a specific result — "Printer
+// connected", "Receipt printed", etc — right where the person lands.
+// Returns null when there's no callback in the current URL (i.e. this
+// wasn't a PassPRNT-triggered landing), and strips the params from the
+// address bar via replaceState either way, so a manual refresh afterwards
+// doesn't replay the same toast.
+export function consumePassPrntCallback(): {
+  success: boolean
+  message: string | null
+  action: string
+} | null {
+  if (typeof window === 'undefined') return null
+
+  const url = new URL(window.location.href)
+  const code = url.searchParams.get('passprnt_code')
+  if (code === null) return null
+
+  const message = url.searchParams.get('passprnt_message')
+  const action = url.searchParams.get('reason') || 'unknown'
+
+  url.searchParams.delete('passprnt_code')
+  url.searchParams.delete('passprnt_message')
+  url.searchParams.delete('reason')
+  window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+
+  return { success: code === '0', message, action }
+}
