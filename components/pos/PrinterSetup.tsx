@@ -46,14 +46,14 @@ const ALL_OPTIONS: PrinterOption[] = [
     type: 'browser',
     label: 'Browser / System',
     icon: '🖨️',
-    desc: 'Uses your device’s normal print dialog. Works on every OS — the right choice for Mac/iPad, or for a printer paired in OS Bluetooth settings (e.g. Star TSP100).',
+    desc: 'Uses your device’s normal print dialog. Works on every OS — good for Mac, or any AirPrint/OS-paired printer. On iPad, a Star TSP100 over classic Bluetooth won’t show up here — use Star PassPRNT instead.',
     recommended: true,
   },
   {
     type: 'star-passprnt',
     label: 'Star PassPRNT',
     icon: '⭐',
-    desc: 'For Android tablets paired with a Star Bluetooth printer (e.g. TSP100IIIBI). Requires the free Star PassPRNT app installed and configured with the printer first.',
+    desc: 'For iPad or Android tablets paired with a Star Bluetooth printer (e.g. TSP100IIIBI). Requires the free Star PassPRNT app installed and configured with the printer first — this is the recommended option on iPad since Safari has no generic Bluetooth print driver.',
   },
   {
     type: 'usb',
@@ -65,13 +65,13 @@ const ALL_OPTIONS: PrinterOption[] = [
     type: 'bluetooth',
     label: 'Bluetooth (BLE)',
     icon: '📶',
-    desc: 'BLE printers only, Chrome/Edge only. Most budget thermal printers (incl. Star TSP100) use classic Bluetooth (SPP) instead — use Pair (Serial), Star PassPRNT (Android), or Browser/System for those.',
+    desc: 'BLE printers only, Chrome/Edge only. Most budget thermal printers (incl. Star TSP100) use classic Bluetooth (SPP) instead — use Pair (Serial), Star PassPRNT (iPad/Android), or Browser/System for those.',
   },
   {
     type: 'serial',
     label: 'Pair (Serial)',
     icon: '🔗',
-    desc: 'Pairs directly with a classic Bluetooth (SPP) printer like the Star TSP100 — pick its port once, prints go straight through after. Chrome/Edge on Windows/macOS/Linux only — not available on Android, use Star PassPRNT there instead.',
+    desc: 'Pairs directly with a classic Bluetooth (SPP) printer like the Star TSP100 — pick its port once, prints go straight through after. Chrome/Edge on Windows/macOS/Linux only — not available on iPad or Android, use Star PassPRNT there instead.',
   },
   {
     type: 'network',
@@ -98,15 +98,25 @@ function useSupportedOptions(): PrinterOption[] {
       typeof navigator !== 'undefined' && 'bluetooth' in navigator
     const hasSerial = typeof navigator !== 'undefined' && 'serial' in navigator
     const onAndroid = isAndroidDevice()
+    // iPadOS Safari has reported itself as a plain "Macintosh" UA (desktop
+    // site by default) since iOS 13, so a UA string check for "iPad" alone
+    // misses real iPads. The standard workaround: a "Mac" UA that also
+    // reports multi-touch is actually an iPad (real Macs report 0 or 1).
+    const onIOS =
+      typeof navigator !== 'undefined' &&
+      (/iPad|iPhone|iPod/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+    const onMobileWithNoDriver = onAndroid || onIOS
     return ALL_OPTIONS.map((opt) => {
-      // On Android, Star PassPRNT is the one path that actually reaches a
-      // classic-Bluetooth (SPP) TSP100 — Serial isn't implemented on Android
-      // Chrome at all, and Browser/System has no generic Bluetooth print
-      // driver on Android the way macOS/Windows do. Swap the recommendation.
+      // On Android or iPad, Star PassPRNT is the one path that actually
+      // reaches a classic-Bluetooth (SPP) TSP100 — Serial isn't implemented
+      // on Android Chrome or iOS Safari at all, and Browser/System has no
+      // generic Bluetooth print driver on either mobile OS the way
+      // macOS/Windows do. Swap the recommendation.
       if (opt.type === 'star-passprnt') {
-        return { ...opt, recommended: onAndroid }
+        return { ...opt, recommended: onMobileWithNoDriver }
       }
-      if (opt.type === 'browser' && onAndroid) {
+      if (opt.type === 'browser' && onMobileWithNoDriver) {
         return { ...opt, recommended: false }
       }
       if (opt.type === 'usb' && !hasUSB) {
