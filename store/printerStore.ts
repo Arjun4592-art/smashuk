@@ -8,7 +8,14 @@ import type { SerialPrinterHandle } from '@/lib/printer/serial-transport'
 import type { LanAgentHandle } from '@/lib/printer/lan-agent-transport'
 
 export type PrinterConnectionType =
-  'none' | 'usb' | 'bluetooth' | 'network' | 'browser' | 'serial' | 'lan-agent'
+  | 'none'
+  | 'usb'
+  | 'bluetooth'
+  | 'network'
+  | 'browser'
+  | 'serial'
+  | 'lan-agent'
+  | 'star-passprnt'
 
 interface PrinterState {
   connectionType: PrinterConnectionType

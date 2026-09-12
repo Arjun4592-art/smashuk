@@ -27,6 +27,7 @@ import {
 } from '@/lib/printer/print-receipt'
 import { printTestPageViaBrowser } from '@/lib/printer/browser-print'
 import { pingLanAgent } from '@/lib/printer/lan-agent-transport'
+import { isAndroidDevice } from '@/lib/printer/passprnt-transport'
 
 interface PrinterOption {
   type: PrinterConnectionType
@@ -46,6 +47,12 @@ const ALL_OPTIONS: PrinterOption[] = [
     recommended: true,
   },
   {
+    type: 'star-passprnt',
+    label: 'Star PassPRNT',
+    icon: '⭐',
+    desc: 'For Android tablets paired with a Star Bluetooth printer (e.g. TSP100IIIBI). Requires the free Star PassPRNT app installed and configured with the printer first.',
+  },
+  {
     type: 'usb',
     label: 'USB',
     icon: '🔌',
@@ -55,13 +62,13 @@ const ALL_OPTIONS: PrinterOption[] = [
     type: 'bluetooth',
     label: 'Bluetooth (BLE)',
     icon: '📶',
-    desc: 'BLE printers only, Chrome/Edge only. Most budget thermal printers (incl. Star TSP100) use classic Bluetooth (SPP) instead — use Pair (Serial) or Browser/System for those.',
+    desc: 'BLE printers only, Chrome/Edge only. Most budget thermal printers (incl. Star TSP100) use classic Bluetooth (SPP) instead — use Pair (Serial), Star PassPRNT (Android), or Browser/System for those.',
   },
   {
     type: 'serial',
     label: 'Pair (Serial)',
     icon: '🔗',
-    desc: 'Pairs directly with a classic Bluetooth (SPP) printer like the Star TSP100 — pick its port once, prints go straight through after. Chrome/Edge on Windows/macOS/Linux only.',
+    desc: 'Pairs directly with a classic Bluetooth (SPP) printer like the Star TSP100 — pick its port once, prints go straight through after. Chrome/Edge on Windows/macOS/Linux only — not available on Android, use Star PassPRNT there instead.',
   },
   {
     type: 'network',
@@ -87,7 +94,18 @@ function useSupportedOptions(): PrinterOption[] {
     const hasBluetooth =
       typeof navigator !== 'undefined' && 'bluetooth' in navigator
     const hasSerial = typeof navigator !== 'undefined' && 'serial' in navigator
+    const onAndroid = isAndroidDevice()
     return ALL_OPTIONS.map((opt) => {
+      // On Android, Star PassPRNT is the one path that actually reaches a
+      // classic-Bluetooth (SPP) TSP100 — Serial isn't implemented on Android
+      // Chrome at all, and Browser/System has no generic Bluetooth print
+      // driver on Android the way macOS/Windows do. Swap the recommendation.
+      if (opt.type === 'star-passprnt') {
+        return { ...opt, recommended: onAndroid }
+      }
+      if (opt.type === 'browser' && onAndroid) {
+        return { ...opt, recommended: false }
+      }
       if (opt.type === 'usb' && !hasUSB) {
         return {
           ...opt,
@@ -262,6 +280,20 @@ export default function PrinterSetup() {
     }
   }
 
+  // Unlike USB/Bluetooth/Serial, there's no browser API here at all — the
+  // printer and paper profile live inside the separate PassPRNT app, which
+  // this page has no way to query. So "connect" just records the choice;
+  // use the "Print test page" button below afterwards (it now routes
+  // through PassPRNT once this is selected) to confirm it actually reaches
+  // the printer, same as you'd verify any newly paired printer.
+  const connectPassPRNT = () => {
+    setConnectionType('star-passprnt')
+    toast.success('Star PassPRNT selected', {
+      description:
+        'Use "Print test page" below to confirm it reaches your printer.',
+    })
+  }
+
   const saveNetwork = () => {
     const trimmedHost = host.trim()
     const portNum = parseInt(port, 10)
@@ -348,7 +380,9 @@ export default function PrinterSetup() {
               ? serialHandle?.label || 'Paired serial printer'
               : connectionType === 'lan-agent'
                 ? `Bridge @ ${lanAgentHandle?.host}:${lanAgentHandle?.port}`
-                : null
+                : connectionType === 'star-passprnt'
+                  ? 'Star PassPRNT app'
+                  : null
 
   return (
     <div className='rounded-xl overflow-hidden bg-white border border-gray-200'>
@@ -403,9 +437,11 @@ export default function PrinterSetup() {
                           ? connectSerial()
                           : opt.type === 'browser'
                             ? connectBrowser()
-                            : opt.type === 'lan-agent'
-                              ? undefined // handled by the form below
-                              : setConnectionType('network')
+                            : opt.type === 'star-passprnt'
+                              ? connectPassPRNT()
+                              : opt.type === 'lan-agent'
+                                ? undefined // handled by the form below
+                                : setConnectionType('network')
                   }
                   className='flex flex-col items-start text-left px-4 py-3 rounded-lg border border-gray-200 hover:border-[#008060] hover:bg-[#F2F7F5] transition-colors disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:bg-transparent'
                 >
@@ -503,8 +539,8 @@ export default function PrinterSetup() {
                 >
                   https://{agentHost.trim()}:{agentPort || '7777'}/status
                 </a>{' '}
-                and tap &ldquo;Advanced&rdquo; &rarr; &ldquo;Proceed anyway&rdquo; on the
-                warning, then come back and press Connect.
+                and tap &ldquo;Advanced&rdquo; &rarr; &ldquo;Proceed
+                anyway&rdquo; on the warning, then come back and press Connect.
               </p>
             )}
           </div>

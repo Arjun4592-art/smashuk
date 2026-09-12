@@ -1,13 +1,15 @@
 // WebUSB transport for USB thermal receipt printers.
-// Works in Chrome/Edge on desktop over HTTPS (or http://localhost). Most
+// Works in Chrome/Edge over HTTPS (or http://localhost) — including Chrome
+// for Android, where WebUSB (unlike Web Bluetooth's BLE-only support, and
+// unlike Web Serial, which Android Chrome doesn't implement at all) works
+// the same as on desktop. On an Android tablet this is a USB-cable-to-
+// printer connection, not a way to reach a Bluetooth-only printer. Most
 // ESC/POS USB printers expose a vendor-specific bulk OUT endpoint — this
 // finds it generically instead of hardcoding one vendor's printer.
 
 export class USBPrinterNotSupportedError extends Error {
   constructor() {
-    super(
-      'WebUSB is not supported in this browser. Use Chrome or Edge on desktop.',
-    )
+    super('WebUSB is not supported in this browser. Use Chrome or Edge.')
     this.name = 'USBPrinterNotSupportedError'
   }
 }

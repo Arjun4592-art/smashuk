@@ -10,6 +10,10 @@ import { printViaNetwork } from './network-transport'
 import { printTestPageViaBrowser } from './browser-print'
 import { printViaSerial, isSerialPrinterAvailable } from './serial-transport'
 import { printViaLanAgent } from './lan-agent-transport'
+import {
+  printViaPassPRNT,
+  printTestPageViaPassPRNT,
+} from './passprnt-transport'
 
 export class NoPrinterConnectedError extends Error {
   constructor() {
@@ -76,7 +80,16 @@ async function sendToConfiguredPrinter(bytes: Uint8Array): Promise<void> {
 }
 
 export async function printReceipt(data: ReceiptData): Promise<void> {
-  const { paperWidth, openDrawerOnPrint } = usePrinterStore.getState()
+  const { connectionType, paperWidth, openDrawerOnPrint } =
+    usePrinterStore.getState()
+  // Star PassPRNT (Android) doesn't take raw ESC/POS bytes either — it
+  // takes an HTML layout via its own URL scheme, and the printer/paper
+  // profile is configured inside the PassPRNT app itself rather than sent
+  // per print. Handled separately here, same reasoning as 'browser' below.
+  if (connectionType === 'star-passprnt') {
+    await printViaPassPRNT(data, paperWidth)
+    return
+  }
   const bytes = await buildReceiptEscPos(data, paperWidth, openDrawerOnPrint)
   await sendToConfiguredPrinter(bytes)
 }
@@ -90,6 +103,10 @@ export async function printTestPage(): Promise<void> {
     await printTestPageViaBrowser(paperWidth)
     return
   }
-  const bytes = buildTestPrintEscPos(paperWidth)
+  if (connectionType === 'star-passprnt') {
+    await printTestPageViaPassPRNT(paperWidth)
+    return
+  }
+  const bytes = await buildTestPrintEscPos(paperWidth)
   await sendToConfiguredPrinter(bytes)
 }
