@@ -27,7 +27,10 @@ import {
 } from '@/lib/printer/print-receipt'
 import { printTestPageViaBrowser } from '@/lib/printer/browser-print'
 import { pingLanAgent } from '@/lib/printer/lan-agent-transport'
-import { isAndroidDevice } from '@/lib/printer/passprnt-transport'
+import {
+  isAndroidDevice,
+  printTestPageViaPassPRNT,
+} from '@/lib/printer/passprnt-transport'
 
 interface PrinterOption {
   type: PrinterConnectionType
@@ -280,18 +283,55 @@ export default function PrinterSetup() {
     }
   }
 
-  // Unlike USB/Bluetooth/Serial, there's no browser API here at all — the
-  // printer and paper profile live inside the separate PassPRNT app, which
-  // this page has no way to query. So "connect" just records the choice;
-  // use the "Print test page" button below afterwards (it now routes
-  // through PassPRNT once this is selected) to confirm it actually reaches
-  // the printer, same as you'd verify any newly paired printer.
-  const connectPassPRNT = () => {
-    setConnectionType('star-passprnt')
-    toast.success('Star PassPRNT selected', {
-      description:
-        'Use "Print test page" below to confirm it reaches your printer.',
-    })
+  // Fires a real test print through PassPRNT rather than marking this
+  // "Connected" on faith — same reasoning as connectBrowser above. Unlike a
+  // real page navigation, triggering the starpassprnt:// / intent:// URI
+  // just backgrounds this tab while the PassPRNT app handles printing (this
+  // component doesn't unmount), so we can safely wait for the tab to regain
+  // focus and then ask. The timeout is a fallback for platforms where no
+  // app switch actually happens (e.g. bench-testing on desktop).
+  const connectPassPRNT = async () => {
+    setBusy(true)
+    try {
+      await printTestPageViaPassPRNT(paperWidth)
+    } catch (err: unknown) {
+      toast.error('Could not open Star PassPRNT', {
+        description:
+          err instanceof Error
+            ? err.message
+            : 'Make sure the Star PassPRNT app is installed.',
+      })
+      setBusy(false)
+      return
+    }
+
+    let settled = false
+    const ask = () => {
+      if (settled) return
+      settled = true
+      document.removeEventListener('visibilitychange', onVisible)
+      clearTimeout(fallback)
+      setBusy(false)
+      const confirmed = window.confirm(
+        'Did the test page print correctly on your Star printer?\n\nClick OK only if it actually printed. Click Cancel to try again.',
+      )
+      if (!confirmed) {
+        toast.error('Not connected', {
+          description:
+            'Check the printer is set up inside the PassPRNT app, then tap Star PassPRNT again.',
+        })
+        return
+      }
+      setConnectionType('star-passprnt')
+      toast.success('Printer connected')
+    }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') ask()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    // Fallback for desktop/dev testing, where there's no app to switch to
+    // and away from, so visibilitychange never fires.
+    const fallback = setTimeout(ask, 4000)
   }
 
   const saveNetwork = () => {
