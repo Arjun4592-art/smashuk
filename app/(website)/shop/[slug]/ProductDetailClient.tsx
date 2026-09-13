@@ -29,6 +29,7 @@ import ProductReviews from '@/components/website/ProductReviews'
 import SizeGuideModal from '@/components/website/SizeGuideModal'
 import NotifyStockForm from '@/components/website/NotifyStockForm'
 import { recordRecentlyViewed } from '@/lib/recently-viewed'
+import { trackViewItem } from '@/lib/analytics-events'
 import type { CrossSellProduct, Product } from '@/types'
 
 const CLOTHING_SIZE_ORDER = [
@@ -1444,6 +1445,13 @@ export default function ProductDetailClient({
   }, [availableTabs, activeTab])
   useEffect(() => {
     recordRecentlyViewed(product.id)
+    trackViewItem({
+      itemId: product.id,
+      itemName: product.name,
+      price: product.price,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once per
+    // product page load, not on every price/name reference change
   }, [product.id])
   const [showSizeGuide, setShowSizeGuide] = useState(false)
   const categoryLower = (product.category ?? '').toLowerCase()

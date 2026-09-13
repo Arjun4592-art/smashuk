@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { usePOSStore } from '@/store/posStore'
 import { useAuthStore } from '@/store/authStore'
 import ProductSearch from '@/components/pos/ProductSearch'
 import CategoryFilter from '@/components/pos/CategoryFilter'
 import ProductGrid, { POSProduct } from '@/components/pos/ProductGrid'
+import VariantPickerModal from '@/components/pos/VariantPickerModal'
 import { sortSizeValues } from '@/lib/pos-size-sort'
 import BillingCart from '@/components/pos/BillingCart'
 import PaymentModal, {
@@ -184,6 +185,37 @@ export default function BillingPage() {
       (p.sku ?? '').toLowerCase().includes(q)
     return matchCat && matchSize && matchSearch
   })
+  // The size filter chips above already let staff narrow to one exact
+  // variant when they know it, but with no size picked `filtered` still
+  // has one row per variant — a shoe in 6 sizes showed as 6 identical
+  // tiles. Collapse that down to one tile per product id; the tile shows
+  // whichever variant is picked as "representative" (first in-stock one)
+  // and clicking it opens a size picker instead of adding directly,
+  // unless the product only has the one variant to begin with.
+  const productGroups = useMemo(() => {
+    const byId = new Map<string, POSProduct[]>()
+    for (const p of filtered) {
+      const list = byId.get(p.id)
+      if (list) list.push(p)
+      else byId.set(p.id, [p])
+    }
+    return byId
+  }, [filtered])
+  const gridProducts = useMemo(() => {
+    return Array.from(productGroups.values()).map((group) => {
+      const representative = group.find((v) => v.stock > 0) ?? group[0]
+      return group.length > 1
+        ? {
+            ...representative,
+            size: undefined,
+            variantCountOverride: group.length,
+          }
+        : representative
+    })
+  }, [productGroups])
+  const [variantPickerFor, setVariantPickerFor] = useState<POSProduct[] | null>(
+    null,
+  )
   const handleScanSubmit = (raw: string) => {
     const q = raw.trim().toLowerCase()
     if (!q) return
@@ -379,6 +411,9 @@ export default function BillingPage() {
             result.splits?.find((s) => s.stripePaymentIntentId)
               ?.stripePaymentAmount,
           gift_card_code: giftCardCode ?? undefined,
+          coupon_code: couponCode ?? undefined,
+          manual_discount_amount:
+            customDiscount > 0 ? customDiscount : undefined,
         })
         medusaOrderId = medusaOrder?.id
       } catch (err: unknown) {
@@ -703,15 +738,34 @@ export default function BillingPage() {
         )}
         <div className='flex-1 min-h-0 overflow-y-auto'>
           <ProductGrid
-            products={filtered}
+            products={gridProducts}
             isLoading={medusaLoading}
             onAdd={(p) => {
+              const group = productGroups.get(p.id) ?? [p]
+              if (group.length > 1) {
+                setVariantPickerFor(group)
+                return
+              }
               handleAdd(p)
               setMobileCartOpen(true)
             }}
           />
         </div>
       </div>
+
+      {variantPickerFor && (
+        <VariantPickerModal
+          productName={variantPickerFor[0].name}
+          image={variantPickerFor[0].image}
+          variants={variantPickerFor}
+          onSelect={(v) => {
+            handleAdd(v)
+            setVariantPickerFor(null)
+            setMobileCartOpen(true)
+          }}
+          onClose={() => setVariantPickerFor(null)}
+        />
+      )}
 
       {}
       {hasItems && (

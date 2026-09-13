@@ -115,13 +115,24 @@ function buildReceiptHtml(data: ReceiptData, width: PaperWidth): string {
 <style>
   @page { size: ${mm}mm auto; margin: 2mm; }
   * { box-sizing: border-box; }
+  html {
+    /* Thermal printers are 1-bit (pure black/white) — antialiased grey
+       edges from normal screen font rendering come out as blurry/fuzzy
+       when PassPRNT rasterizes and dithers this page. Forcing off
+       antialiasing and using bold weight keeps every letter a crisp,
+       fully-black stroke instead. */
+    -webkit-font-smoothing: none;
+    text-rendering: optimizeSpeed;
+  }
   body {
     margin: 0;
     font-family: 'Courier New', Courier, monospace;
-    font-size: 12px;
-    line-height: 1.45;
+    font-weight: 700;
+    font-size: 13px;
+    line-height: 1.5;
     color: #000;
     width: ${mm}mm;
+    -webkit-font-smoothing: none;
   }
   .center { text-align: center; }
   .bold { font-weight: 700; }
@@ -174,8 +185,9 @@ function buildTestHtml(width: PaperWidth): string {
 <meta charset="utf-8" />
 <style>
   @page { size: ${mm}mm auto; margin: 2mm; }
-  body { margin: 0; font-family: 'Courier New', Courier, monospace; font-size: 12px; width: ${mm}mm; text-align: center; }
-  h1 { font-size: 15px; }
+  html { -webkit-font-smoothing: none; text-rendering: optimizeSpeed; }
+  body { margin: 0; font-family: 'Courier New', Courier, monospace; font-weight: 700; font-size: 13px; width: ${mm}mm; text-align: center; -webkit-font-smoothing: none; }
+  h1 { font-size: 16px; }
   hr { border: none; border-top: 1px dashed #000; margin: 2mm 0; }
 </style>
 </head>

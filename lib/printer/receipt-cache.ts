@@ -58,3 +58,12 @@ export function takeReceiptHtml(token: string): string | null {
   if (entry.expiresAt < Date.now()) return null
   return entry.html
 }
+
+// Non-destructive existence check, for HEAD probes that some HTTP clients
+// (Chrome/Android, PassPRNT's own fetcher) send before the real GET. Must
+// NOT delete the entry — only takeReceiptHtml (the real GET) consumes it.
+export function peekReceiptHtml(token: string): boolean {
+  const entry = store.get(token)
+  if (!entry) return false
+  return entry.expiresAt >= Date.now()
+}

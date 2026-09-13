@@ -160,26 +160,29 @@ export default function BillingCart({
                       }}
                     >
                       {item.name}
+                    </p>
+                    <div className='flex items-center gap-1.5 flex-wrap'>
+                      {}
                       {item.variantTitle && (
                         <span
-                          className='font-normal'
+                          className='text-[10px] font-semibold px-1.5 py-[1px] rounded shrink-0'
                           style={{
-                            color: '#8C9196',
+                            background: '#F2F7F5',
+                            color: '#008060',
                           }}
                         >
-                          {' '}
-                          · {item.variantTitle}
+                          {item.variantTitle}
                         </span>
                       )}
-                    </p>
-                    <p
-                      className='text-[11px]'
-                      style={{
-                        color: '#8C9196',
-                      }}
-                    >
-                      {fmt(item.price)} each
-                    </p>
+                      <p
+                        className='text-[11px]'
+                        style={{
+                          color: '#8C9196',
+                        }}
+                      >
+                        {fmt(item.price)} each
+                      </p>
+                    </div>
                   </div>
 
                   {}

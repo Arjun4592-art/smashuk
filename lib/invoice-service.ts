@@ -1,6 +1,12 @@
 import 'server-only'
 import { generateInvoicePdf, InvoiceData } from './invoice-pdf'
 import {
+  STORE_DISPLAY_NAME,
+  CONTACT_PHONE,
+  SITE_URL,
+  SITE_LOGO,
+} from './constants'
+import {
   medusaServiceFetch,
   getMedusaServiceToken,
   MEDUSA_URL,
@@ -77,7 +83,30 @@ async function uploadPdfToMedusa(
   if (!url) {
     throw new Error('[invoicing] Medusa upload response missing file url')
   }
-  return url
+  // Medusa's local file provider builds this url from its OWN server-side
+  // config (its BACKEND_URL env), not from anything this Next app sends —
+  // so if that box still has BACKEND_URL=http://localhost:9000 (common
+  // when it was provisioned before the production domain existed), every
+  // upload keeps coming back as a localhost link no matter which frontend
+  // (demo.smashuk.co, POS, etc.) triggered the generation.
+  //
+  // We deliberately do NOT reuse NEXT_PUBLIC_MEDUSA_BACKEND_URL here: on
+  // the VPS that variable is (correctly) left as http://localhost:9000
+  // so server-to-server calls between the two apps on the same box stay
+  // fast and don't round-trip through the public internet. MEDUSA_PUBLIC_URL
+  // is a separate, public-only value used purely to rewrite links that a
+  // customer's browser or email client will actually open.
+  const publicOrigin = (
+    process.env.MEDUSA_PUBLIC_URL ??
+    process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ??
+    MEDUSA_URL
+  ).replace(/\/$/, '')
+  try {
+    const fixed = new URL(url)
+    return `${publicOrigin}${fixed.pathname}${fixed.search}`
+  } catch {
+    return url
+  }
 }
 function derivePaymentMethod(order: OrderForInvoice): string {
   const posMethod = order.metadata?.payment_method
@@ -165,13 +194,36 @@ export async function generateInvoiceForOrder(
     0,
   )
   const orderNumber = order.display_id ? `SR-${order.display_id}` : order.id
+  const customerName =
+    `${order.customer?.first_name ?? ''} ${order.customer?.last_name ?? ''}`.trim() ||
+    'Customer'
+  // Ship to only makes sense for an order that's actually being shipped
+  // (website checkout with a delivery address, or a POS sale where staff
+  // picked "Ship" instead of in-store pickup/carry-out) — gated on the
+  // order actually having a shipping method + address, not on channel, so
+  // a POS "Ship" sale gets the same Ship to block a website order does. A
+  // POS/website pickup sale has no shipping_methods and so never shows it.
+  const isShippedOrder =
+    (order.shipping_methods ?? []).length > 0 &&
+    !!order.shipping_address?.address_1
+  const placedDate = order.created_at ? new Date(order.created_at) : null
   const invoiceData: InvoiceData = {
     invoiceNumber,
     invoiceDate: new Date().toISOString().slice(0, 10),
     supplyDate: new Date().toISOString().slice(0, 10),
     orderReference: orderNumber,
-    placedAt: order.created_at
-      ? new Date(order.created_at).toISOString().slice(0, 10)
+    placedAt: placedDate
+      ? placedDate.toLocaleDateString('en-GB', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        })
+      : undefined,
+    receiptTime: placedDate
+      ? placedDate.toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
       : undefined,
     paymentMethod: derivePaymentMethod(order),
     staffName:
@@ -180,10 +232,11 @@ export async function generateInvoiceForOrder(
         : undefined,
     currency: order.currency_code.toUpperCase(),
     business: BUSINESS_DETAILS,
+    brandName: STORE_DISPLAY_NAME,
+    brandLogoUrl: `${SITE_URL}${SITE_LOGO}`,
+    phone: CONTACT_PHONE,
     customer: {
-      name:
-        `${order.customer?.first_name ?? ''} ${order.customer?.last_name ?? ''}`.trim() ||
-        'Customer',
+      name: customerName,
       addressLines: [
         order.shipping_address?.address_1,
         order.shipping_address?.address_2,
@@ -201,6 +254,20 @@ export async function generateInvoiceForOrder(
       vatRatePercent: 20,
     })),
     shippingExVat: shippingExVat || undefined,
+    shipTo: isShippedOrder
+      ? {
+          name: customerName,
+          addressLines: [
+            order.shipping_address?.address_1,
+            order.shipping_address?.address_2,
+            [order.shipping_address?.city, order.shipping_address?.postal_code]
+              .filter(Boolean)
+              .join(' '),
+            order.shipping_address?.country_code?.toUpperCase(),
+          ].filter(Boolean) as string[],
+        }
+      : undefined,
+    trackingUrl: `${SITE_URL}/orders/${encodeURIComponent(order.id)}`,
   }
   const pdfBuffer = await generateInvoicePdf(invoiceData)
   const url = await uploadPdfToMedusa(pdfBuffer, `${invoiceNumber}.pdf`)

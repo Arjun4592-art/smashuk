@@ -644,31 +644,48 @@ export async function getDiscounts(params?: {
   return {
     discounts: data.promotions.map((d: any) => {
       const quantityRule = d.rules?.find((r: any) => r.attribute === 'quantity')
+      const subtotalRule = d.rules?.find((r: any) => r.attribute === 'subtotal')
       const isQuantityDiscount =
         d.application_method?.type === 'percentage' &&
         !!d.is_automatic &&
         !!quantityRule
+
+      // free_shipping is identified by target_type, not by application type.
+      const isFreeShipping =
+        d.application_method?.target_type === 'shipping_methods'
+      const type = isFreeShipping
+        ? 'free_shipping'
+        : isQuantityDiscount
+          ? 'buy_x_get_y'
+          : (d.application_method?.type ?? 'percentage')
+
+      // Campaign holds dates, budget (max uses) and description in Medusa v2.
+      // These are NOT on the top-level promotion object.
+      const campaign = d.campaign
+
+      // rule values come back as { id, value } objects after an API round-trip;
+      // right after create they can be plain strings — normalise both.
+      const normaliseRuleValue = (v: any) =>
+        v && typeof v === 'object' ? v.value : v
+
       return {
         id: d.id,
         code: d.code,
-        type: isQuantityDiscount
-          ? 'buy_x_get_y'
-          : (d.application_method?.type ?? 'percentage'),
+        type,
         value: d.application_method?.value ?? 0,
-        minQuantity: quantityRule?.values?.[0]?.value ?? null,
-        minOrderAmount:
-          d.rules?.find((r: any) => r.attribute === 'subtotal')?.values?.[0] ??
-          0,
-        maxUses: d.usage_limit ?? null,
+        minQuantity: normaliseRuleValue(quantityRule?.values?.[0]) ?? null,
+        minOrderAmount: normaliseRuleValue(subtotalRule?.values?.[0]) ?? 0,
+        maxUses: campaign?.budget?.limit ?? null,
         usedCount: d.usage_count ?? 0,
-        startsAt: d.starts_at
-          ? new Date(d.starts_at).toISOString().split('T')[0]
+        // Dates live on campaign, not the top-level promotion.
+        startsAt: campaign?.starts_at
+          ? new Date(campaign.starts_at).toISOString().split('T')[0]
           : '',
-        expiresAt: d.ends_at
-          ? new Date(d.ends_at).toISOString().split('T')[0]
+        expiresAt: campaign?.ends_at
+          ? new Date(campaign.ends_at).toISOString().split('T')[0]
           : null,
         isActive: d.status === 'active',
-        description: d.campaign?.description ?? '',
+        description: campaign?.description ?? '',
       }
     }),
     count: data.count,

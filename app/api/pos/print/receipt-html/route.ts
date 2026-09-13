@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
-import { putReceiptHtml, takeReceiptHtml } from '@/lib/printer/receipt-cache'
+import {
+  putReceiptHtml,
+  takeReceiptHtml,
+  peekReceiptHtml,
+} from '@/lib/printer/receipt-cache'
 
 export const runtime = 'nodejs'
 
@@ -35,6 +39,21 @@ export async function POST(req: NextRequest) {
 
   const token = putReceiptHtml(body.html)
   return NextResponse.json({ token })
+}
+
+// Android/Chrome (and some HTTP clients PassPRNT uses under the hood) issue
+// a HEAD request to validate a URL before the real GET that fetches content.
+// Without this handler, Next.js silently serves HEAD requests through the
+// GET handler below, which would consume the single-use token before
+// PassPRNT ever does its real fetch — receipt "prints" nothing, no error.
+// HEAD must NOT delete the entry, only report whether it's still there.
+export async function HEAD(req: NextRequest) {
+  const token = req.nextUrl.searchParams.get('token')
+  const exists = token ? peekReceiptHtml(token) : false
+  return new NextResponse(null, {
+    status: exists ? 200 : 404,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  })
 }
 
 // Called by PassPRNT itself (no auth — it's a separate native app, not a

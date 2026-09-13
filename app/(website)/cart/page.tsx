@@ -14,13 +14,14 @@ import {
   ChevronUpIcon,
   ShieldIcon,
 } from '@/components/ui/Icons'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   FREE_SHIPPING_THRESHOLD,
   GIFT_CARD_PRODUCT_HANDLE,
 } from '@/lib/constants'
 import { getProductsByIds, normalizeProduct } from '@/lib/api/store'
 import { getRecentlyViewedIds } from '@/lib/recently-viewed'
+import { trackViewCart } from '@/lib/analytics-events'
 import ProductCard from '@/components/website/ProductCard'
 import type { Product } from '@/types'
 export default function CartPage() {
@@ -107,6 +108,23 @@ export default function CartPage() {
   useEffect(() => {
     setCouponSuccess('')
   }, [couponCode])
+  // Fires once per cart-page visit, as soon as the persisted cart has
+  // rehydrated with items — guarded by a ref so re-renders (coupon/gift
+  // card state changes, quantity edits) never re-fire it.
+  const viewCartFired = useRef(false)
+  useEffect(() => {
+    if (viewCartFired.current || items.length === 0) return
+    viewCartFired.current = true
+    trackViewCart({
+      value: subtotal,
+      items: items.map((item) => ({
+        itemId: item.variant?.id ?? item.product.id,
+        itemName: item.product.name,
+        price: item.product.price,
+        quantity: item.quantity,
+      })),
+    })
+  }, [items, subtotal])
   const handleApplyCoupon = async () => {
     const code = couponInput.trim().toUpperCase()
     if (!code) return

@@ -149,14 +149,6 @@ const SETTINGS_NAV = [
     label: 'Notifications',
     href: '/dashboard/settings/notifications',
   },
-  {
-    label: 'Marketing',
-    href: '/dashboard/settings/marketing',
-  },
-  {
-    label: 'Promo Banner',
-    href: '/dashboard/settings/promo-banner',
-  },
 ]
 const COUNTRY_OPTIONS = [
   {

@@ -15,6 +15,10 @@ export interface POSProduct {
   variantId?: string
   size?: string
   sizeOptionTitle?: string
+  // Set on the collapsed "one tile per product" grid entry when a
+  // product has more than one variant, so the tile can say "5 sizes"
+  // instead of showing one specific (and misleading) size.
+  variantCountOverride?: number
 }
 interface Props {
   products: POSProduct[]
@@ -177,6 +181,19 @@ export default function ProductGrid({ products, onAdd, isLoading }: Props) {
                   {p.size}
                 </span>
               )}
+              {!p.size &&
+                p.variantCountOverride &&
+                p.variantCountOverride > 1 && (
+                  <span
+                    className='text-[10px] font-semibold px-1.5 py-[1px] rounded'
+                    style={{
+                      background: '#F0F1F2',
+                      color: '#6D7175',
+                    }}
+                  >
+                    {p.variantCountOverride} sizes
+                  </span>
+                )}
             </div>
 
             {}

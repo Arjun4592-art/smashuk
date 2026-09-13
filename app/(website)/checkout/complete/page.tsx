@@ -1,65 +1,75 @@
-'use client';
-import { useEffect, useState, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import { useCartStore } from '@/store/cartStore';
-import { getCart } from '@/lib/api/store';
-const isPickupOption = (name: string) => /pickup|store|collect/i.test(name);
-type Status = 'checking' | 'completing' | 'success' | 'error';
+'use client'
+import { useEffect, useState, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
+import { useCartStore } from '@/store/cartStore'
+import { getCart } from '@/lib/api/store'
+import { trackPurchase } from '@/lib/analytics-events'
+const isPickupOption = (name: string) => /pickup|store|collect/i.test(name)
+type Status = 'checking' | 'completing' | 'success' | 'error'
 function CompleteInner() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const clearCart = useCartStore(s => s.clearCart);
-  const storeCartId = useCartStore(s => s.cartId);
-  const [status, setStatus] = useState<Status>('checking');
-  const [errorMessage, setErrorMessage] = useState('');
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const clearCart = useCartStore((s) => s.clearCart)
+  const storeCartId = useCartStore((s) => s.cartId)
+  const [status, setStatus] = useState<Status>('checking')
+  const [errorMessage, setErrorMessage] = useState('')
   useEffect(() => {
-    const cartId = searchParams.get('cart_id') || storeCartId;
-    const redirectStatus = searchParams.get('redirect_status');
+    const cartId = searchParams.get('cart_id') || storeCartId
+    const redirectStatus = searchParams.get('redirect_status')
     if (!cartId) {
-      setStatus('error');
-      setErrorMessage('Missing cart reference. Please try checking out again.');
-      return;
+      setStatus('error')
+      setErrorMessage('Missing cart reference. Please try checking out again.')
+      return
     }
     if (redirectStatus !== 'succeeded') {
-      setStatus('error');
-      setErrorMessage(redirectStatus === 'failed' || redirectStatus === 'canceled' ? 'Payment was not completed. No charge was made — please try again.' : 'Could not confirm payment status. Please try again.');
-      return;
+      setStatus('error')
+      setErrorMessage(
+        redirectStatus === 'failed' || redirectStatus === 'canceled'
+          ? 'Payment was not completed. No charge was made — please try again.'
+          : 'Could not confirm payment status. Please try again.',
+      )
+      return
     }
-    let cancelled = false;
-    (async () => {
-      setStatus('completing');
+    let cancelled = false
+    ;(async () => {
+      setStatus('completing')
       try {
-        const cart = await getCart(cartId);
+        const cart = await getCart(cartId)
         if (!cart) {
-          throw new Error('Cart not found — it may have already been completed.');
+          throw new Error(
+            'Cart not found — it may have already been completed.',
+          )
         }
-        const shippingMethodName = cart.shipping_methods?.[0]?.name ?? cart.shipping_methods?.[0]?.shipping_option?.name ?? '';
-        const isPickupOrder = isPickupOption(shippingMethodName);
-        const address = cart.shipping_address;
-        const paymentIntentId = searchParams.get('payment_intent');
-        let actualPaymentMethod = 'card';
+        const shippingMethodName =
+          cart.shipping_methods?.[0]?.name ??
+          cart.shipping_methods?.[0]?.shipping_option?.name ??
+          ''
+        const isPickupOrder = isPickupOption(shippingMethodName)
+        const address = cart.shipping_address
+        const paymentIntentId = searchParams.get('payment_intent')
+        let actualPaymentMethod = 'card'
         if (paymentIntentId) {
           try {
             const methodRes = await fetch('/api/store/payment', {
               method: 'POST',
               headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
               },
               credentials: 'include',
               body: JSON.stringify({
                 action: 'get-method',
-                paymentIntentId
-              })
-            });
-            const methodData = await methodRes.json();
-            actualPaymentMethod = methodData?.payment_method ?? 'card';
+                paymentIntentId,
+              }),
+            })
+            const methodData = await methodRes.json()
+            actualPaymentMethod = methodData?.payment_method ?? 'card'
           } catch {}
         }
         const completeRes = await fetch('/api/store/payment', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
           },
           credentials: 'include',
           body: JSON.stringify({
@@ -67,37 +77,68 @@ function CompleteInner() {
             cartId,
             metadata: {
               payment_method: actualPaymentMethod,
-              ...(isPickupOrder ? {
-                fulfillment_type: 'pickup',
-                pickup_contact_name: address ? `${address.first_name ?? ''} ${address.last_name ?? ''}`.trim() : undefined,
-                pickup_contact_phone: address?.phone || undefined
-              } : {})
-            }
-          })
-        });
-        const completeData = await completeRes.json();
+              ...(isPickupOrder
+                ? {
+                    fulfillment_type: 'pickup',
+                    pickup_contact_name: address
+                      ? `${address.first_name ?? ''} ${address.last_name ?? ''}`.trim()
+                      : undefined,
+                    pickup_contact_phone: address?.phone || undefined,
+                  }
+                : {}),
+            },
+          }),
+        })
+        const completeData = await completeRes.json()
         if (!completeRes.ok) {
-          throw new Error(completeData?.message ?? 'Order placement failed');
+          throw new Error(completeData?.message ?? 'Order placement failed')
         }
-        if (cancelled) return;
-        clearCart();
-        setStatus('success');
+        if (cancelled) return
+        const order = completeData?.order ?? completeData?.cart
+        if (order?.id) {
+          const orderRef = order.display_id
+            ? `SR-${order.display_id}`
+            : order.id
+          trackPurchase({
+            orderId: orderRef,
+            value: order.total ?? 0,
+            currency: (order.currency_code ?? 'gbp').toUpperCase(),
+            items: (order.items ?? []).map((item: any) => ({
+              itemId: item.variant_id ?? item.id,
+              itemName: item.title ?? item.product_title ?? 'Product',
+              price: item.unit_price ?? 0,
+              quantity: item.quantity ?? 1,
+            })),
+            // Used for Facebook Conversions API matching and Google Ads
+            // Enhanced Conversions — both are hashed before leaving the
+            // browser/server, never sent in the clear to either platform.
+            email: order.email || order.customer?.email || undefined,
+            phone: order.shipping_address?.phone || undefined,
+          })
+        }
+        clearCart()
+        setStatus('success')
         setTimeout(() => {
-          router.push('/profile?tab=orders');
-        }, 1500);
+          router.push('/profile?tab=orders')
+        }, 1500)
       } catch (err: any) {
-        if (cancelled) return;
-        setStatus('error');
-        setErrorMessage(err?.message ?? 'Payment succeeded but we could not finalize your order. Contact support with your payment reference.');
+        if (cancelled) return
+        setStatus('error')
+        setErrorMessage(
+          err?.message ??
+            'Payment succeeded but we could not finalize your order. Contact support with your payment reference.',
+        )
       }
-    })();
+    })()
     return () => {
-      cancelled = true;
-    };
-  }, []);
-  return <div className='min-h-screen bg-[#F2F4F7] flex items-center justify-center px-4'>
+      cancelled = true
+    }
+  }, [])
+  return (
+    <div className='min-h-screen bg-[#F2F4F7] flex items-center justify-center px-4'>
       <div className='w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center'>
-        {(status === 'checking' || status === 'completing') && <>
+        {(status === 'checking' || status === 'completing') && (
+          <>
             <div className='w-10 h-10 border-4 border-gray-200 border-t-[#E8553A] rounded-full animate-spin mx-auto mb-5' />
             <h1 className='font-montserrat font-black text-xl text-[#0A1F44] mb-2'>
               Finalizing your order…
@@ -105,9 +146,11 @@ function CompleteInner() {
             <p className='text-sm text-gray-500 font-lato'>
               Please don&apos;t close this page.
             </p>
-          </>}
+          </>
+        )}
 
-        {status === 'success' && <>
+        {status === 'success' && (
+          <>
             <div className='w-14 h-14 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-2xl mx-auto mb-5'>
               ✓
             </div>
@@ -117,9 +160,11 @@ function CompleteInner() {
             <p className='text-sm text-gray-500 font-lato'>
               Redirecting you to your orders…
             </p>
-          </>}
+          </>
+        )}
 
-        {status === 'error' && <>
+        {status === 'error' && (
+          <>
             <div className='w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-2xl mx-auto mb-5'>
               ✕
             </div>
@@ -129,15 +174,22 @@ function CompleteInner() {
             <p className='text-sm text-gray-500 font-lato mb-6'>
               {errorMessage}
             </p>
-            <Link href='/checkout' className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-xl transition-colors'>
+            <Link
+              href='/checkout'
+              className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-xl transition-colors'
+            >
               Back to Checkout
             </Link>
-          </>}
+          </>
+        )}
       </div>
-    </div>;
+    </div>
+  )
 }
 export default function CheckoutCompletePage() {
-  return <Suspense fallback={<div className='min-h-screen bg-[#F2F4F7]' />}>
+  return (
+    <Suspense fallback={<div className='min-h-screen bg-[#F2F4F7]' />}>
       <CompleteInner />
-    </Suspense>;
+    </Suspense>
+  )
 }

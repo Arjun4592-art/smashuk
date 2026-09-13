@@ -30,7 +30,9 @@ function statusBadge(
     | 'admin'
     | 'subscribed'
     | 'staff'
-    | 'invoice',
+    | 'invoice'
+    | 'payment_failed'
+    | 'dispute',
 ) {
   const map = {
     confirmed: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'ORDER CONFIRMED' },
@@ -48,6 +50,8 @@ function statusBadge(
     subscribed: { bg: '#ECFDF5', fg: GREEN, label: 'SUBSCRIBED' },
     staff: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'TEAM INVITE' },
     invoice: { bg: '#ECFDF5', fg: GREEN, label: 'INVOICE' },
+    payment_failed: { bg: '#FDF0ED', fg: CORAL, label: 'PAYMENT FAILED' },
+    dispute: { bg: '#FDF0ED', fg: CORAL, label: 'DISPUTE OPENED' },
   }[kind]
   return pillBadge(map.label, map.bg, map.fg)
 }
@@ -551,6 +555,70 @@ export function adminWelcomeEmail(customer: {
   const text = `New customer account created — ${name} (${customer.email}). Welcome email sent.`
   return { subject, html, text }
 }
+// Sent to the store owner/admin inbox when a Stripe PaymentIntent fails
+// (card declined, authentication failed, etc). Fired from the Stripe
+// webhook — this is the only place a failed attempt is visible, since a
+// failed payment never reaches the website's own /complete step.
+export function adminPaymentFailedEmail(opts: {
+  paymentIntentId: string
+  amount: number
+  currency: string
+  customerEmail?: string
+  reason?: string
+}) {
+  const subject = `Payment failed — ${fmt(opts.amount)}${opts.customerEmail ? ` (${opts.customerEmail})` : ''}`
+  const html = shell(
+    statusBadge('payment_failed'),
+    'A payment attempt failed',
+    `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:4px;">
+        ${infoRow('Amount', `${fmt(opts.amount)} ${opts.currency.toUpperCase()}`)}
+        ${opts.customerEmail ? infoRow('Customer', opts.customerEmail) : ''}
+        ${infoRow('Reason', opts.reason || 'Not specified by Stripe')}
+        ${infoRow('Payment Intent', opts.paymentIntentId)}
+      </table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+        No order was created for this attempt. The customer may retry checkout — no action is usually needed unless this happens repeatedly for the same customer or card.
+      </p>
+    `,
+  )
+  const text = `Payment failed — ${fmt(opts.amount)} ${opts.currency.toUpperCase()}${opts.customerEmail ? ` (${opts.customerEmail})` : ''}. Reason: ${opts.reason || 'not specified'}. Payment Intent: ${opts.paymentIntentId}. No order was created.`
+  return { subject, html, text }
+}
+
+// Sent to the store owner/admin inbox when a customer disputes/chargebacks
+// a charge. Time-sensitive — Stripe requires evidence submitted by
+// evidenceDueBy or the dispute is auto-lost.
+export function adminDisputeEmail(opts: {
+  chargeId: string
+  paymentIntentId?: string
+  amount: number
+  currency: string
+  reason: string
+  evidenceDueBy?: Date
+}) {
+  const subject = `⚠ Dispute opened — ${fmt(opts.amount)} — respond by ${opts.evidenceDueBy ? opts.evidenceDueBy.toLocaleDateString('en-GB') : 'the deadline in Stripe'}`
+  const html = shell(
+    statusBadge('dispute'),
+    'A customer has disputed a charge',
+    `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:4px;">
+        ${infoRow('Amount', `${fmt(opts.amount)} ${opts.currency.toUpperCase()}`)}
+        ${infoRow('Reason', opts.reason)}
+        ${infoRow('Charge', opts.chargeId)}
+        ${opts.paymentIntentId ? infoRow('Payment Intent', opts.paymentIntentId) : ''}
+        ${infoRow('Respond by', opts.evidenceDueBy ? opts.evidenceDueBy.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'See Stripe dashboard')}
+      </table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Submit evidence (proof of delivery, communication, etc.) in the Stripe Dashboard under Payments → Disputes before the deadline above, or the dispute is automatically lost.
+      </p>
+      ${ctaButton('Open in Stripe Dashboard', `https://dashboard.stripe.com/payments/${opts.paymentIntentId ?? opts.chargeId}`)}
+    `,
+  )
+  const text = `Dispute opened for ${fmt(opts.amount)} ${opts.currency.toUpperCase()}. Reason: ${opts.reason}. Charge: ${opts.chargeId}. Respond by: ${opts.evidenceDueBy ? opts.evidenceDueBy.toISOString() : 'see Stripe dashboard'}.`
+  return { subject, html, text }
+}
+
 export function adminNewOrderEmail(
   order: any,
   channel: 'website' | 'pos' = 'website',

@@ -3,9 +3,20 @@ import {
   Page,
   Text,
   View,
+  Image,
   StyleSheet,
   renderToBuffer,
 } from '@react-pdf/renderer'
+import qrcodegen from 'qrcode-generator'
+// Generated locally (no network call) so the QR code can never go missing
+// from a PDF because of a slow/blocked external request — same reasoning
+// as the POS printed receipt (components/pos/Receipt.tsx).
+function qrDataUrl(text: string): string {
+  const qr = qrcodegen(0, 'M')
+  qr.addData(text)
+  qr.make()
+  return qr.createDataURL(4, 0)
+}
 const styles = StyleSheet.create({
   page: {
     padding: 40,
@@ -20,6 +31,10 @@ const styles = StyleSheet.create({
   businessBlock: {
     maxWidth: 260,
   },
+  logo: {
+    width: 90,
+    marginBottom: 8,
+  },
   title: {
     fontSize: 18,
     fontWeight: 700,
@@ -31,6 +46,14 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 16,
+  },
+  addressColumns: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  addressBlock: {
+    maxWidth: 240,
   },
   row: {
     flexDirection: 'row',
@@ -86,13 +109,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  footerNote: {
+  // "Boxed total" — the grand total gets its own bordered box so it stands
+  // out from the subtotal/VAT rows above it, matching the receipt-style
+  // redesign (vs. the old plain right-aligned row).
+  totalBox: {
+    marginTop: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#111',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: 200,
+  },
+  footer: {
     marginTop: 32,
     paddingTop: 16,
     borderTop: '1px solid #ddd',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  footerNote: {
     color: '#666',
     fontSize: 9,
-    textAlign: 'center',
+    maxWidth: 380,
+  },
+  qr: {
+    width: 50,
+    height: 50,
   },
 })
 export type InvoiceLineItem = {
@@ -107,6 +151,7 @@ export type InvoiceData = {
   supplyDate: string
   orderReference: string
   placedAt?: string
+  receiptTime?: string
   paymentMethod?: string
   staffName?: string
   currency: string
@@ -116,13 +161,28 @@ export type InvoiceData = {
     vatRegistered: boolean
     vatNumber?: string
   }
+  // Logo + display name shown at the top of the PDF. Kept separate from
+  // `business` (the legal entity used for the VAT block) since the brand
+  // shown to the customer can differ from the registered legal name.
+  brandName?: string
+  brandLogoUrl?: string
+  phone?: string
   customer: {
+    name: string
+    addressLines: string[]
+  }
+  // Only present for orders actually being shipped (website checkout with
+  // a delivery address, or a POS "Ship" sale) — see invoice-service.ts.
+  shipTo?: {
     name: string
     addressLines: string[]
   }
   lineItems: InvoiceLineItem[]
   shippingExVat?: number
   shippingVatRatePercent?: number
+  // Link encoded into the footer QR code so a customer can scan the
+  // printed/PDF invoice to jump straight to their order status page.
+  trackingUrl?: string
 }
 function formatMoney(amount: number, currency: string) {
   return new Intl.NumberFormat('en-GB', {
@@ -161,10 +221,17 @@ function InvoiceDocument({ data }: { data: InvoiceData }) {
       <Page size='A4' style={styles.page}>
         <View style={styles.header}>
           <View style={styles.businessBlock}>
-            <Text style={styles.title}>{data.business.name}</Text>
+            {data.brandLogoUrl && (
+              // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's Image has no alt prop
+              <Image style={styles.logo} src={data.brandLogoUrl} />
+            )}
+            <Text style={styles.title}>
+              {data.brandName ?? data.business.name}
+            </Text>
             {data.business.addressLines.map((line, i) => (
               <Text key={i}>{line}</Text>
             ))}
+            {data.phone && <Text>{data.phone}</Text>}
             {data.business.vatRegistered && data.business.vatNumber && (
               <Text
                 style={{
@@ -193,7 +260,10 @@ function InvoiceDocument({ data }: { data: InvoiceData }) {
             </View>
             <View style={styles.row}>
               <Text style={styles.label}>Order Date</Text>
-              <Text>{data.placedAt ?? data.supplyDate}</Text>
+              <Text>
+                {data.placedAt ?? data.supplyDate}
+                {data.receiptTime ? `, ${data.receiptTime}` : ''}
+              </Text>
             </View>
             {data.paymentMethod && (
               <View style={styles.row}>
@@ -210,12 +280,23 @@ function InvoiceDocument({ data }: { data: InvoiceData }) {
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.label}>Bill To</Text>
-          <Text>{data.customer.name}</Text>
-          {data.customer.addressLines.map((line, i) => (
-            <Text key={i}>{line}</Text>
-          ))}
+        <View style={data.shipTo ? styles.addressColumns : styles.section}>
+          <View style={data.shipTo ? styles.addressBlock : undefined}>
+            <Text style={styles.label}>Bill To</Text>
+            <Text>{data.customer.name}</Text>
+            {data.customer.addressLines.map((line, i) => (
+              <Text key={i}>{line}</Text>
+            ))}
+          </View>
+          {data.shipTo && (
+            <View style={styles.addressBlock}>
+              <Text style={styles.label}>Ship To</Text>
+              <Text>{data.shipTo.name}</Text>
+              {data.shipTo.addressLines.map((line, i) => (
+                <Text key={i}>{line}</Text>
+              ))}
+            </View>
+          )}
         </View>
 
         <View style={styles.table}>
@@ -262,15 +343,23 @@ function InvoiceDocument({ data }: { data: InvoiceData }) {
               <Text>{formatMoney(totalVat, data.currency)}</Text>
             </View>
           )}
-          <View style={[styles.totalRow, styles.grandTotal]}>
-            <Text>Total</Text>
-            <Text>{formatMoney(grandTotal, data.currency)}</Text>
+          <View style={styles.totalBox}>
+            <Text style={styles.grandTotal}>Total</Text>
+            <Text style={styles.grandTotal}>
+              {formatMoney(grandTotal, data.currency)}
+            </Text>
           </View>
         </View>
 
-        <Text style={styles.footerNote}>
-          Thank you for shopping with {data.business.name}.
-        </Text>
+        <View style={styles.footer}>
+          <Text style={styles.footerNote}>
+            Thank you for shopping with {data.brandName ?? data.business.name}.
+          </Text>
+          {data.trackingUrl && (
+            // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's Image has no alt prop
+            <Image style={styles.qr} src={qrDataUrl(data.trackingUrl)} />
+          )}
+        </View>
       </Page>
     </Document>
   )

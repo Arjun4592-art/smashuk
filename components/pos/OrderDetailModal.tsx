@@ -19,6 +19,7 @@ import {
   NoPrinterConnectedError,
 } from '@/lib/printer/print-receipt'
 import { ReceiptBody } from './Receipt'
+import EmailReceiptModal from './EmailReceiptModal'
 import { waitForPrintImages } from '@/lib/utils'
 import type { CartDisplayItem } from '@/types'
 const fmt = (n: number) => CURRENCY_SYMBOL + (Number(n) || 0).toFixed(2)
@@ -82,6 +83,7 @@ export default function OrderDetailModal({
   const [mounted, setMounted] = useState(false)
   const [fulfilling, setFulfilling] = useState(false)
   const [fulfillError, setFulfillError] = useState('')
+  const [showEmailReceipt, setShowEmailReceipt] = useState(false)
   const handleFulfill = async () => {
     setFulfilling(true)
     setFulfillError('')
@@ -930,6 +932,41 @@ export default function OrderDetailModal({
                 <span className='truncate'>Print receipt</span>
               </button>
 
+              <button
+                onClick={() => {
+                  if (!order.medusaOrderId && !order.id) {
+                    toast.error('Could not email receipt', {
+                      description:
+                        'This order has no ID to email a receipt for.',
+                    })
+                    return
+                  }
+                  setShowEmailReceipt(true)
+                }}
+                disabled={!canPrintReceipt}
+                className='flex-1 min-w-0 py-3 rounded-lg text-sm font-medium border transition-colors hover:bg-[#F6F6F7] disabled:opacity-50 flex items-center justify-center gap-2'
+                style={{
+                  borderColor: '#E1E3E5',
+                  color: '#202223',
+                }}
+              >
+                <svg
+                  width='15'
+                  height='15'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='1.8'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  className='shrink-0'
+                >
+                  <path d='M4 4h16v16H4z' />
+                  <path d='M22 6l-10 7L2 6' />
+                </svg>
+                <span className='truncate'>Email</span>
+              </button>
+
               {!order.returned && !isAwaitingPickup(order) && !canFulfill && (
                 <button
                   onClick={onReturn}
@@ -980,6 +1017,24 @@ export default function OrderDetailModal({
           printMode
         />
       </div>
+
+      {showEmailReceipt && (
+        <EmailReceiptModal
+          onClose={() => setShowEmailReceipt(false)}
+          defaultEmail={order.customer?.email ?? ''}
+          receipt={{
+            orderId: order.medusaOrderId ?? order.id,
+            items: receiptItems,
+            subtotal: order.subtotal,
+            discountAmount: order.discountTotal,
+            tax: order.tax,
+            total: order.total,
+            payMethod: order.paymentMethod,
+            splitPayments: order.splitPayments,
+            cashier: order.cashier,
+          }}
+        />
+      )}
     </>
   )
 }

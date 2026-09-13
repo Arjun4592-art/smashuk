@@ -176,11 +176,7 @@ const Icons = {
   ),
 }
 
-const SETTINGS_NAV = [
-  {
-    label: 'General',
-    href: '/dashboard/settings',
-  },
+const SETTINGS_NAV: { label: string; href: string; active?: boolean }[] = [
   {
     label: 'Billing',
     href: '/dashboard/settings/billing',
@@ -188,19 +184,6 @@ const SETTINGS_NAV = [
   {
     label: 'Shipping',
     href: '/dashboard/settings/shipping',
-  },
-  {
-    label: 'Notifications',
-    href: '/dashboard/settings/notifications',
-  },
-  {
-    label: 'Marketing',
-    href: '/dashboard/settings/marketing',
-    active: true,
-  },
-  {
-    label: 'Promo Banner',
-    href: '/dashboard/settings/promo-banner',
   },
 ]
 

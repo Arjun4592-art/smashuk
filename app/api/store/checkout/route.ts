@@ -1,50 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
-import { sendMail } from '@/lib/email'
 import {
-  orderConfirmationEmail,
-  adminNewOrderEmail,
-} from '@/lib/email-templates'
+  notifyNewOrder,
+  sendOrderConfirmationEmail,
+} from '@/lib/api/order-notifications'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 const PUB_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
-async function notifyNewOrder(order: any) {
-  const { medusaServiceFetch } = await import('@/lib/api/medusa-service-token')
-  const storeRes = await medusaServiceFetch(
-    `/admin/stores?limit=1&fields=id,metadata`,
-  )
-  if (!storeRes.ok) return
-  const storeData = await storeRes.json().catch(() => ({}))
-  const notificationSettings = storeData.stores?.[0]?.metadata
-    ?.notificationSettings as
-    | {
-        settings?: Record<
-          string,
-          {
-            email?: boolean
-          }
-        >
-        channels?: {
-          email?: string
-        }
-      }
-    | undefined
-  const emailEnabled = notificationSettings?.settings?.new_order?.email ?? true
-  if (!emailEnabled) return
-  const to =
-    notificationSettings?.channels?.email ||
-    process.env.STORE_OWNER_EMAIL ||
-    process.env.MEDUSA_ADMIN_EMAIL
-  if (!to) return
-  const { subject, html, text } = adminNewOrderEmail(order, 'website')
-  await sendMail({
-    to,
-    subject,
-    html,
-    text,
-  })
-}
 function storeHeaders(token?: string) {
   const h: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -142,7 +105,7 @@ export async function POST(req: NextRequest) {
         try {
           const newOrder = completeData.order ?? completeData.cart
           if (newOrder?.id) {
-            await notifyNewOrder(newOrder)
+            await notifyNewOrder(newOrder, 'website')
           }
         } catch (notifyErr) {
           console.error(
@@ -152,14 +115,8 @@ export async function POST(req: NextRequest) {
         }
         try {
           const newOrder = completeData.order ?? completeData.cart
-          if (newOrder?.id && newOrder.email) {
-            const { subject, html, text } = orderConfirmationEmail(newOrder)
-            await sendMail({
-              to: newOrder.email,
-              subject,
-              html,
-              text,
-            })
+          if (newOrder?.id) {
+            await sendOrderConfirmationEmail(newOrder)
           }
         } catch (confirmErr) {
           console.error(

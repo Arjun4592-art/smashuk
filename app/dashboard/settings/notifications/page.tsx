@@ -191,14 +191,6 @@ const SETTINGS_NAV = [
     href: '/dashboard/settings/notifications',
     active: true,
   },
-  {
-    label: 'Marketing',
-    href: '/dashboard/settings/marketing',
-  },
-  {
-    label: 'Promo Banner',
-    href: '/dashboard/settings/promo-banner',
-  },
 ]
 interface NotificationSetting {
   id: string

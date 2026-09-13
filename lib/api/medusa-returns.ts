@@ -30,8 +30,12 @@ async function readJson(res: Response) {
   return res.json().catch(() => ({}))
 }
 export async function getOrderForReturn(orderId: string, fetcher: Fetcher) {
+  // `*items` expands the line-item relation, but Medusa's computed totals
+  // (total/discount_total/refundable_total*) have to be requested
+  // explicitly or they come back undefined — see buildReturnLines() below,
+  // which needs the post-discount amount, not the raw `unit_price`.
   const res = await fetcher(
-    `/admin/orders/${orderId}?fields=id,display_id,email,*items,*payment_collections.payments,metadata,currency_code`,
+    `/admin/orders/${orderId}?fields=id,display_id,email,*items,items.total,items.subtotal,items.discount_total,items.refundable_total,items.refundable_total_per_unit,*payment_collections.payments,metadata,currency_code`,
   )
   if (!res.ok) {
     const err = await readJson(res)
@@ -66,6 +70,7 @@ export function buildReturnLines(order: any, lines: ReturnLineInput[]) {
   const itemsById = new Map((order.items ?? []).map((i: any) => [i.id, i]))
   const built: ReturnRecord['items'] = []
   let refund_amount = 0
+  let usedFallbackPricing = false
   for (const line of lines) {
     if (!line.item_id || !line.quantity || line.quantity <= 0) continue
     const item: any = itemsById.get(line.item_id)
@@ -77,16 +82,43 @@ export function buildReturnLines(order: any, lines: ReturnLineInput[]) {
         `Only ${canReturn} of "${item.title}" left to return (requested ${line.quantity})`,
       )
     }
+    // `unit_price` is the raw, pre-discount catalog price — it doesn't move
+    // when a coupon or manual discount is applied at the order level (those
+    // are tracked separately as adjustments). Refunding off `unit_price`
+    // would hand back more than the customer actually paid on a discounted
+    // order. `refundable_total_per_unit` is Medusa's own field for exactly
+    // this — the post-discount, post-tax amount still refundable per unit —
+    // so prefer that, then fall back to the line's post-discount total
+    // divided across its quantity, and only fall back to `unit_price` (old
+    // behaviour) if neither is available (e.g. an older Medusa version that
+    // doesn't return these fields).
+    let unitRefundAmount: number
+    if (typeof item.refundable_total_per_unit === 'number') {
+      unitRefundAmount = item.refundable_total_per_unit
+    } else if (typeof item.total === 'number' && item.quantity > 0) {
+      unitRefundAmount = item.total / item.quantity
+    } else {
+      usedFallbackPricing = true
+      unitRefundAmount = item.unit_price
+    }
     built.push({
       item_id: item.id,
       title: item.title,
       quantity: line.quantity,
       unit_price: item.unit_price,
     })
-    refund_amount += item.unit_price * line.quantity
+    refund_amount += unitRefundAmount * line.quantity
   }
   if (built.length === 0) {
     throw new Error('No valid items selected to return')
+  }
+  if (usedFallbackPricing) {
+    // Not fatal — but on a discounted order this means the return refunds
+    // the pre-discount amount. Surfaced loudly so it shows up in server
+    // logs rather than silently overpaying a refund.
+    console.warn(
+      "[POS return] refundable_total_per_unit/total not available on this order's line items — refund amount falls back to pre-discount unit_price. If this order had a coupon or manual discount applied, the refund may be too high.",
+    )
   }
   return {
     items: built,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
+import { invalidateFacebookCapiCache } from '@/lib/api/facebook-capi'
 
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
@@ -170,6 +171,10 @@ export async function POST(req: NextRequest) {
         },
       )
     }
+    // Facebook Pixel ID / access token may have just changed — make sure
+    // the Conversions API route picks up the new values immediately
+    // instead of serving the previous ones from its in-memory cache.
+    invalidateFacebookCapiCache()
     return NextResponse.json({
       success: true,
     })

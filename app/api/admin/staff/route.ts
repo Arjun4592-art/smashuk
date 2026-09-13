@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminAuthHeader } from '@/lib/api/admin-auth'
+import { getAdminAuthHeader, getManagerAuthHeader } from '@/lib/api/admin-auth'
 import { sendMail } from '@/lib/email'
 import { staffInviteEmail } from '@/lib/email-templates'
 import { hashPin } from '@/lib/api/pin-hash'
 import { safeJson } from '@/lib/api/safe-json'
 const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 export async function GET(req: NextRequest) {
-  const authorization = (await getAdminAuthHeader(req)) ?? ''
+  // Read-only staff list — needed by the POS clock-in/switch-user UI for
+  // every staff member, so both dashboard and POS sessions are allowed.
+  const authorization =
+    (await getAdminAuthHeader(req, { allowPos: true })) ?? ''
   const { searchParams } = new URL(req.url)
   const limit = searchParams.get('limit') ?? '50'
   const offset = searchParams.get('offset') ?? '0'
@@ -107,7 +110,8 @@ export async function GET(req: NextRequest) {
   }
 }
 export async function POST(req: NextRequest) {
-  const authorization = (await getAdminAuthHeader(req)) ?? ''
+  // Creating staff / assigning roles is Owner-or-Manager only.
+  const authorization = (await getManagerAuthHeader(req)) ?? ''
   if (!authorization) {
     return NextResponse.json(
       {

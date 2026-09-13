@@ -180,6 +180,12 @@ function stepError(label: string, status: number, data: any): string {
   return `[${label}] (HTTP ${status}) ${raw}`
 }
 export async function POST(request: NextRequest) {
+  // Tracks a one-off Medusa promotion created for a manual (%/£) POS
+  // discount, so it can be cleaned up in `finally` below regardless of how
+  // this handler exits (early return or thrown error) — see the discount
+  // block right after line items are added.
+  let tempManualDiscountPromotionId: string | null = null
+  let orderCompleted = false
   if (!(await requirePosSession())) {
     return NextResponse.json(
       {
@@ -217,6 +223,8 @@ export async function POST(request: NextRequest) {
       fulfillment_type,
       shipping_address,
       gift_card_code,
+      coupon_code,
+      manual_discount_amount,
     } = body
     const fulfillmentType: 'pickup' | 'ship' =
       fulfillment_type === 'ship' ? 'ship' : 'pickup'
@@ -428,6 +436,100 @@ export async function POST(request: NextRequest) {
             },
           )
         }
+      }
+    }
+    // Apply the coupon and/or manual discount to the real Medusa cart *before*
+    // anything downstream reads `cart.total` (gift cards, shipping, and the
+    // Stripe amount-verification check below all use it). Previously nothing
+    // was applied here, so the cart always priced at full value — card sales
+    // with a discount failed the amount-verification check ("Sale not
+    // recorded"), and cash sales saved to Medusa at the wrong (full) total.
+    //
+    // Coupon codes go through Medusa's real promotion engine (same as the
+    // website), so its rules/dates are authoritative here even if something
+    // changed between the POS's earlier validate-coupon check and now.
+    //
+    // Manual discounts have no equivalent in Medusa's promotion engine, so a
+    // single-use, unconditional promotion is created on the fly to carry the
+    // discount into the cart, then cleaned up in `finally` if the sale never
+    // completes (see `tempManualDiscountPromotionId` above).
+    const promoCodesToApply: string[] = []
+    if (coupon_code) {
+      promoCodesToApply.push(String(coupon_code).trim().toUpperCase())
+    }
+    if (manual_discount_amount && Number(manual_discount_amount) > 0) {
+      const tempCode = `POS-MANUAL-${cartId.slice(-12)}`.toUpperCase()
+      const createPromoRes = await medusaServiceFetch('/admin/promotions', {
+        method: 'POST',
+        body: JSON.stringify({
+          code: tempCode,
+          type: 'standard',
+          is_automatic: false,
+          status: 'active',
+          application_method: {
+            type: 'fixed',
+            target_type: 'order',
+            allocation: 'across',
+            value: Number(manual_discount_amount),
+            currency_code: 'gbp',
+          },
+          campaign: {
+            name: tempCode,
+            budget: {
+              type: 'usage',
+              limit: 1,
+            },
+          },
+        }),
+      })
+      const createPromoData = await safeJson(
+        createPromoRes,
+        'manual discount setup',
+      )
+      if (!createPromoRes.ok || !createPromoData?.promotion?.id) {
+        console.error(
+          '[POS orders] manual discount promotion create failed:',
+          createPromoRes.status,
+          createPromoData,
+        )
+        return NextResponse.json(
+          {
+            error: stepError(
+              'manual discount setup',
+              createPromoRes.status,
+              createPromoData,
+            ),
+          },
+          {
+            status: createPromoRes.status || 500,
+          },
+        )
+      }
+      tempManualDiscountPromotionId = createPromoData.promotion.id
+      promoCodesToApply.push(tempCode)
+    }
+    if (promoCodesToApply.length > 0) {
+      const promoRes = await storeFetch(`/store/carts/${cartId}/promotions`, {
+        method: 'POST',
+        body: JSON.stringify({
+          promo_codes: promoCodesToApply,
+        }),
+      })
+      if (!promoRes.ok) {
+        const promoData = await safeJson(promoRes, 'apply discount to cart')
+        console.error(
+          '[POS orders] applying discount(s) to cart failed:',
+          promoRes.status,
+          promoData,
+        )
+        return NextResponse.json(
+          {
+            error: stepError('apply discount', promoRes.status, promoData),
+          },
+          {
+            status: promoRes.status,
+          },
+        )
       }
     }
     let giftCardApplied = false
@@ -675,6 +777,7 @@ export async function POST(request: NextRequest) {
       )
     }
     const order = completeData.order
+    orderCompleted = true
     const metadataPayload = {
       source: 'pos',
       cashier: cashier ?? '',
@@ -842,5 +945,28 @@ export async function POST(request: NextRequest) {
         status: 500,
       },
     )
+  } finally {
+    // If a one-off manual-discount promotion was created above but the sale
+    // never actually completed (any early return or thrown error), delete
+    // it so unused single-purpose promotions don't pile up in the
+    // dashboard's discount list. If the order *did* complete, leave it in
+    // place — it's already spent (usage limit 1) and the order's adjustment
+    // records reference it, so deleting it post-completion could orphan
+    // that reference.
+    if (tempManualDiscountPromotionId && !orderCompleted) {
+      try {
+        await medusaServiceFetch(
+          `/admin/promotions/${tempManualDiscountPromotionId}`,
+          {
+            method: 'DELETE',
+          },
+        )
+      } catch (cleanupErr) {
+        console.warn(
+          '[POS orders] failed to clean up unused manual-discount promotion:',
+          cleanupErr,
+        )
+      }
+    }
   }
 }

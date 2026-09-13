@@ -53,6 +53,13 @@ export interface CreatePOSOrderPayload {
   }
   shipping_option_id?: string
   gift_card_code?: string
+  /** Coupon code applied at POS — validated and applied against the real
+   * Medusa cart during order creation, same as website checkout. */
+  coupon_code?: string
+  /** Manual (%/£) discount amount in pounds, already resolved by the POS UI.
+   * Applied to the real Medusa cart as a one-off order-level discount so the
+   * synced order total matches what the customer was actually charged. */
+  manual_discount_amount?: number
 }
 function extractPrice(variant: any, productMetadata: any): number {
   const gbpPrice = variant?.prices?.find(
@@ -387,13 +394,30 @@ export interface CouponValidationResult {
   code?: string
   type?: 'percentage' | 'fixed'
   value?: number
+  reason?:
+    'not_started' | 'expired' | 'min_amount' | 'min_quantity' | 'customer_group'
+}
+export interface CouponValidationContext {
+  /** Cart subtotal in pounds (not pence) — matches how POS stores prices. */
+  subtotal?: number
+  /** Total item quantity in the cart. */
+  quantity?: number
+  /** Medusa customer id attached to the sale, if any. */
+  customerId?: string
 }
 export async function validateCoupon(
   code: string,
+  context: CouponValidationContext = {},
 ): Promise<CouponValidationResult> {
   try {
+    const searchParams = new URLSearchParams({ code })
+    if (context.subtotal != null)
+      searchParams.set('subtotal', String(context.subtotal))
+    if (context.quantity != null)
+      searchParams.set('quantity', String(context.quantity))
+    if (context.customerId) searchParams.set('customerId', context.customerId)
     const res = await fetch(
-      `/api/pos/coupons/validate?code=${encodeURIComponent(code)}`,
+      `/api/pos/coupons/validate?${searchParams.toString()}`,
     )
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))

@@ -1,309 +1,202 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
-const MEDUSA_URL =
-  process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
-async function safeJson(res: Response) {
-  const text = await res.text()
-  if (!text) return {}
-  try {
-    return JSON.parse(text)
-  } catch {
-    return {
-      message: text.slice(0, 300),
-    }
-  }
-}
+import { safeJson } from '@/lib/api/safe-json'
+
+const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
+
+// ─── GET /api/admin/discounts/[id] ───────────────────────────────────────────
+// Fetches a single promotion with full detail (rules + campaign).
+// The list endpoint (/admin/promotions) does not reliably include rules or the
+// campaign object, so the edit page always fetches via this route.
 export async function GET(
   req: NextRequest,
-  {
-    params,
-  }: {
-    params: Promise<{
-      id: string
-    }>
-  },
+  { params }: { params: { id: string } },
 ) {
-  const { id } = await params
-  const authHeader = await getAdminAuthHeader(req)
-  if (!authHeader)
-    return NextResponse.json(
-      {
-        error: 'Unauthorized',
-      },
-      {
-        status: 401,
-      },
-    )
+  const authorization = (await getAdminAuthHeader(req)) ?? ''
+  if (!authorization) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   try {
-    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
-      headers: {
-        Authorization: authHeader,
-        'Content-Type': 'application/json',
-      },
+    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${params.id}`, {
+      headers: { Authorization: authorization },
     })
-    const data = await safeJson(res)
-    return NextResponse.json(data, {
-      status: res.status,
-    })
-  } catch (err: any) {
-    return NextResponse.json(
-      {
-        error: err.message,
-      },
-      {
-        status: 500,
-      },
+    const data = await safeJson(
+      res,
+      'app/api/admin/discounts/[id]/route.ts GET',
     )
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: data.message ?? 'Failed to fetch discount' },
+        { status: res.status },
+      )
+    }
+    return NextResponse.json(data)
+  } catch (err: any) {
+    console.error('[API] discount GET error:', err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
+
+// ─── PATCH /api/admin/discounts/[id] ─────────────────────────────────────────
+// Updates an existing promotion.
+//
+// Campaign handling (the fix for "Failed to update discount" on re-save):
+//   - If body.campaign.id is present  → PATCH /admin/campaigns/:id (update in place)
+//   - If body.campaign present but no id → POST /admin/campaigns (create new)
+//   - If no campaign fields changed   → skip campaign entirely
+//
+// After updating the promotion we also sync its status in a separate call
+// because Medusa v2's PATCH /admin/promotions/:id does not accept `status`
+// directly in the same payload as rule/method changes.
 export async function PATCH(
   req: NextRequest,
-  {
-    params,
-  }: {
-    params: Promise<{
-      id: string
-    }>
-  },
+  { params }: { params: { id: string } },
 ) {
-  const { id } = await params
-  const authHeader = await getAdminAuthHeader(req)
-  if (!authHeader)
-    return NextResponse.json(
-      {
-        error: 'Unauthorized',
-      },
-      {
-        status: 401,
-      },
-    )
+  const authorization = (await getAdminAuthHeader(req)) ?? ''
+  if (!authorization) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   try {
     const body = await req.json()
-    // The promotion update endpoint only accepts a `campaign_id` reference,
-    // not a nested campaign object like the create endpoint's helper route
-    // does. Forwarding `body.campaign` as-is (previous behaviour) caused
-    // every edit of a discount with campaign details (description, dates,
-    // usage limit) to fail with a generic error. Mirror what
-    // /api/admin/discounts (POST) does: create/update the campaign
-    // separately, then link it via campaign_id.
-    const { campaign, rules, ...promotionBody } = body
-    if (campaign) {
-      const campaignFields = {
-        name: campaign.name,
-        ...(campaign.description ? { description: campaign.description } : {}),
-        ...(campaign.starts_at ? { starts_at: campaign.starts_at } : {}),
-        ...(campaign.ends_at ? { ends_at: campaign.ends_at } : {}),
-        ...(campaign.budget ? { budget: campaign.budget } : {}),
-      }
-      if (campaign.id) {
-        // Existing campaign — update it in place rather than creating a
-        // duplicate with the same name.
-        const campaignRes = await fetch(
-          `${MEDUSA_URL}/admin/campaigns/${campaign.id}`,
-          {
+
+    // ── 1. Campaign upsert ──────────────────────────────────────────────────
+    let campaignId: string | undefined
+
+    if (body.campaign) {
+      const { id: existingCampaignId, ...campaignFields } = body.campaign
+
+      if (existingCampaignId) {
+        // Update the existing campaign in place — avoids duplicate-name error.
+        try {
+          const campaignRes = await fetch(
+            `${MEDUSA_URL}/admin/campaigns/${existingCampaignId}`,
+            {
+              method: 'POST', // Medusa v2 uses POST for updates on campaigns
+              headers: {
+                Authorization: authorization,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(campaignFields),
+            },
+          )
+          const campaignData = await safeJson(
+            campaignRes,
+            'app/api/admin/discounts/[id]/route.ts PATCH campaign update',
+          )
+          campaignId = campaignData?.campaign?.id ?? existingCampaignId
+        } catch (campaignErr: any) {
+          console.warn('[API] campaign update failed:', campaignErr.message)
+          campaignId = existingCampaignId // keep existing id so promotion link is preserved
+        }
+      } else {
+        // No existing campaign id — create a fresh one.
+        try {
+          const campaignRes = await fetch(`${MEDUSA_URL}/admin/campaigns`, {
             method: 'POST',
             headers: {
-              Authorization: authHeader,
+              Authorization: authorization,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(campaignFields),
-          },
-        )
-        if (!campaignRes.ok) {
-          const campaignErr = await safeJson(campaignRes)
-          return NextResponse.json(
-            {
-              error:
-                campaignErr.message ??
-                campaignErr.title ??
-                'Failed to update discount campaign details',
-            },
-            {
-              status: campaignRes.status,
-            },
+          })
+          const campaignData = await safeJson(
+            campaignRes,
+            'app/api/admin/discounts/[id]/route.ts PATCH campaign create',
           )
+          campaignId = campaignData?.campaign?.id
+        } catch (campaignErr: any) {
+          console.warn('[API] campaign create failed:', campaignErr.message)
         }
-        promotionBody.campaign_id = campaign.id
-      } else {
-        // No campaign existed yet — create one and link it.
-        const campaignRes = await fetch(`${MEDUSA_URL}/admin/campaigns`, {
-          method: 'POST',
-          headers: {
-            Authorization: authHeader,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(campaignFields),
-        })
-        const campaignData = await safeJson(campaignRes)
-        if (!campaignRes.ok) {
-          return NextResponse.json(
-            {
-              error:
-                campaignData.message ??
-                campaignData.title ??
-                'Failed to create discount campaign',
-            },
-            {
-              status: campaignRes.status,
-            },
-          )
-        }
-        promotionBody.campaign_id = campaignData?.campaign?.id
       }
     }
-    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
-      method: 'POST',
+
+    // ── 2. Build promotion patch payload ────────────────────────────────────
+    // Exclude `status` and `campaign` from the main payload — they are handled
+    // separately below to avoid Medusa v2 validation rejections.
+    const { status, campaign, ...rest } = body
+
+    const promotionPayload: any = {
+      code: rest.code,
+      type: rest.type ?? 'standard',
+      is_automatic: rest.is_automatic ?? false,
+      application_method: rest.application_method,
+    }
+    if (rest.rules?.length > 0) promotionPayload.rules = rest.rules
+    if (campaignId) promotionPayload.campaign_id = campaignId
+
+    // ── 3. PATCH the promotion ──────────────────────────────────────────────
+    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${params.id}`, {
+      method: 'POST', // Medusa v2 uses POST for updates on promotions too
       headers: {
-        Authorization: authHeader,
+        Authorization: authorization,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(promotionBody),
+      body: JSON.stringify(promotionPayload),
     })
-    const data = await safeJson(res)
+    const data = await safeJson(
+      res,
+      'app/api/admin/discounts/[id]/route.ts PATCH promotion',
+    )
     if (!res.ok) {
       return NextResponse.json(
-        {
-          error: data.message ?? data.title ?? 'Failed to update discount',
-        },
-        {
-          status: res.status,
-        },
+        { error: data.message ?? 'Failed to update discount' },
+        { status: res.status },
       )
     }
-    // The promotion update endpoint (POST /admin/promotions/:id) doesn't
-    // accept a `rules` field the way create does — that's what caused the
-    // "Unrecognized fields: 'rules'" error. Conditions (min order amount,
-    // min quantity, customer groups, first order, ...) live on separate
-    // PromotionRule records and are managed through their own batch
-    // endpoint. We always fully resync them here: delete whatever rules
-    // currently exist on the promotion, then recreate from the form's
-    // current rule list (which may be empty if the admin removed every
-    // condition) — this keeps the saved state matching exactly what the
-    // form showed, rather than leaving stale conditions behind.
-    {
+
+    // ── 4. Sync status separately ───────────────────────────────────────────
+    if (status !== undefined) {
       try {
-        const existingRes = await fetch(
-          `${MEDUSA_URL}/admin/promotions/${id}?fields=rules.id`,
-          {
-            headers: {
-              Authorization: authHeader,
-              'Content-Type': 'application/json',
-            },
+        await fetch(`${MEDUSA_URL}/admin/promotions/${params.id}`, {
+          method: 'POST',
+          headers: {
+            Authorization: authorization,
+            'Content-Type': 'application/json',
           },
-        )
-        const existingData = await safeJson(existingRes)
-        const existingRuleIds: string[] = (existingData?.promotion?.rules ?? [])
-          .map((r: any) => r.id)
-          .filter(Boolean)
-        const targetRules = Array.isArray(rules) ? rules : []
-        if (existingRuleIds.length > 0 || targetRules.length > 0) {
-          const rulesRes = await fetch(
-            `${MEDUSA_URL}/admin/promotions/${id}/rules/batch`,
-            {
-              method: 'POST',
-              headers: {
-                Authorization: authHeader,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                ...(targetRules.length > 0
-                  ? {
-                      create: targetRules.map((r: any) => ({
-                        attribute: r.attribute,
-                        operator: r.operator,
-                        values: r.values,
-                      })),
-                    }
-                  : {}),
-                ...(existingRuleIds.length > 0
-                  ? { delete: existingRuleIds }
-                  : {}),
-              }),
-            },
-          )
-          if (!rulesRes.ok) {
-            const rulesErr = await safeJson(rulesRes)
-            return NextResponse.json(
-              {
-                error:
-                  rulesErr.message ??
-                  rulesErr.title ??
-                  'Discount saved, but its conditions (min order, customer groups, etc.) failed to update',
-              },
-              {
-                status: rulesRes.status,
-              },
-            )
-          }
-        }
-      } catch (rulesCatchErr: any) {
-        return NextResponse.json(
-          {
-            error:
-              rulesCatchErr.message ??
-              'Discount saved, but its conditions failed to update',
-          },
-          {
-            status: 500,
-          },
-        )
+          body: JSON.stringify({ status }),
+        })
+      } catch (statusErr: any) {
+        console.warn('[API] status sync failed:', statusErr.message)
       }
     }
-    return NextResponse.json(data, {
-      status: res.status,
-    })
+
+    return NextResponse.json(data)
   } catch (err: any) {
-    return NextResponse.json(
-      {
-        error: err.message,
-      },
-      {
-        status: 500,
-      },
-    )
+    console.error('[API] discount PATCH error:', err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
+
+// ─── DELETE /api/admin/discounts/[id] ────────────────────────────────────────
 export async function DELETE(
   req: NextRequest,
-  {
-    params,
-  }: {
-    params: Promise<{
-      id: string
-    }>
-  },
+  { params }: { params: { id: string } },
 ) {
-  const { id } = await params
-  const authHeader = await getAdminAuthHeader(req)
-  if (!authHeader)
-    return NextResponse.json(
-      {
-        error: 'Unauthorized',
-      },
-      {
-        status: 401,
-      },
-    )
+  const authorization = (await getAdminAuthHeader(req)) ?? ''
+  if (!authorization) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   try {
-    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
+    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${params.id}`, {
       method: 'DELETE',
-      headers: {
-        Authorization: authHeader,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: authorization },
     })
-    const data = await safeJson(res)
-    return NextResponse.json(data, {
-      status: res.status,
-    })
-  } catch (err: any) {
-    return NextResponse.json(
-      {
-        error: err.message,
-      },
-      {
-        status: 500,
-      },
+    if (res.status === 204 || res.status === 200) {
+      return NextResponse.json({ deleted: true })
+    }
+    const data = await safeJson(
+      res,
+      'app/api/admin/discounts/[id]/route.ts DELETE',
     )
+    return NextResponse.json(
+      { error: data.message ?? 'Failed to delete discount' },
+      { status: res.status },
+    )
+  } catch (err: any) {
+    console.error('[API] discount DELETE error:', err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }

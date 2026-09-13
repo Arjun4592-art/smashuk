@@ -197,6 +197,27 @@ export async function POST(req: NextRequest) {
           invoiceErr,
         )
       }
+      // Customer order-confirmation email + store owner new-order
+      // notification. This previously only existed in the older
+      // /api/store/checkout completion path, which nothing on the live
+      // Stripe checkout flow calls — so orders placed through the actual
+      // website checkout never emailed anyone. Wiring it in here fixes that.
+      try {
+        const order = data.order ?? data.cart
+        if (order?.id) {
+          const { notifyNewOrder, sendOrderConfirmationEmail } =
+            await import('@/lib/api/order-notifications')
+          await Promise.all([
+            notifyNewOrder(order, 'website'),
+            sendOrderConfirmationEmail(order),
+          ])
+        }
+      } catch (notifyErr) {
+        console.error(
+          '[/api/store/payment] order notification emails failed:',
+          notifyErr,
+        )
+      }
       return NextResponse.json(data, {
         status: res.status,
       })
