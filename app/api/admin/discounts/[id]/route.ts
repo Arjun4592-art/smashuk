@@ -5,20 +5,18 @@ import { safeJson } from '@/lib/api/safe-json'
 const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 
 // ─── GET /api/admin/discounts/[id] ───────────────────────────────────────────
-// Fetches a single promotion with full detail (rules + campaign).
-// The list endpoint (/admin/promotions) does not reliably include rules or the
-// campaign object, so the edit page always fetches via this route.
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params
   const authorization = (await getAdminAuthHeader(req)) ?? ''
   if (!authorization) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${params.id}`, {
+    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
       headers: { Authorization: authorization },
     })
     const data = await safeJson(
@@ -39,20 +37,11 @@ export async function GET(
 }
 
 // ─── PATCH /api/admin/discounts/[id] ─────────────────────────────────────────
-// Updates an existing promotion.
-//
-// Campaign handling (the fix for "Failed to update discount" on re-save):
-//   - If body.campaign.id is present  → PATCH /admin/campaigns/:id (update in place)
-//   - If body.campaign present but no id → POST /admin/campaigns (create new)
-//   - If no campaign fields changed   → skip campaign entirely
-//
-// After updating the promotion we also sync its status in a separate call
-// because Medusa v2's PATCH /admin/promotions/:id does not accept `status`
-// directly in the same payload as rule/method changes.
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params
   const authorization = (await getAdminAuthHeader(req)) ?? ''
   if (!authorization) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -68,12 +57,11 @@ export async function PATCH(
       const { id: existingCampaignId, ...campaignFields } = body.campaign
 
       if (existingCampaignId) {
-        // Update the existing campaign in place — avoids duplicate-name error.
         try {
           const campaignRes = await fetch(
             `${MEDUSA_URL}/admin/campaigns/${existingCampaignId}`,
             {
-              method: 'POST', // Medusa v2 uses POST for updates on campaigns
+              method: 'POST',
               headers: {
                 Authorization: authorization,
                 'Content-Type': 'application/json',
@@ -88,10 +76,9 @@ export async function PATCH(
           campaignId = campaignData?.campaign?.id ?? existingCampaignId
         } catch (campaignErr: any) {
           console.warn('[API] campaign update failed:', campaignErr.message)
-          campaignId = existingCampaignId // keep existing id so promotion link is preserved
+          campaignId = existingCampaignId
         }
       } else {
-        // No existing campaign id — create a fresh one.
         try {
           const campaignRes = await fetch(`${MEDUSA_URL}/admin/campaigns`, {
             method: 'POST',
@@ -113,8 +100,6 @@ export async function PATCH(
     }
 
     // ── 2. Build promotion patch payload ────────────────────────────────────
-    // Exclude `status` and `campaign` from the main payload — they are handled
-    // separately below to avoid Medusa v2 validation rejections.
     const { status, campaign, ...rest } = body
 
     const promotionPayload: any = {
@@ -127,8 +112,8 @@ export async function PATCH(
     if (campaignId) promotionPayload.campaign_id = campaignId
 
     // ── 3. PATCH the promotion ──────────────────────────────────────────────
-    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${params.id}`, {
-      method: 'POST', // Medusa v2 uses POST for updates on promotions too
+    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
+      method: 'POST',
       headers: {
         Authorization: authorization,
         'Content-Type': 'application/json',
@@ -149,7 +134,7 @@ export async function PATCH(
     // ── 4. Sync status separately ───────────────────────────────────────────
     if (status !== undefined) {
       try {
-        await fetch(`${MEDUSA_URL}/admin/promotions/${params.id}`, {
+        await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
           method: 'POST',
           headers: {
             Authorization: authorization,
@@ -172,15 +157,16 @@ export async function PATCH(
 // ─── DELETE /api/admin/discounts/[id] ────────────────────────────────────────
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params
   const authorization = (await getAdminAuthHeader(req)) ?? ''
   if (!authorization) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${params.id}`, {
+    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
       method: 'DELETE',
       headers: { Authorization: authorization },
     })
