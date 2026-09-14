@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
         ? u.metadata.posRole
         : ['admin', 'staff'].includes(u.metadata?.role ?? '')
           ? u.metadata.role
-          : 'admin',
+          : 'staff',
       hasPin: Boolean(u.metadata?.pin),
       shift: u.metadata?.shift ?? '',
       isActive: u.metadata?.isActive !== false,

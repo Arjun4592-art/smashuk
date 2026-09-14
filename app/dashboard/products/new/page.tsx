@@ -1915,11 +1915,22 @@ export default function AddProductPage() {
                                   field === 'sku'
                                     ? 'e.g. FB-001-BLK-8'
                                     : field === 'price'
-                                      ? '0.00'
+                                      ? form.price
+                                        ? `${form.price} (product price)`
+                                        : '0.00'
                                       : '0'
                                 }
                                 className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
                               />
+                              {field === 'price' && (
+                                <p className='text-[10.5px] text-[#8C9196] mt-1'>
+                                  {variant.price
+                                    ? 'Overrides the product price for this variant.'
+                                    : form.price
+                                      ? `Blank = uses product price (£${form.price}). Enter a value to set a different price for this variant.`
+                                      : 'Blank = uses the product price above.'}
+                                </p>
+                              )}
                             </div>
                           ))}
                         </div>

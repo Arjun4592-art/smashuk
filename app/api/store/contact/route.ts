@@ -1,184 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { setSurfaceCookies } from '@/lib/api/auth-cookie'
 import { sendMail, notifyOwner } from '@/lib/email'
-import { welcomeEmail, adminWelcomeEmail } from '@/lib/email-templates'
-const MEDUSA_URL =
-  process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
-const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
-const STORE_HEADERS = {
-  'Content-Type': 'application/json',
-  'x-publishable-api-key': PUBLISHABLE_KEY,
-}
+import { contactAutoReplyEmail, contactAdminEmail } from '@/lib/email-templates'
+
 export async function POST(req: NextRequest) {
   try {
-    const { name, email, password } = await req.json()
-    if (!name || !email || !password) {
+    const { name, email, subject, message } = await req.json()
+
+    if (!name || !email || !message) {
       return NextResponse.json(
-        {
-          error: 'Name, email and password required.',
-        },
-        {
-          status: 400,
-        },
+        { error: 'Name, email and message are required.' },
+        { status: 400 },
       )
     }
-    if (password.length < 8) {
-      return NextResponse.json(
-        {
-          error: 'Password must be at least 8 characters.',
-        },
-        {
-          status: 400,
-        },
-      )
-    }
-    const regRes = await fetch(
-      `${MEDUSA_URL}/auth/customer/emailpass/register`,
-      {
-        method: 'POST',
-        headers: STORE_HEADERS,
-        body: JSON.stringify({
-          email,
-          password,
-        }),
-      },
-    )
-    const regData = await regRes.json().catch(() => ({}))
-    if (!regRes.ok) {
-      const msg = regData?.message ?? regData?.error ?? 'Registration failed.'
-      if (regRes.status === 409 || msg.toLowerCase().includes('exist')) {
-        return NextResponse.json(
-          {
-            error: 'This email is already registered. Please login.',
-          },
-          {
-            status: 409,
-          },
-        )
-      }
-      return NextResponse.json(
-        {
-          error: msg,
-        },
-        {
-          status: regRes.status,
-        },
-      )
-    }
-    const registrationToken = regData.token as string
-    if (!registrationToken) {
-      return NextResponse.json(
-        {
-          error: 'Registration failed. Please try again.',
-        },
-        {
-          status: 500,
-        },
-      )
-    }
-    const [firstName, ...rest] = name.trim().split(' ')
-    const createCustomerRes = await fetch(`${MEDUSA_URL}/store/customers`, {
-      method: 'POST',
-      headers: {
-        ...STORE_HEADERS,
-        Authorization: `Bearer ${registrationToken}`,
-      },
-      body: JSON.stringify({
-        email,
-        first_name: firstName,
-        last_name: rest.join(' ') || '',
-      }),
+
+    // Notify the store owner of the new enquiry
+    const adminEmail = contactAdminEmail({ name, email, subject, message })
+    notifyOwner({
+      subject: adminEmail.subject,
+      html: adminEmail.html,
+      text: adminEmail.text,
+      customerEmail: email,
+    }).catch((err) => {
+      console.error('[contact] notifyOwner failed:', err)
     })
-    const createCustomerData = await createCustomerRes.json().catch(() => ({}))
-    if (!createCustomerRes.ok) {
-      const msg =
-        createCustomerData?.message ?? 'Could not create customer profile.'
-      return NextResponse.json(
-        {
-          error: msg,
-        },
-        {
-          status: createCustomerRes.status,
-        },
-      )
-    }
-    try {
-      const newCustomer = createCustomerData.customer ?? {
-        first_name: firstName,
-        last_name: rest.join(' ') || '',
-        email,
-      }
-      const { subject, html, text } = welcomeEmail(newCustomer)
-      sendMail({ to: email, subject, html, text }).catch(() => {})
-      const adminEmail = adminWelcomeEmail(newCustomer)
-      notifyOwner({
-        subject: adminEmail.subject,
-        html: adminEmail.html,
-        text: adminEmail.text,
-        customerEmail: email,
-      }).catch(() => {})
-    } catch (welcomeErr) {
-      console.error('[customer-register] welcome email failed:', welcomeErr)
-    }
-    const loginRes = await fetch(`${MEDUSA_URL}/auth/customer/emailpass`, {
-      method: 'POST',
-      headers: STORE_HEADERS,
-      body: JSON.stringify({
-        email,
-        password,
-      }),
+
+    // Send an auto-reply confirmation to the customer
+    const autoReply = contactAutoReplyEmail({ name, message })
+    sendMail({
+      to: email,
+      subject: autoReply.subject,
+      html: autoReply.html,
+      text: autoReply.text,
+    }).catch((err) => {
+      console.error('[contact] auto-reply failed:', err)
     })
-    const loginData = await loginRes.json()
-    if (!loginRes.ok || !loginData.token) {
-      return NextResponse.json(
-        {
-          error:
-            'Registration successful but login failed. Please login manually.',
-        },
-        {
-          status: 201,
-        },
-      )
-    }
-    const token = loginData.token as string
-    const customer = createCustomerData.customer
-    const user = {
-      id: customer?.id ?? email,
-      name:
-        `${customer?.first_name ?? ''} ${customer?.last_name ?? ''}`.trim() ||
-        name,
-      email,
-      role: 'customer' as const,
-      createdAt: customer?.created_at ?? new Date().toISOString(),
-    }
-    const response = NextResponse.json(
-      {
-        user,
-      },
-      {
-        status: 201,
-      },
-    )
-    setSurfaceCookies(
-      response.cookies,
-      'website',
-      {
-        isAuthenticated: true,
-        role: 'customer',
-      },
-      token,
-      'lax',
-    )
-    return response
+
+    return NextResponse.json({ success: true }, { status: 200 })
   } catch (err: any) {
-    console.error('[customer-register]', err)
+    console.error('[contact]', err)
     return NextResponse.json(
-      {
-        error: 'Registration failed. Please try again.',
-      },
-      {
-        status: 500,
-      },
+      { error: 'Failed to send message. Please try again.' },
+      { status: 500 },
     )
   }
 }

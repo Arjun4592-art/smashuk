@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Papa from 'papaparse'
 import { toast } from 'sonner'
 import { useCustomers } from '@/hooks/useDashboard'
+import { useDebouncedValue } from '@/hooks/useDebounce'
 import {
   CUSTOMER_SEGMENTS,
   SEGMENT_STYLES,
@@ -302,9 +303,10 @@ function CustomersContent() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [page, setPage] = useState(1)
   const pageSize = 10
+  const debouncedSearch = useDebouncedValue(search, 400)
   const { data, loading, error, refetch } = useCustomers({
     limit: 100,
-    q: search || undefined,
+    q: debouncedSearch || undefined,
   })
   const customers = data?.customers ?? []
   const [showAddModal, setShowAddModal] = useState(false)

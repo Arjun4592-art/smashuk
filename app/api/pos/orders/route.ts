@@ -4,9 +4,11 @@ import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { getRemainingReturnableQty } from '@/lib/api/medusa-returns'
 import { fulfillOrder } from '@/lib/api/medusa-fulfillment'
+import { getPublicFreeShippingThreshold } from '@/lib/shipping-settings'
 import { requireStripe } from '@/lib/stripe-server'
 import { notifyOwner } from '@/lib/email'
 import { adminNewOrderEmail } from '@/lib/email-templates'
+import { sendOrderConfirmationEmail } from '@/lib/api/order-notifications'
 // Synthetic emails we generate ourselves for walk-in / no-email customers —
 // never send a "confirmation" to these, they're not real inboxes.
 const isSyntheticEmail = (email?: string) =>
@@ -591,13 +593,56 @@ export async function POST(request: NextRequest) {
         'shipping options fetch',
       )
       const options = shippingOptsData.shipping_options ?? []
-      const chosen =
-        fulfillmentType === 'ship'
-          ? (options.find(
-              (o: any) => !/pickup|store|pos/i.test(o.name ?? ''),
-            ) ?? options[0])
-          : (options.find((o: any) => /pickup|store|pos/i.test(o.name ?? '')) ??
-            options[0])
+      const isPickupOptionName = (name: string) =>
+        /pickup|store|pos/i.test(name ?? '')
+      const isFreeOptionName = (name: string) =>
+        !isPickupOptionName(name) && /free/i.test(name ?? '')
+      let chosen: any = null
+      if (fulfillmentType === 'ship') {
+        // BUG FIX: this used to just grab the first non-pickup option
+        // regardless of order value, so POS "Ship" sales always charged
+        // the flat paid rate (e.g. £5.98) even on orders well above the
+        // store's free-shipping threshold — the website checkout already
+        // applies this threshold correctly, POS never did. Mirror that
+        // same logic here: use item_total (post-discount, pre-shipping)
+        // against the store's configured free-shipping threshold.
+        let itemTotal = 0
+        try {
+          const cartTotalsRes = await storeFetch(
+            `/store/carts/${cartId}?fields=item_total`,
+          )
+          if (cartTotalsRes.ok) {
+            const cartTotalsData = await safeJson(
+              cartTotalsRes,
+              'cart item_total fetch',
+            )
+            itemTotal = Number(cartTotalsData?.cart?.item_total ?? 0)
+          }
+        } catch (err) {
+          console.warn(
+            '[POS orders] could not read cart item_total for free-shipping check, defaulting to paid rate:',
+            err,
+          )
+        }
+        const freeShippingThreshold = await getPublicFreeShippingThreshold()
+        const freeOption = options.find((o: any) =>
+          isFreeOptionName(o.name ?? ''),
+        )
+        const paidOption = options.find(
+          (o: any) =>
+            !isPickupOptionName(o.name ?? '') &&
+            !isFreeOptionName(o.name ?? ''),
+        )
+        chosen =
+          (itemTotal >= freeShippingThreshold ? freeOption : paidOption) ??
+          freeOption ??
+          paidOption ??
+          options[0]
+      } else {
+        chosen =
+          options.find((o: any) => isPickupOptionName(o.name ?? '')) ??
+          options[0]
+      }
       if (chosen) {
         const smRes = await storeFetch(
           `/store/carts/${cartId}/shipping-methods`,
@@ -900,10 +945,14 @@ export async function POST(request: NextRequest) {
         const orderNumber = fullOrder?.display_id
           ? `#${fullOrder.display_id}`
           : order.id
-        // Admin-only — the customer already gets a receipt via the POS
-        // "Email Receipt" action when the cashier chooses to send one.
-        // Auto-sending a second "order confirmed" email here duplicated
-        // that receipt for the customer, so it's admin-only now.
+        // Notify the store owner of every POS sale, and — separately —
+        // send the customer their own order-confirmation email (same
+        // template/behaviour as a website order) whenever we have a real
+        // address on file. This used to be admin-only, relying on the
+        // cashier manually hitting "Email Receipt" on the POS receipt
+        // screen, but that step was easy to forget/skip, so it's now sent
+        // automatically here too. "Email Receipt" still exists for a
+        // manual resend if the customer needs another copy.
         const { html, text } = adminNewOrderEmail(fullOrder ?? order, 'pos')
         notifyOwner({
           subject: `New POS order ${orderNumber}`,
@@ -913,6 +962,14 @@ export async function POST(request: NextRequest) {
             ? fullOrder?.email
             : undefined,
         }).catch(() => {})
+        if (!isSyntheticEmail(fullOrder?.email)) {
+          sendOrderConfirmationEmail(fullOrder ?? order).catch((err) => {
+            console.error(
+              '[POS orders] customer order-confirmation email failed:',
+              err,
+            )
+          })
+        }
       }
     } catch (notifyErr) {
       console.error('[POS orders] order-placed notification failed:', notifyErr)

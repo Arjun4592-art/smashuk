@@ -1,7 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { POSCartItem, POSSession, Product, ProductVariant } from '@/types'
-import { VAT_RATE } from '@/lib/constants'
+import {
+  VAT_RATE,
+  FREE_SHIPPING_THRESHOLD,
+  STANDARD_SHIPPING_COST,
+} from '@/lib/constants'
 import {
   fetchCashDrawerState,
   openCashDrawerRemote,
@@ -161,6 +165,7 @@ interface POSState {
   shippingAddress: {
     first_name: string
     last_name: string
+    email: string
     address_1: string
     address_2: string
     city: string
@@ -171,6 +176,7 @@ interface POSState {
   } | null
   subtotal: number
   discountTotal: number
+  shippingCost: number
   tax: number
   total: number
   amountDue: number
@@ -278,6 +284,7 @@ function computePOSTotals(
   customDiscount: number,
   couponDiscount: number,
   giftCardAmount: number = 0,
+  fulfillmentType: 'pickup' | 'ship' = 'pickup',
 ) {
   const subtotal = items.reduce(
     (sum, item) =>
@@ -286,17 +293,27 @@ function computePOSTotals(
   )
   const discountTotal = customDiscount + couponDiscount
   const taxable = Math.max(0, subtotal - discountTotal)
+  // Shipping only applies when the sale is being shipped to the customer, and
+  // only below the store's free-shipping threshold — mirrors the website cart
+  // (store/cartStore.ts) so the charge shown here matches what checkout would apply.
+  const shippingCost =
+    fulfillmentType === 'ship' &&
+    taxable > 0 &&
+    taxable < FREE_SHIPPING_THRESHOLD
+      ? STANDARD_SHIPPING_COST
+      : 0
+  const chargeableBase = taxable + shippingCost
   const rate = liveTaxRate ?? VAT_RATE
   let tax: number
   let total: number
   if (liveTaxInclusive) {
     // Prices already include VAT — extract it for the receipt/display only, never add it on top
-    tax = Math.round((taxable - taxable / (1 + rate)) * 100) / 100
-    total = taxable
+    tax = Math.round((chargeableBase - chargeableBase / (1 + rate)) * 100) / 100
+    total = chargeableBase
   } else {
     // Ex-VAT (trade/wholesale) pricing — VAT is added on top
-    tax = Math.round(taxable * rate * 100) / 100
-    total = taxable + tax
+    tax = Math.round(chargeableBase * rate * 100) / 100
+    total = chargeableBase + tax
   }
   const cappedGiftCard = Math.max(0, Math.min(giftCardAmount, total))
   const amountDue = total - cappedGiftCard
@@ -304,6 +321,7 @@ function computePOSTotals(
   return {
     subtotal,
     discountTotal,
+    shippingCost,
     tax,
     total,
     amountDue,
@@ -353,6 +371,7 @@ export const usePOSStore = create<POSState>()(
       auditLog: [],
       subtotal: 0,
       discountTotal: 0,
+      shippingCost: 0,
       tax: 0,
       total: 0,
       amountDue: 0,
@@ -469,14 +488,20 @@ export const usePOSStore = create<POSState>()(
             currencyCode: data.currencyCode,
             storeSettingsLoaded: true,
           })
-          const { items, customDiscount, couponDiscount, giftCardAmount } =
-            get()
+          const {
+            items,
+            customDiscount,
+            couponDiscount,
+            giftCardAmount,
+            fulfillmentType,
+          } = get()
           set(
             computePOSTotals(
               items,
               customDiscount,
               couponDiscount,
               giftCardAmount,
+              fulfillmentType,
             ),
           )
         } catch (err) {
@@ -489,8 +514,13 @@ export const usePOSStore = create<POSState>()(
       updateTerminalSetting: (key, value) => {
         if (key === 'taxInclusivePricing') {
           liveTaxInclusive = value
-          const { items, customDiscount, couponDiscount, giftCardAmount } =
-            get()
+          const {
+            items,
+            customDiscount,
+            couponDiscount,
+            giftCardAmount,
+            fulfillmentType,
+          } = get()
           set({
             [key]: value,
             ...computePOSTotals(
@@ -498,6 +528,7 @@ export const usePOSStore = create<POSState>()(
               customDiscount,
               couponDiscount,
               giftCardAmount,
+              fulfillmentType,
             ),
           } as Pick<POSState, typeof key>)
           return
@@ -609,6 +640,7 @@ export const usePOSStore = create<POSState>()(
               state.customDiscount,
               state.couponDiscount,
               state.giftCardAmount,
+              state.fulfillmentType,
             ),
           }
         })
@@ -628,6 +660,7 @@ export const usePOSStore = create<POSState>()(
               state.customDiscount,
               state.couponDiscount,
               state.giftCardAmount,
+              state.fulfillmentType,
             ),
           }
         })
@@ -653,6 +686,7 @@ export const usePOSStore = create<POSState>()(
               state.customDiscount,
               state.couponDiscount,
               state.giftCardAmount,
+              state.fulfillmentType,
             ),
           }
         })
@@ -674,6 +708,7 @@ export const usePOSStore = create<POSState>()(
               state.customDiscount,
               state.couponDiscount,
               state.giftCardAmount,
+              state.fulfillmentType,
             ),
           }
         })
@@ -686,6 +721,7 @@ export const usePOSStore = create<POSState>()(
             discount,
             state.couponDiscount,
             state.giftCardAmount,
+            state.fulfillmentType,
           ),
         })),
       applyCoupon: (code, discount) =>
@@ -697,6 +733,7 @@ export const usePOSStore = create<POSState>()(
             state.customDiscount,
             discount,
             state.giftCardAmount,
+            state.fulfillmentType,
           ),
         })),
       removeCoupon: () =>
@@ -708,6 +745,7 @@ export const usePOSStore = create<POSState>()(
             state.customDiscount,
             0,
             state.giftCardAmount,
+            state.fulfillmentType,
           ),
         })),
       applyGiftCard: (code, cardBalance) =>
@@ -718,6 +756,7 @@ export const usePOSStore = create<POSState>()(
             state.customDiscount,
             state.couponDiscount,
             cardBalance,
+            state.fulfillmentType,
           ),
         })),
       removeGiftCard: () =>
@@ -728,6 +767,7 @@ export const usePOSStore = create<POSState>()(
             state.customDiscount,
             state.couponDiscount,
             0,
+            state.fulfillmentType,
           ),
         })),
       setPaymentMethod: (method) =>
@@ -788,14 +828,21 @@ export const usePOSStore = create<POSState>()(
           orderNote: '',
         }),
       setFulfillmentType: (type) =>
-        set({
+        set((state) => ({
           fulfillmentType: type,
           ...(type === 'pickup'
             ? {
                 shippingAddress: null,
               }
             : {}),
-        }),
+          ...computePOSTotals(
+            state.items,
+            state.customDiscount,
+            state.couponDiscount,
+            state.giftCardAmount,
+            type,
+          ),
+        })),
       setShippingAddress: (addr) =>
         set({
           shippingAddress: addr,
@@ -808,6 +855,7 @@ export const usePOSStore = create<POSState>()(
             amount,
             state.couponDiscount,
             state.giftCardAmount,
+            state.fulfillmentType,
           ),
         })),
       applyPercentageDiscount: (percent) =>
@@ -824,6 +872,7 @@ export const usePOSStore = create<POSState>()(
               amount,
               state.couponDiscount,
               state.giftCardAmount,
+              state.fulfillmentType,
             ),
           }
         }),
@@ -858,7 +907,7 @@ export const usePOSStore = create<POSState>()(
             couponDiscount: 0,
             giftCardCode: null,
             savedCarts: state.savedCarts.filter((c) => c.id !== id),
-            ...computePOSTotals(cart.items, 0, 0),
+            ...computePOSTotals(cart.items, 0, 0, 0, state.fulfillmentType),
           }
         }),
       deleteSavedCart: (id) =>

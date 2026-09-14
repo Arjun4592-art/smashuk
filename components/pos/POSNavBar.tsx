@@ -17,12 +17,7 @@ import {
 import POSProfileModal from '@/components/pos/POSProfileModal'
 import { SITE_LOGO, SITE_NAME } from '@/lib/constants'
 type Tab =
-  | 'billing'
-  | 'orders'
-  | 'products'
-  | 'analytics'
-  | 'customers'
-  | 'settings'
+  'billing' | 'orders' | 'products' | 'analytics' | 'customers' | 'settings'
 interface Props {
   user: any
   tab: Tab
@@ -90,10 +85,7 @@ interface Notification {
 }
 const LOW_STOCK_THRESHOLD = 5
 type TerminalSettingKey =
-  | 'soundOnScan'
-  | 'autoPrintReceipt'
-  | 'showStockCount'
-  | 'taxInclusivePricing'
+  'soundOnScan' | 'autoPrintReceipt' | 'showStockCount' | 'taxInclusivePricing'
 const SETTING_LABELS: Record<TerminalSettingKey, string> = {
   soundOnScan: 'Sound on scan',
   autoPrintReceipt: 'Auto-print receipt',
@@ -211,13 +203,20 @@ export default function POSNavBar({
       .filter((p) => p.stock > 0 && p.stock <= LOW_STOCK_THRESHOLD)
       .sort((a, b) => a.stock - b.stock)
       .slice(0, 5)
-      .map((p) => ({
-        id: `stock-${p.id}`,
-        type: 'warning',
-        title: 'Low stock alert',
-        message: `${p.name} — only ${p.stock} left`,
-        read: readIds.has(`stock-${p.id}`),
-      }))
+      .map((p) => {
+        // Products with multiple variants (sizes etc.) share the same
+        // p.id — the variant is what makes each row distinct, so key off
+        // that (falling back to p.id for the rare case it's missing),
+        // same as ProductGrid already does when rendering these.
+        const key = p.variantId ?? p.id
+        return {
+          id: `stock-${key}`,
+          type: 'warning',
+          title: 'Low stock alert',
+          message: `${p.name} — only ${p.stock} left`,
+          read: readIds.has(`stock-${key}`),
+        }
+      })
     const recentOrders: Notification[] = (completedOrders ?? [])
       .slice(0, 5)
       .map((o: any) => ({

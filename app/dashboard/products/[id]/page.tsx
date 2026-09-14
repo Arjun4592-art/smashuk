@@ -2270,8 +2270,24 @@ export default function EditProductPage({
                                     e.target.value,
                                   )
                                 }
+                                placeholder={
+                                  field === 'price'
+                                    ? form.price
+                                      ? `${form.price} (product price)`
+                                      : '0.00'
+                                    : undefined
+                                }
                                 className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all'
                               />
+                              {field === 'price' && (
+                                <p className='text-[10.5px] text-[#8C9196] mt-1'>
+                                  {variant.price
+                                    ? 'Overrides the product price for this variant.'
+                                    : form.price
+                                      ? `Blank = uses product price (£${form.price}). Enter a value to set a different price for this variant.`
+                                      : 'Blank = uses the product price above.'}
+                                </p>
+                              )}
                             </div>
                           ))}
                         </div>

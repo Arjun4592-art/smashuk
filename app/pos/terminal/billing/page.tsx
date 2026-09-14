@@ -91,6 +91,7 @@ export default function BillingPage() {
     items,
     subtotal,
     discountTotal,
+    shippingCost,
     tax,
     total,
     customDiscount,
@@ -390,7 +391,7 @@ export default function BillingPage() {
             customer?.id && !customer.id.startsWith('local-')
               ? customer.id
               : undefined,
-          customer_email: (customer as any)?.email,
+          customer_email: (customer as any)?.email || shippingAddress?.email,
           customer_name: customer?.name,
           customer_phone: customer?.phone,
           payment_method: result.method,
@@ -492,6 +493,7 @@ export default function BillingPage() {
         subtotal,
         discountAmount: discountTotal,
         discountLabel: couponCode || 'Discount',
+        shippingAmount: shippingCost,
         giftCardAmount: giftCardAmount ?? 0,
         giftCardMasked: giftCardCode
           ? `**** **** ${giftCardCode.slice(-4)}`
@@ -561,7 +563,7 @@ export default function BillingPage() {
   if (screen === 'receipt') {
     return (
       <div
-        className='flex-1 overflow-y-auto'
+        className='flex-1 min-h-0'
         style={{
           opacity: mounted ? 1 : 0,
           transform: mounted ? 'translateY(0)' : 'translateY(8px)',
@@ -570,9 +572,11 @@ export default function BillingPage() {
       >
         <Receipt
           orderId={orderId}
+          medusaOrderId={medusaOrderId}
           items={cartDisplayItems}
           subtotal={subtotal}
           discountAmount={discountTotal}
+          shippingAmount={shippingCost}
           gst={tax}
           total={total}
           payMethod={paymentMethod}
@@ -600,7 +604,9 @@ export default function BillingPage() {
         {showEmailReceipt && (
           <EmailReceiptModal
             onClose={() => setShowEmailReceipt(false)}
-            defaultEmail={(customer as any)?.email ?? ''}
+            defaultEmail={
+              (customer as any)?.email || shippingAddress?.email || ''
+            }
             receipt={{
               orderId: medusaOrderId ?? orderId,
               items: cartDisplayItems,
@@ -826,6 +832,7 @@ export default function BillingPage() {
               items={cartDisplayItems}
               subtotal={subtotal}
               discountAmount={discountTotal}
+              shippingAmount={shippingCost}
               gst={tax}
               total={total}
               giftCardCode={giftCardCode}
@@ -1116,6 +1123,7 @@ export default function BillingPage() {
           <BillingCart
             items={cartDisplayItems}
             discountAmount={discountTotal}
+            shippingAmount={shippingCost}
             gst={tax}
             total={total}
             subtotal={subtotal}

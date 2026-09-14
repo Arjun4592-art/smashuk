@@ -23,9 +23,11 @@ interface ShippingAddress {
 }
 interface Props {
   orderId: string
+  medusaOrderId?: string
   items: CartDisplayItem[]
   subtotal: number
   discountAmount: number
+  shippingAmount?: number
   gst: number
   total: number
   payMethod: string
@@ -72,9 +74,11 @@ function qrDataUrl(text: string): string {
 }
 export default function Receipt({
   orderId,
+  medusaOrderId,
   items,
   subtotal,
   discountAmount,
+  shippingAmount = 0,
   gst,
   total,
   payMethod,
@@ -105,14 +109,14 @@ export default function Receipt({
   const change = payMethod === 'cash' ? rounding : 0
   return (
     <div
-      className='flex flex-col h-full items-center justify-center p-6 print:p-0'
+      className='flex flex-col h-full items-center overflow-y-auto! p-6 print:p-0'
       style={{
         background: '#F6F6F7',
       }}
     >
       {}
       <div
-        className='w-full max-w-sm rounded-xl overflow-hidden print:hidden'
+        className='w-full max-w-sm rounded-xl print:hidden my-auto'
         style={{
           background: '#FFFFFF',
           border: '1px solid #E1E3E5',
@@ -197,9 +201,11 @@ export default function Receipt({
         <div className='px-5 py-4'>
           <ReceiptBody
             orderId={orderId}
+            medusaOrderId={medusaOrderId}
             items={items}
             subtotal={subtotal}
             discountAmount={discountAmount}
+            shippingAmount={shippingAmount}
             gst={gst}
             total={total}
             payMethod={payMethod}
@@ -292,9 +298,11 @@ export default function Receipt({
       <div className='hidden print:block print-receipt'>
         <ReceiptBody
           orderId={orderId}
+          medusaOrderId={medusaOrderId}
           items={items}
           subtotal={subtotal}
           discountAmount={discountAmount}
+          shippingAmount={shippingAmount}
           gst={gst}
           total={total}
           payMethod={payMethod}
@@ -353,9 +361,11 @@ export default function Receipt({
 }
 export function ReceiptBody({
   orderId,
+  medusaOrderId,
   items,
   subtotal,
   discountAmount,
+  shippingAmount = 0,
   gst,
   total,
   payMethod,
@@ -375,9 +385,11 @@ export function ReceiptBody({
   printMode = false,
 }: {
   orderId: string
+  medusaOrderId?: string
   items: CartDisplayItem[]
   subtotal: number
   discountAmount: number
+  shippingAmount?: number
   gst: number
   total: number
   payMethod: string
@@ -407,7 +419,11 @@ export function ReceiptBody({
     ? `**** **** ${giftCardCode.slice(-4)}`
     : ''
   const showShipTo = fulfillmentType === 'ship' && !!shippingAddress?.address_1
-  const trackingUrl = `${SITE_URL}/orders/${encodeURIComponent(orderId)}`
+  // The website's order lookup (/api/store/orders) resolves by Medusa's real
+  // order id, not the human-readable POS receipt number — so the tracking
+  // link/QR must use medusaOrderId whenever the sale synced to Medusa, same
+  // as the order-confirmation email (see lib/invoice-service.ts).
+  const trackingUrl = `${SITE_URL}/orders/${encodeURIComponent(medusaOrderId ?? orderId)}`
   const qrSrc = qrDataUrl(trackingUrl)
   if (printMode) {
     return (
@@ -583,6 +599,9 @@ export function ReceiptBody({
               value={`-${fmt(discountAmount)}`}
               green
             />
+          )}
+          {shippingAmount > 0 && (
+            <Row label='Shipping' value={fmt(shippingAmount)} />
           )}
         </div>
 
@@ -1002,6 +1021,17 @@ export function ReceiptBody({
             <span>-{fmt(discountAmount)}</span>
           </div>
         )}
+        {shippingAmount > 0 && (
+          <div
+            className='flex justify-between text-xs'
+            style={{
+              color: '#6D7175',
+            }}
+          >
+            <span>Shipping</span>
+            <span>{fmt(shippingAmount)}</span>
+          </div>
+        )}
         {giftCardAmount > 0 && (
           <div
             className='flex justify-between text-xs'
@@ -1104,14 +1134,27 @@ export function ReceiptBody({
         </div>
       )}
 
-      <p
-        className='text-center text-xs mt-4'
-        style={{
-          color: '#8C9196',
-        }}
-      >
-        Thank you for shopping with {STORE_DISPLAY_NAME}!
-      </p>
+      <div className='text-center mt-4'>
+        <a
+          href={trackingUrl}
+          target='_blank'
+          rel='noopener noreferrer'
+          className='text-xs font-medium'
+          style={{
+            color: '#008060',
+          }}
+        >
+          Track this order →
+        </a>
+        <p
+          className='text-xs mt-1.5'
+          style={{
+            color: '#8C9196',
+          }}
+        >
+          Thank you for shopping with {STORE_DISPLAY_NAME}!
+        </p>
+      </div>
     </>
   )
 }

@@ -5,6 +5,7 @@ import { sendMail } from '@/lib/email'
 import { invoiceEmail } from '@/lib/email-templates'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { generateInvoiceForOrder } from '@/lib/invoice-service'
+import { SITE_URL } from '@/lib/constants'
 
 async function requirePosSession(): Promise<boolean> {
   const cookieStore = await cookies()
@@ -86,6 +87,7 @@ export async function POST(req: NextRequest) {
       invoiceNumber,
       orderNumber,
       pdfUrl: url,
+      trackingUrl: `${SITE_URL}/orders/${encodeURIComponent(order.id)}`,
     })
     const result = await sendMail({
       to: email,

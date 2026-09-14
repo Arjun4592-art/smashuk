@@ -155,6 +155,7 @@ function buildReceiptHtml(data: ReceiptData, width: PaperWidth): string {
   <hr />
   <div class="row"><span>Subtotal</span><span>${fmt(data.subtotal)}</span></div>
   ${data.discountAmount > 0 ? `<div class="row"><span>${escapeHtml(data.discountLabel)}</span><span>-${fmt(data.discountAmount)}</span></div>` : ''}
+  ${data.shippingAmount && data.shippingAmount > 0 ? `<div class="row"><span>Shipping</span><span>${fmt(data.shippingAmount)}</span></div>` : ''}
   ${data.giftCardAmount > 0 ? `<div class="row"><span>Gift card${data.giftCardMasked ? ` (${escapeHtml(data.giftCardMasked)})` : ''}</span><span>-${fmt(data.giftCardAmount)}</span></div>` : ''}
   <hr />
   <div class="total-row"><span>TOTAL</span><span>${fmt(data.total)}</span></div>

@@ -41,7 +41,11 @@ async function getPosStaffUser(serviceToken: string, staffId: string, sessionId:
   const meta = u?.metadata ?? {};
   if (meta.isActive === false) return null;
   if (!isPosSessionValid(meta, sessionId)) return null;
-  const role: 'admin' | 'staff' = ['admin', 'staff'].includes(meta.posRole) ? meta.posRole : 'admin';
+  const role: 'admin' | 'staff' = ['admin', 'staff'].includes(meta.posRole)
+    ? meta.posRole
+    : meta.role === 'admin'
+      ? 'admin'
+      : 'staff';
   return {
     id: u.id,
     name: `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || u.email,

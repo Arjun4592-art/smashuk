@@ -35,6 +35,7 @@ export interface ReceiptData {
   subtotal: number
   discountAmount: number
   discountLabel: string
+  shippingAmount?: number
   giftCardAmount: number
   giftCardMasked?: string
   tax: number
@@ -276,6 +277,9 @@ export async function buildReceiptEscPos(
   b.row('Subtotal', fmt(data.subtotal))
   if (data.discountAmount > 0) {
     b.row(data.discountLabel, `-${fmt(data.discountAmount)}`)
+  }
+  if (data.shippingAmount && data.shippingAmount > 0) {
+    b.row('Shipping', fmt(data.shippingAmount))
   }
   if (data.giftCardAmount > 0) {
     b.row(

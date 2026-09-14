@@ -5,6 +5,7 @@ import Link from 'next/link'
 import Papa from 'papaparse'
 import { toast } from 'sonner'
 import { useProducts } from '@/hooks/useDashboard'
+import { useDebouncedValue } from '@/hooks/useDebounce'
 import { useRouter } from 'next/navigation'
 import { deleteProduct, duplicateProduct } from '@/lib/api/dashboard'
 const STATUS_STYLES: Record<string, string> = {
@@ -214,9 +215,10 @@ export default function ProductsPage() {
       error: string
     }[]
   } | null>(null)
+  const debouncedSearch = useDebouncedValue(search, 400)
   const { data, loading, error, refetch } = useProducts({
     limit: 200,
-    q: search || undefined,
+    q: debouncedSearch || undefined,
   })
   const products = data?.products ?? []
   const filtered = products.filter((p: (typeof products)[0]) => {

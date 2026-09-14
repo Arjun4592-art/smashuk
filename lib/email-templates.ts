@@ -742,8 +742,17 @@ export function invoiceEmail(opts: {
   invoiceNumber: string
   orderNumber: string
   pdfUrl: string
+  trackingUrl?: string
 }) {
   const subject = `Your invoice ${opts.invoiceNumber} — ${SITE_NAME}`
+  const trackingBlock = opts.trackingUrl
+    ? `
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+        You can check the status of your order any time.
+      </p>
+      ${ctaButton('Track your order', opts.trackingUrl)}
+    `
+    : ''
   const html = shell(
     statusBadge('invoice'),
     'Thank you for shopping with us',
@@ -752,11 +761,15 @@ export function invoiceEmail(opts: {
         Please find attached invoice <strong style="color:${TEXT};">${opts.invoiceNumber}</strong> for order <strong style="color:${TEXT};">${opts.orderNumber}</strong>.
       </p>
       ${ctaButton('Download invoice', opts.pdfUrl)}
+      ${trackingBlock}
       <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${TEXT};">
         Thank you for shopping with us.
       </p>
     `,
   )
-  const text = `Please find attached invoice ${opts.invoiceNumber} for order ${opts.orderNumber}. You can also download it here: ${opts.pdfUrl}`
+  const trackingText = opts.trackingUrl
+    ? ` Track your order here: ${opts.trackingUrl}`
+    : ''
+  const text = `Please find attached invoice ${opts.invoiceNumber} for order ${opts.orderNumber}. You can also download it here: ${opts.pdfUrl}.${trackingText}`
   return { subject, html, text }
 }

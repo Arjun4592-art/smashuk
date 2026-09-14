@@ -7,6 +7,7 @@ interface Props {
   gst: number
   total: number
   subtotal: number
+  shippingAmount?: number
   giftCardCode?: string | null
   giftCardAmount?: number
   amountDue?: number
@@ -24,6 +25,7 @@ export default function BillingCart({
   gst,
   total,
   subtotal,
+  shippingAmount = 0,
   giftCardCode,
   giftCardAmount = 0,
   amountDue,
@@ -355,6 +357,17 @@ export default function BillingCart({
               {}
               <span>Discount</span>
               <span>-{fmt(discountAmount)}</span>
+            </div>
+          )}
+          {shippingAmount > 0 && (
+            <div
+              className='flex justify-between text-xs'
+              style={{
+                color: '#6D7175',
+              }}
+            >
+              <span>Shipping</span>
+              <span>{fmt(shippingAmount)}</span>
             </div>
           )}
           <div
