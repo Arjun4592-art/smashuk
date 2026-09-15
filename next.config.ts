@@ -28,6 +28,18 @@ const nextConfig: NextConfig = {
         destination: '/shop',
         permanent: true,
       },
+      // Catch-all for every other old Shopify /collections/{handle} URL.
+      // The new site has no per-collection pages (filtering now happens via
+      // /shop?sport=&category= query params), so there's no exact 1:1
+      // mapping. Sending these to /shop (rather than leaving them as 404s)
+      // preserves link equity and avoids sending Google-indexed / bookmarked
+      // links to a dead page. Must come AFTER the more specific
+      // '/collections/all' rule above, since Next matches redirects in order.
+      {
+        source: '/collections/:handle',
+        destination: '/shop',
+        permanent: true,
+      },
     ]
   },
 }
