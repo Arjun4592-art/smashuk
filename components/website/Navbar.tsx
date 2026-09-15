@@ -396,6 +396,7 @@ export default function Navbar({
                                   <li key={link.href}>
                                     <Link
                                       href={link.href}
+                                      prefetch={false}
                                       onClick={() => setActiveMegaMenu(null)}
                                       className='flex items-center gap-1.5 text-sm font-lato text-[#4B5563] hover:text-[#E8553A] py-1 transition-colors group/link'
                                     >
@@ -421,6 +422,7 @@ export default function Navbar({
                                 <Link
                                   key={feat.href}
                                   href={feat.href}
+                                  prefetch={false}
                                   onClick={() => setActiveMegaMenu(null)}
                                   className='block rounded-xl overflow-hidden border border-transparent hover:border-[#E8553A]/20 transition-all group/feat bg-[#F2F4F7]'
                                 >
@@ -443,6 +445,7 @@ export default function Navbar({
                                 <Link
                                   key={feat.href}
                                   href={feat.href}
+                                  prefetch={false}
                                   onClick={() => setActiveMegaMenu(null)}
                                   className='flex items-center justify-between gap-3 px-4 py-3.5 bg-[#F2F4F7] hover:bg-[#E8553A]/6 rounded-xl border border-transparent hover:border-[#E8553A]/20 transition-all group/feat'
                                 >
