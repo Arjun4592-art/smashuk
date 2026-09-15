@@ -7,6 +7,8 @@ import { usePathname } from 'next/navigation'
 import { useSidebar } from '../../context/SidebarContext'
 import { useAuthStore } from '@/store/authStore'
 import { SITE_NAME, SITE_LOGO, SITE_ICON } from '@/lib/constants'
+import { getDisplayOrderStatus } from '@/lib/order-status'
+
 interface NavChild {
   label: string
   href: string
@@ -825,22 +827,26 @@ export default function Sidebar() {
   const [openMenus, setOpenMenus] = useState<string[]>([])
   const [collapsed, setCollapsed] = useState(false)
   const [orderCount, setOrderCount] = useState<number | null>(null)
+
   useEffect(() => {
     let cancelled = false
-    fetch('/api/admin/orders?limit=1&status=pending', {
+    fetch('/api/admin/orders?limit=100', {
       credentials: 'include',
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled && data && typeof data.count === 'number') {
-          setOrderCount(data.count)
-        }
+        if (cancelled || !data?.orders) return
+        const pendingCount = data.orders.filter(
+          (o: any) => getDisplayOrderStatus(o) === 'pending',
+        ).length
+        setOrderCount(pendingCount)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [])
+
   useEffect(() => {
     const activeParent = NAV_ITEMS.find((item) => {
       if (!item.children) return false
