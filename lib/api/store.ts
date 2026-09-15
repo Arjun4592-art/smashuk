@@ -3,7 +3,7 @@ export const STORE_PRODUCT_FIELDS =
   '+description,+metadata,*variants,*variants.prices,*variants.calculated_price,*variants.inventory_quantity,*variants.options,*variants.images,*options,*options.values,*categories,*images,*tags'
 
 export const STORE_PRODUCT_LISTING_FIELDS =
-  'id,title,handle,thumbnail,created_at,updated_at,+metadata,*tags,*categories,*variants.id,*variants.inventory_quantity,*variants.calculated_price'
+  'id,title,handle,thumbnail,created_at,updated_at,+description,+metadata,*variants,*variants.prices,*variants.calculated_price,*variants.inventory_quantity,*variants.options,*variants.images,*options,*options.values,*categories,*images,*tags'
 
 const SPORT_CATEGORY_SLUGS = new Set([
   'badminton',
