@@ -1,6 +1,7 @@
 import type { Product } from '@/types'
 export const STORE_PRODUCT_FIELDS =
   '+description,+metadata,*variants,*variants.prices,*variants.calculated_price,*variants.inventory_quantity,*variants.options,*variants.images,*options,*options.values,*categories,*images,*tags'
+
 export const STORE_PRODUCT_LISTING_FIELDS =
   'id,title,handle,thumbnail,created_at,updated_at,+metadata,*tags,*categories,*variants.id,*variants.inventory_quantity,*variants.calculated_price'
 
@@ -44,10 +45,7 @@ export function normalizeProduct(p: any): Product {
     : undefined
   const legacySecondGbpPrice =
     gbpPrices.length > 1 ? Math.max(...gbpPrices) : undefined
-  // Listing requests no longer ask for *variants.prices, so legacySecondGbpPrice
-  // is undefined there. calculated_price.original_amount is the same number
-  // (the pre-sale / pre-price-list amount) and comes back with the price we
-  // already fetch, so the strike-through survives the slimmer field set.
+
   const calcOriginal =
     variant?.calculated_price?.original_amount !== undefined &&
     variant?.calculated_price?.original_amount !== null &&
@@ -186,19 +184,7 @@ function extractSpecs(metadata: any): {
         typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value),
     }))
 }
-// Real Shopify variant options (Size, Grip Size, Size (UK), Weight, Colour,
-// ...) come through the CSV import as genuine Medusa product options
-// (p.options[].title / .values[].value) — NOT as metadata.specifications.
-// extractSpecs() above only ever reads metadata, so this data was invisible
-// to the shop sidebar/filtering even though it's exactly what shoppers
-// expect to filter shoes and rackets by. One spec entry is emitted per
-// distinct option value (not just the first) so a product with several
-// selectable sizes/weights matches a filter on ANY of them — the existing
-// `.some()` based spec-matching in ShopClient already handles multiple
-// entries sharing the same label correctly. Labels that don't map to a
-// known canonical filter (e.g. "Title" on single-variant products,
-// "Denominations" on gift cards) are simply ignored later by
-// canonicalizeSpecLabel — no filtering needed here.
+
 function extractOptionSpecs(
   options: { title?: string; values?: { value?: string }[] }[] | undefined,
 ): { label: string; value: string }[] {

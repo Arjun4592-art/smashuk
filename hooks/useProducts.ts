@@ -29,13 +29,7 @@ export function useMedusaProducts(params?: {
     isLoading: query.isLoading || query.isPlaceholderData,
   }
 }
-/**
- * @deprecated Downloads the entire catalogue into the browser. Browse and
- * search now go through useCatalog() / /api/store/catalog, which filters,
- * sorts, pages and counts server-side and sends back one page. Kept only so
- * nothing breaks if another surface still imports it — do not use it for new
- * listing UI.
- */
+
 export function useAllStoreProducts(params?: {
   q?: string
   category_id?: string[]
