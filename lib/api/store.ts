@@ -2,14 +2,8 @@ import type { Product } from '@/types'
 export const STORE_PRODUCT_FIELDS =
   '+description,+metadata,*variants,*variants.prices,*variants.calculated_price,*variants.inventory_quantity,*variants.options,*variants.images,*options,*options.values,*categories,*images,*tags'
 export const STORE_PRODUCT_LISTING_FIELDS =
-  '+description,+metadata,*variants.prices,*variants.inventory_quantity,*categories,*images,*tags'
-// Medusa doesn't guarantee category array order, and a product is normally
-// linked to BOTH its sport's top-level category ("Badminton") and a specific
-// sub-category ("Badminton Rackets"). Blindly taking categories[0] can land
-// on the generic top-level one, which then fails every "includes('racket')"
-// / "includes('shoe')" style check downstream and silently falls back to a
-// much broader (and much noisier) filter set. Prefer the more specific,
-// non-top-level category instead.
+  'id,title,handle,thumbnail,created_at,updated_at,+metadata,*tags,*categories,*variants.id,*variants.inventory_quantity,*variants.calculated_price'
+
 const SPORT_CATEGORY_SLUGS = new Set([
   'badminton',
   'tennis',
@@ -25,13 +19,7 @@ function pickCategory(categories: any[] | undefined): {
   const specificOnes = categories.filter(
     (c) => c?.handle && !SPORT_CATEGORY_SLUGS.has(c.handle),
   )
-  // Some products end up linked to more than one specific sub-category — a
-  // known data issue where re-detecting a product's category leaves a stale
-  // "Rackets" link attached alongside the real, more specific one (e.g. a
-  // shoe that's also still tagged "Squash Rackets" from an earlier import
-  // pass). "Rackets" is the least-informative default sub-category, so if
-  // something more specific is also present, trust that one instead of
-  // whichever happens to come first in Medusa's unordered array.
+  
   const preferred =
     specificOnes.find((c) => !/rackets?$/i.test(c.handle ?? '')) ??
     specificOnes[0]
@@ -56,7 +44,18 @@ export function normalizeProduct(p: any): Product {
     : undefined
   const legacySecondGbpPrice =
     gbpPrices.length > 1 ? Math.max(...gbpPrices) : undefined
-  const originalPrice = metaCompareAt ?? metaOriginal ?? legacySecondGbpPrice
+  // Listing requests no longer ask for *variants.prices, so legacySecondGbpPrice
+  // is undefined there. calculated_price.original_amount is the same number
+  // (the pre-sale / pre-price-list amount) and comes back with the price we
+  // already fetch, so the strike-through survives the slimmer field set.
+  const calcOriginal =
+    variant?.calculated_price?.original_amount !== undefined &&
+    variant?.calculated_price?.original_amount !== null &&
+    variant.calculated_price.original_amount !== calcAmount
+      ? variant.calculated_price.original_amount
+      : undefined
+  const originalPrice =
+    metaCompareAt ?? metaOriginal ?? legacySecondGbpPrice ?? calcOriginal
   return {
     id: p.id,
     name: p.title ?? '',
@@ -262,6 +261,9 @@ function buildProductUrl(
       'fields',
       light ? STORE_PRODUCT_LISTING_FIELDS : STORE_PRODUCT_FIELDS,
     )
+    // region_id is now required for listings too — without it Medusa omits
+    // variants.calculated_price, which is the only price the slim listing
+    // field set carries.
     if (regionId) sp.set('region_id', regionId)
   } else if (light) {
     sp.set('light', '1')
@@ -369,19 +371,24 @@ export async function getAllProducts(params?: {
   products: any[]
   count: number
 }> {
-  const { count } = await getProducts({
+  // PERF: this used to fire a throwaway `limit=1` request purely to learn
+  // `count`, then re-request offset 0 as a full page — two serial round trips
+  // to Medusa before a single product was in hand. The first real page already
+  // returns `count`, so fetch that and page on from there.
+  const firstPage = await getProducts({
     ...params,
-    limit: 1,
+    limit: PRODUCTS_PAGE_SIZE,
     offset: 0,
     light: true,
   })
+  const count = firstPage.count
   if (count === 0)
     return {
       products: [],
       count: 0,
     }
   const offsets: number[] = []
-  for (let o = 0; o < count; o += PRODUCTS_PAGE_SIZE) {
+  for (let o = PRODUCTS_PAGE_SIZE; o < count; o += PRODUCTS_PAGE_SIZE) {
     offsets.push(o)
   }
   const CONCURRENCY = 5
@@ -403,7 +410,10 @@ export async function getAllProducts(params?: {
     )
     pages.push(...batchResults)
   }
-  const products = ([] as any[]).concat(...pages.map((p) => p.products))
+  const products = ([] as any[]).concat(
+    firstPage.products,
+    ...pages.map((p) => p.products),
+  )
   return {
     products,
     count,

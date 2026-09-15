@@ -10,6 +10,7 @@ import { formatCurrency, calculateDiscount, stripHtml } from '@/lib/utils'
 import type { Product } from '@/types'
 import { HeartIcon, CartIcon, StarIcon, CheckIcon } from '@/components/ui/Icons'
 import QuickViewModal from '@/components/website/QuickViewModal'
+import ProductImage from '@/components/website/ProductImage'
 const BADGE_STYLES: Record<string, string> = {
   NEW: 'bg-[#E6F1FB] text-[#185FA5]',
   SALE: 'bg-[#FCEBEB] text-[#A32D2D]',
@@ -65,9 +66,10 @@ export default function ProductCard({
         <div className='flex gap-4 bg-white border border-[#E5E7EB] rounded-2xl p-4 hover:border-[#E8553A]/30 hover:shadow-[0_4px_20px_rgba(232,85,58,0.08)] transition-all duration-300'>
           {}
           <div className='relative w-28 h-28 sm:w-36 sm:h-36 rounded-xl overflow-hidden bg-[#F2F4F7] pt-3 shrink-0'>
-            <img
+            <ProductImage
               src={product.images[0]}
               alt={product.name}
+              sizes='(max-width: 640px) 112px, 144px'
               className='w-full h-full pt-3 object-cover group-hover:scale-105 transition-transform duration-500'
             />
             {displayBadge && (
@@ -125,9 +127,16 @@ export default function ProductCard({
             </div>
 
             {}
-            <p className='text-[12px] text-[#4B5563] font-lato line-clamp-2 mb-3 hidden sm:block leading-relaxed'>
-              {stripHtml(product.description)}
-            </p>
+            {/* Listing responses intentionally omit `description` now (see
+                STORE_PRODUCT_LISTING_FIELDS). Render the snippet only when it
+                is actually present — on a PDP-sourced product, or a wishlist /
+                recently-viewed entry — rather than an empty paragraph that
+                still takes up a line of layout. */}
+            {product.description && (
+              <p className='text-[12px] text-[#4B5563] font-lato line-clamp-2 mb-3 hidden sm:block leading-relaxed'>
+                {stripHtml(product.description)}
+              </p>
+            )}
 
             {}
             <div className='flex items-center justify-between gap-3 flex-wrap'>
@@ -174,9 +183,10 @@ export default function ProductCard({
         <div className='bg-white border border-[#E5E7EB] rounded-2xl overflow-hidden hover:border-[#E8553A]/35 hover:shadow-[0_8px_32px_rgba(232,85,58,0.10)] transition-all duration-300 hover:-translate-y-1'>
           {}
           <div className='relative aspect-square bg-[#F2F4F7] overflow-hidden'>
-            <img
+            <ProductImage
               src={product.images[0]}
               alt={product.name}
+              sizes='(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw'
               className='w-full h-full object-cover group-hover:scale-[1.07] transition-transform duration-700'
             />
 

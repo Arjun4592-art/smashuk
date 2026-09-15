@@ -3,13 +3,21 @@ import { safeJson } from '@/lib/api/safe-json'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
-export const dynamic = 'force-dynamic'
+// `dynamic = 'force-dynamic'` and `revalidate = 600` contradicted each other:
+// force-dynamic opts the segment out of caching entirely, so the 600s window
+// never applied and every visitor triggered a fresh 1000-product scan against
+// Medusa. This route's output depends on nothing request-specific, so drop
+// force-dynamic and let the revalidate window actually do its job.
 export const revalidate = 600
 export async function GET() {
   try {
     const params = new URLSearchParams({
       limit: '1000',
-      fields: '+metadata,*variants.inventory_quantity',
+      // This route only ever reads metadata.brand / .sport / .rating /
+      // .reviewCount. `*variants.inventory_quantity` was pulling the inventory
+      // module join for every variant of all ~1700 products and then throwing
+      // the result away — by far the most expensive part of the query.
+      fields: 'id,+metadata',
     })
     const res = await fetch(`${MEDUSA_URL}/store/products?${params}`, {
       headers: {
@@ -61,15 +69,22 @@ export async function GET() {
         },
       ]),
     )
-    return NextResponse.json({
-      brands,
-      brandCount: brands.length,
-      productCount: data.count ?? products.length,
-      avgRating: ratingCount
-        ? Number((ratingSum / ratingCount).toFixed(1))
-        : null,
-      bySport,
-    })
+    return NextResponse.json(
+      {
+        brands,
+        brandCount: brands.length,
+        productCount: data.count ?? products.length,
+        avgRating: ratingCount
+          ? Number((ratingSum / ratingCount).toFixed(1))
+          : null,
+        bySport,
+      },
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=3600',
+        },
+      },
+    )
   } catch (err: any) {
     console.error('[API] store/brands GET error:', err)
     return NextResponse.json(

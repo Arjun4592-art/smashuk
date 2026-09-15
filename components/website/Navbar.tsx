@@ -295,6 +295,7 @@ export default function Navbar({
               )}
               <Link
                 href='/cart'
+                prefetch={false}
                 className='relative flex items-center gap-2 ml-1 bg-[#0A1F44] hover:bg-[#E8553A] text-white px-4 py-2.5 rounded-xl transition-all duration-200 group'
                 aria-label='Cart'
               >
@@ -317,7 +318,11 @@ export default function Navbar({
               >
                 <SearchIcon size={20} />
               </button>
-              <Link href='/cart' className='relative p-2 text-[#0A1F44]'>
+              <Link
+                href='/cart'
+                prefetch={false}
+                className='relative p-2 text-[#0A1F44]'
+              >
                 <CartIcon size={20} />
                 {mounted && itemCount > 0 && (
                   <span className='absolute -top-1 -right-1 w-5 h-5 bg-[#E8553A] text-white text-[10px] font-black rounded-full flex items-center justify-center'>
@@ -588,6 +593,7 @@ export default function Navbar({
               </Link>
               <Link
                 href='/cart'
+                prefetch={false}
                 onClick={() => setMobileOpen(false)}
                 className='flex items-center justify-center gap-2 w-full py-3 bg-[#0A1F44] hover:bg-[#E8553A] text-white rounded-xl text-sm font-black font-montserrat mt-2 transition-colors'
               >

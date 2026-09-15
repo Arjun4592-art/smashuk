@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
@@ -8,6 +8,7 @@ import { useCartStore } from '@/store/cartStore';
 import { formatCurrency, calculateDiscount, stripHtml } from '@/lib/utils';
 import type { Product } from '@/types';
 import { StarIcon, CartIcon, CheckIcon } from '@/components/ui/Icons';
+import { getProduct, normalizeProduct } from '@/lib/api/store';
 interface Props {
   product: Product;
   onClose: () => void;
@@ -18,6 +19,23 @@ export default function QuickViewModal({
 }: Props) {
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
+  // Listing responses no longer carry `description` (see
+  // STORE_PRODUCT_LISTING_FIELDS — it was a large share of the browse payload
+  // for a field the grid never renders). Quick view does show it, so fetch it
+  // here instead: one request, only when the shopper actually opens the modal,
+  // and it hits the same cached /api/store/products?handle=... the PDP uses.
+  const [description, setDescription] = useState(product.description ?? '');
+  useEffect(() => {
+    if (description) return;
+    let cancelled = false;
+    getProduct(product.slug).then(full => {
+      if (cancelled || !full) return;
+      setDescription(normalizeProduct(full).description ?? '');
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [product.slug, description]);
   const addItem = useCartStore(s => s.addItem);
   const router = useRouter();
   const discount = product.originalPrice ? calculateDiscount(product.price, product.originalPrice) : 0;
@@ -91,8 +109,8 @@ export default function QuickViewModal({
               </>}
           </div>
 
-          {product.description && <p className='text-[13px] text-[#4B5563] font-lato leading-relaxed line-clamp-4 mb-5'>
-              {stripHtml(product.description)}
+          {description && <p className='text-[13px] text-[#4B5563] font-lato leading-relaxed line-clamp-4 mb-5'>
+              {stripHtml(description)}
             </p>}
 
           {product.specs?.length > 0 && <div className='grid grid-cols-2 gap-x-4 gap-y-1.5 mb-6 text-[12px] font-lato'>

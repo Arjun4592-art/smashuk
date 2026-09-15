@@ -1,8 +1,38 @@
 import type { NextConfig } from 'next'
 import path from 'path'
 
+const EXTRA_IMAGE_HOSTS = (process.env.NEXT_PUBLIC_IMAGE_HOSTS ?? 'cdn.shopify.com')
+  .split(',')
+  .map((h) => h.trim())
+  .filter(Boolean)
+
+const medusaHost = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? '').hostname
+  } catch {
+    return null
+  }
+})()
+
+const imageHosts = [...new Set([...EXTRA_IMAGE_HOSTS, ...(medusaHost ? [medusaHost] : [])])]
+
 const nextConfig: NextConfig = {
   serverExternalPackages: ['isomorphic-dompurify', 'jsdom'],
+  images: {
+    // next/image was previously unconfigured, so every product shot was served
+    // as the full-size original. remotePatterns is what unlocks resizing +
+    // AVIF/WebP + srcset for these hosts.
+    remotePatterns: imageHosts.map((hostname) => ({
+      protocol: 'https' as const,
+      hostname,
+    })),
+    // Next 16 narrowed the default to [75] and coerces `quality` to the nearest
+    // configured value; stating it explicitly avoids the un-configured-qualities
+    // error if anyone passes a different number later.
+    qualities: [75],
+    formats: ['image/avif', 'image/webp'],
+    minimumCacheTTL: 60 * 60 * 24 * 30,
+  },
   turbopack: {
     root: path.join(__dirname),
   },
@@ -28,11 +58,6 @@ const nextConfig: NextConfig = {
         destination: '/shop',
         permanent: true,
       },
-      // Old Shopify static "Pages" (About, Store, etc.) were never migrated
-      // by script — rebuilt manually under new routes, or folded into
-      // existing collection/blog pages. One entry per old /pages/{handle}
-      // URL still found in Google's index as of Sep 2026 — add more here
-      // if Search Console turns up further stragglers.
       {
         source: '/pages/manchester-store-page',
         destination: '/local-store',

@@ -58,12 +58,24 @@ export async function GET(req: NextRequest) {
     const light = searchParams.get('light') === '1'
     const fields = light ? STORE_PRODUCT_LISTING_FIELDS : STORE_PRODUCT_FIELDS
     const regionStart = Date.now()
-    const regionId = light ? null : await getFirstRegionId()
+    // Two changes here:
+    //  1. The region is now resolved for `light` listings too. The slim
+    //     listing field set reads prices via *variants.calculated_price, and
+    //     Medusa only populates that when region_id is on the query.
+    //  2. Region and category lookups run CONCURRENTLY. They were two
+    //     independent, sequential awaits in front of the products call, so on
+    //     a cold Data Cache every listing paid both latencies back to back
+    //     before the real query even started. Both are revalidate:300 so this
+    //     is nearly always a cache hit, but the cold path was serial for no
+    //     reason.
+    const [regionId, lookedUpCategoryId] = await Promise.all([
+      getFirstRegionId(),
+      !category_id && category_handle
+        ? getCategoryIdByHandle(category_handle)
+        : Promise.resolve(null),
+    ])
     const regionMs = Date.now() - regionStart
-    let resolvedCategoryId = category_id
-    if (!resolvedCategoryId && category_handle) {
-      resolvedCategoryId = (await getCategoryIdByHandle(category_handle)) ?? ''
-    }
+    const resolvedCategoryId = category_id || (lookedUpCategoryId ?? '')
     const params = new URLSearchParams({
       limit,
       offset,
@@ -126,7 +138,24 @@ export async function GET(req: NextRequest) {
         `[/api/store/products] SLOW — region=${regionMs}ms medusa=${medusaMs}ms total=${totalMs}ms limit=${limit} offset=${offset} light=${light} q="${q}" handle="${handle}"`,
       )
     }
-    return NextResponse.json(data)
+    // The route's own HTTP response carried no Cache-Control at all, so every
+    // browser/CDN hit went all the way back to Medusa even when the Next Data
+    // Cache upstream was warm. Browse/search responses are identical for every
+    // visitor, so they can be shared: `s-maxage` lets the CDN serve them, and
+    // `stale-while-revalidate` means the refresh happens off the critical path
+    // instead of making one unlucky shopper wait for Medusa.
+    //
+    // Single-product lookups (`handle` set) stay uncacheable — same reasoning
+    // as the `cache: 'no-store'` above: that response drives the "Only N left"
+    // copy and the max quantity a customer can check out with.
+    return NextResponse.json(data, {
+      headers: handle
+        ? { 'Cache-Control': 'no-store' }
+        : {
+            'Cache-Control':
+              'public, s-maxage=60, stale-while-revalidate=600',
+          },
+    })
   } catch (err: any) {
     console.error('[/api/store/products] Error:', err.message)
     return NextResponse.json(

@@ -8,14 +8,7 @@ import {
   CheckIcon,
 } from '@/components/ui/Icons'
 import { SPORTS } from '@/lib/constants'
-import { matchesBadgeFilter } from '@/lib/api/store'
-import {
-  canonicalizeSpecLabel,
-  SPEC_FILTER_ORDER,
-  resolveSpecFilterValue,
-  compareWeightValues,
-} from '@/lib/spec-filters'
-import type { Product } from '@/types'
+import type { CatalogFacets } from '@/lib/catalog/types'
 export interface FilterState {
   sports: string[]
   brands: string[]
@@ -31,10 +24,20 @@ interface ShopFilterSidebarProps {
   onChange: (filters: FilterState) => void
   onClear: () => void
   activeCount: number
-  allProducts?: Product[]
+  /**
+   * Precomputed counts from /api/store/catalog.
+   *
+   * This used to take `allProducts` and `categoryProducts` — the entire
+   * catalogue, ~1700 products — and derive every count from them in the
+   * browser. That meant the sidebar couldn't render a single number until the
+   * whole catalogue had downloaded, and every filter click re-walked all of it
+   * on the main thread. The derivation logic itself now lives in
+   * lib/catalog/facets.ts and runs server-side; what arrives here is a small
+   * JSON object of counts.
+   */
+  facets: CatalogFacets
   activeSports?: string[]
   activeBadges?: string[]
-  categoryProducts?: Product[]
   hideSportSection?: boolean
   hideCategorySection?: boolean
 }
@@ -103,20 +106,6 @@ function resolveSwatchColor(value: string): string | null {
     if (lower.includes(name)) return hex
   }
   return null
-}
-function formatCategoryLabel(handle: string): string {
-  let rest = handle
-  for (const s of SPORTS) {
-    if (rest.startsWith(`${s.slug}-`)) {
-      rest = rest.slice(s.slug.length + 1)
-      break
-    }
-  }
-  return rest
-    .split('-')
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ')
 }
 const MIN_PRICE = 0
 const MAX_PRICE = 500
@@ -197,21 +186,43 @@ export default function ShopFilterSidebar({
   onChange,
   onClear,
   activeCount,
-  allProducts,
+  facets,
   activeSports = [],
   activeBadges = [],
-  categoryProducts,
   hideSportSection = false,
   hideCategorySection = false,
 }: ShopFilterSidebarProps) {
-  const availableBrands = (() => {
-    if (!allProducts || activeSports.length === 0) return null
-    const set = new Set<string>()
-    for (const p of allProducts) {
-      if (activeSports.includes(p.sport) && p.brand) set.add(p.brand)
-    }
-    return set
-  })()
+  // All of these were local derivations over the full catalogue. They are now
+  // just reads off the facets payload — same numbers, computed once on the
+  // server (see lib/catalog/facets.ts) instead of once per browser per click.
+  const availableBrands = facets.availableBrands
+    ? new Set(facets.availableBrands)
+    : null
+  const categoryOptions = facets.categoryOptions
+  const dynamicSpecGroups = facets.specGroups
+  const sportCounts = new Map<string, number>(
+    Object.entries(facets.sportCounts),
+  )
+  const brandCounts = new Map<string, number>(
+    Object.entries(facets.brandCounts),
+  )
+  const badgeCounts = new Map<string, number>(
+    Object.entries(facets.badgeCounts),
+  )
+  // Rating keys are numeric in the UI (RATINGS = [4,3,2,1]) but JSON object
+  // keys are always strings, so convert back on the way in.
+  const ratingCounts = new Map<number, number>(
+    Object.entries(facets.ratingCounts).map(
+      ([k, v]) => [Number(k), v] as [number, number],
+    ),
+  )
+  const availabilityCounts = facets.availability
+  const specValueCounts = new Map<string, number>(
+    Object.entries(facets.specValueCounts),
+  )
+
+  // Pruning selections that no longer exist in the current scope. Unchanged in
+  // intent; they just read the facet lists now.
   useEffect(() => {
     if (!availableBrands) return
     const stillValid = filters.brands.filter((b) => availableBrands.has(b))
@@ -223,15 +234,11 @@ export default function ShopFilterSidebar({
     }
   }, [activeSports.join(',')])
   useEffect(() => {
-    if (!allProducts) return
-    const validHandles = new Set(
-      allProducts
-        .filter((p) => !activeSports.length || activeSports.includes(p.sport))
-        .map((p) => p.category)
-        .filter(Boolean),
-    )
+    if (!categoryOptions.length) return
     const stillValid = filters.categories.filter((c) =>
-      [...validHandles].some((h) => h.includes(c) || c.includes(h)),
+      categoryOptions.some(
+        (o) => o.handle.includes(c) || c.includes(o.handle),
+      ),
     )
     if (stillValid.length !== filters.categories.length) {
       onChange({
@@ -240,34 +247,18 @@ export default function ShopFilterSidebar({
       })
     }
   }, [activeSports.join(',')])
-  const categoryOptions = (() => {
-    const map = new Map<string, number>()
-    if (!allProducts)
-      return [] as {
-        handle: string
-        label: string
-        count: number
-      }[]
-    for (const p of allProducts) {
-      if (!p.inStock) continue
-      if (activeSports.length && !activeSports.includes(p.sport)) continue
-      if (filters.brands.length && !filters.brands.includes(p.brand)) continue
-      if (
-        activeBadges.length &&
-        !activeBadges.some((b) => matchesBadgeFilter(p, b))
-      )
-        continue
-      if (!p.category) continue
-      map.set(p.category, (map.get(p.category) ?? 0) + 1)
+  useEffect(() => {
+    const validLabels = new Set(dynamicSpecGroups.map((g) => g.label))
+    const cleaned = Object.fromEntries(
+      Object.entries(filters.specs).filter(([label]) => validLabels.has(label)),
+    )
+    if (Object.keys(cleaned).length !== Object.keys(filters.specs).length) {
+      onChange({
+        ...filters,
+        specs: cleaned,
+      })
     }
-    return [...map.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([handle, count]) => ({
-        handle,
-        count,
-        label: formatCategoryLabel(handle),
-      }))
-  })()
+  }, [dynamicSpecGroups.map((g) => g.label).join(',')])
   const toggle = useCallback(
     <K extends 'sports' | 'brands' | 'badges' | 'categories'>(
       key: K,
@@ -301,155 +292,6 @@ export default function ShopFilterSidebar({
     },
     [filters, onChange],
   )
-  // Which raw spec labels are allowed to become filters — and what canonical
-  // name/order they show up under — is centralised in lib/spec-filters.ts so
-  // the sidebar and the actual product filtering (ShopClient) always agree.
-  // Every raw label variant that describes the same attribute (e.g. "Colour",
-  // "Frame Colour", "Racket Weight (g)") gets merged into a single canonical
-  // section instead of showing up as separate near-duplicate filters.
-  const dynamicSpecGroups = (() => {
-    if (!categoryProducts || categoryProducts.length === 0) return []
-    const map = new Map<string, Set<string>>()
-    for (const p of categoryProducts) {
-      for (const s of p.specs ?? []) {
-        if (!s.label || !s.value) continue
-        const canonicalLabel = canonicalizeSpecLabel(
-          p.sport,
-          p.category,
-          s.label,
-        )
-        if (!canonicalLabel) continue
-        const resolvedValue = resolveSpecFilterValue(
-          p.sport,
-          p.category,
-          canonicalLabel,
-          s.value,
-        )
-        if (!resolvedValue) continue
-        if (!map.has(canonicalLabel)) map.set(canonicalLabel, new Set())
-        map.get(canonicalLabel)!.add(resolvedValue)
-      }
-    }
-    const MAX_SPEC_GROUPS = 6
-    const MAX_DISTINCT_VALUES = 12
-    const MAX_UNIQUE_RATIO = 0.6
-    return [...map.entries()]
-      .filter(([, values]) => values.size > 1)
-      .filter(([, values]) => values.size <= MAX_DISTINCT_VALUES)
-      .filter(
-        ([, values]) =>
-          values.size / categoryProducts.length <= MAX_UNIQUE_RATIO,
-      )
-      .sort(
-        (a, b) =>
-          SPEC_FILTER_ORDER.indexOf(a[0]) - SPEC_FILTER_ORDER.indexOf(b[0]),
-      )
-      .slice(0, MAX_SPEC_GROUPS)
-      .map(([label, values]) => ({
-        label,
-        values:
-          label === 'Weight'
-            ? [...values].sort(compareWeightValues)
-            : [...values].sort(),
-      }))
-  })()
-  useEffect(() => {
-    if (!categoryProducts) return
-    const validLabels = new Set(dynamicSpecGroups.map((g) => g.label))
-    const cleaned = Object.fromEntries(
-      Object.entries(filters.specs).filter(([label]) => validLabels.has(label)),
-    )
-    if (Object.keys(cleaned).length !== Object.keys(filters.specs).length) {
-      onChange({
-        ...filters,
-        specs: cleaned,
-      })
-    }
-  }, [dynamicSpecGroups.map((g) => g.label).join(',')])
-  const sportCounts = (() => {
-    const map = new Map<string, number>()
-    if (!allProducts) return map
-    for (const p of allProducts) {
-      if (!p.inStock) continue
-      if (filters.brands.length && !filters.brands.includes(p.brand)) continue
-      if (
-        activeBadges.length &&
-        !activeBadges.some((b) => matchesBadgeFilter(p, b))
-      )
-        continue
-      map.set(p.sport, (map.get(p.sport) ?? 0) + 1)
-    }
-    return map
-  })()
-  const brandCounts = (() => {
-    const map = new Map<string, number>()
-    const source = categoryProducts ?? []
-    for (const p of source) {
-      if (
-        filters.badges.length &&
-        !filters.badges.some((b) => matchesBadgeFilter(p, b))
-      )
-        continue
-      if (p.brand) map.set(p.brand, (map.get(p.brand) ?? 0) + 1)
-    }
-    return map
-  })()
-  const badgeCounts = (() => {
-    const map = new Map<string, number>()
-    const source = categoryProducts ?? []
-    for (const id of BADGES.map((b) => b.id)) {
-      map.set(id, source.filter((p) => matchesBadgeFilter(p, id)).length)
-    }
-    return map
-  })()
-  const ratingCounts = (() => {
-    const map = new Map<number, number>()
-    const source = categoryProducts ?? []
-    for (const r of RATINGS) {
-      map.set(r, source.filter((p) => p.rating >= r).length)
-    }
-    return map
-  })()
-  const availabilityCounts = (() => {
-    let source = allProducts ?? []
-    if (activeSports.length)
-      source = source.filter((p) => activeSports.includes(p.sport))
-    if (filters.brands.length)
-      source = source.filter((p) => filters.brands.includes(p.brand))
-    if (activeBadges.length)
-      source = source.filter((p) =>
-        activeBadges.some((b) => matchesBadgeFilter(p, b)),
-      )
-    return {
-      inStock: source.filter((p) => p.inStock).length,
-      outOfStock: source.filter((p) => !p.inStock).length,
-    }
-  })()
-  const specValueCounts = (() => {
-    const map = new Map<string, number>()
-    const source = categoryProducts ?? []
-    for (const p of source) {
-      for (const s of p.specs ?? []) {
-        if (!s.label || !s.value) continue
-        const canonicalLabel = canonicalizeSpecLabel(
-          p.sport,
-          p.category,
-          s.label,
-        )
-        if (!canonicalLabel) continue
-        const resolvedValue = resolveSpecFilterValue(
-          p.sport,
-          p.category,
-          canonicalLabel,
-          s.value,
-        )
-        if (!resolvedValue) continue
-        const key = `${canonicalLabel}::${resolvedValue}`
-        map.set(key, (map.get(key) ?? 0) + 1)
-      }
-    }
-    return map
-  })()
   const fillPctLow =
     ((filters.priceRange[0] - MIN_PRICE) / (MAX_PRICE - MIN_PRICE)) * 100
   const fillPctHigh =

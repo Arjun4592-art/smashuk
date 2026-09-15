@@ -22,6 +22,24 @@ interface ProductGridProps {
   showPagination?: boolean
   columns?: 2 | 3 | 4
   isLoading?: boolean
+  /**
+   * Server-paginated mode. When set, `products` is ONE PAGE of an already
+   * filtered and sorted result set, so this component must not sort or slice
+   * it again — sorting a single page would silently reorder 12 items and call
+   * it "price: low to high" for the whole catalogue. Sort/page/perPage become
+   * controlled, and `totalCount` drives the pager instead of products.length.
+   *
+   * Left off, the component behaves exactly as before, so the other callers
+   * (home page, blog embeds, local-store new arrivals) are unaffected.
+   */
+  serverPaginated?: boolean
+  totalCount?: number
+  sort?: string
+  onSortChange?: (sort: string) => void
+  page?: number
+  onPageChange?: (updater: number | ((p: number) => number)) => void
+  perPage?: number
+  onPerPageChange?: (perPage: number) => void
 }
 const SORT_OPTIONS = [
   {
@@ -106,16 +124,41 @@ export default function ProductGrid({
   showPagination = false,
   columns = 4,
   isLoading = false,
+  serverPaginated = false,
+  totalCount,
+  sort: sortProp,
+  onSortChange,
+  page: pageProp,
+  onPageChange,
+  perPage: perPageProp,
+  onPerPageChange,
 }: ProductGridProps) {
   const [view, setView] = useState<'grid' | 'list'>('grid')
-  const [sort, setSort] = useState('featured')
   const [sortOpen, setSortOpen] = useState(false)
   const [activeSport, setActiveSport] = useState('ALL')
   const [activeBadge, setActiveBadge] = useState('ALL')
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [perPage, setPerPage] = useState(12)
-  const [page, setPage] = useState(1)
+  const [internalSort, setInternalSort] = useState('featured')
+  const [internalPerPage, setInternalPerPage] = useState(12)
+  const [internalPage, setInternalPage] = useState(1)
+  // Controlled when the parent owns paging, uncontrolled otherwise. Same names
+  // below either way, so the JSX doesn't have to branch.
+  const sort = serverPaginated ? (sortProp ?? 'featured') : internalSort
+  const setSort = serverPaginated
+    ? (v: string) => onSortChange?.(v)
+    : setInternalSort
+  const perPage = serverPaginated ? (perPageProp ?? 12) : internalPerPage
+  const setPerPage = serverPaginated
+    ? (v: number) => onPerPageChange?.(v)
+    : setInternalPerPage
+  const page = serverPaginated ? (pageProp ?? 1) : internalPage
+  const setPage = serverPaginated
+    ? (v: number | ((p: number) => number)) => onPageChange?.(v)
+    : setInternalPage
   const filtered = useMemo(() => {
+    // Already filtered AND sorted upstream — touching it here would reorder a
+    // single page in isolation.
+    if (serverPaginated) return products
     let result = [...products]
     if (activeSport !== 'ALL')
       result = result.filter((p) => p.sport === activeSport)
@@ -151,14 +194,20 @@ export default function ProductGrid({
         break
     }
     return result
-  }, [products, activeSport, activeBadge, sort])
+  }, [products, activeSport, activeBadge, sort, serverPaginated])
   useEffect(() => {
-    setPage(1)
-  }, [products, activeSport, activeBadge, sort, perPage])
-  const pageCount = Math.max(1, Math.ceil(filtered.length / perPage))
-  const paged = showPagination
-    ? filtered.slice((page - 1) * perPage, page * perPage)
-    : filtered
+    // In server mode ShopClient resets the page when the filter set changes;
+    // doing it here too would fight it — `products` is a new array on every
+    // fetch, so this would snap back to page 1 the moment page 2 arrived.
+    if (serverPaginated) return
+    setInternalPage(1)
+  }, [products, activeSport, activeBadge, sort, perPage, serverPaginated])
+  const resultCount = serverPaginated ? (totalCount ?? 0) : filtered.length
+  const pageCount = Math.max(1, Math.ceil(resultCount / perPage))
+  const paged =
+    showPagination && !serverPaginated
+      ? filtered.slice((page - 1) * perPage, page * perPage)
+      : filtered
   const currentSort = SORT_OPTIONS.find((o) => o.value === sort)
   const activeFilterCount =
     (activeSport !== 'ALL' ? 1 : 0) + (activeBadge !== 'ALL' ? 1 : 0)
@@ -174,7 +223,7 @@ export default function ProductGrid({
                 {title}
               </h2>
               <p className='text-[12px] text-[#9CA3AF] font-lato mt-0.5'>
-                {filtered.length} product{filtered.length !== 1 ? 's' : ''}
+                {resultCount} product{resultCount !== 1 ? 's' : ''}
               </p>
             </div>
           )}
@@ -372,7 +421,7 @@ export default function ProductGrid({
             ))}
           </div>
         )
-      ) : filtered.length === 0 ? (
+      ) : paged.length === 0 ? (
         <div className='text-center py-24'>
           <div className='w-20 h-20 bg-[#F2F4F7] rounded-2xl flex items-center justify-center mx-auto mb-5 text-4xl'>
             🔍
@@ -408,7 +457,7 @@ export default function ProductGrid({
       )}
 
       {}
-      {showPagination && !isLoading && filtered.length > 0 && (
+      {showPagination && !isLoading && resultCount > 0 && (
         <div className='flex flex-col sm:flex-row items-center justify-between gap-4 mt-8 pt-6 border-t border-[#F2F4F7]'>
           <div className='flex items-center gap-2 text-xs font-lato text-gray-500'>
             <span>Show</span>

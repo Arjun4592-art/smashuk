@@ -283,6 +283,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
             {}
             <Link
               href='/checkout'
+                prefetch={false}
               onClick={onClose}
               className='flex items-center justify-center gap-2 w-full bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-black py-3.5 rounded-xl transition-colors shadow-lg shadow-[#E8553A]/20 hover:-translate-y-0.5 transition-all duration-200'
             >
@@ -291,6 +292,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
             </Link>
             <Link
               href='/cart'
+                prefetch={false}
               onClick={onClose}
               className='flex items-center justify-center w-full border border-[#E5E7EB] hover:border-[#0A1F44] text-[#0A1F44] font-montserrat font-semibold py-3 rounded-xl transition-colors text-sm'
             >
