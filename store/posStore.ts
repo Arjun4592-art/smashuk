@@ -93,12 +93,7 @@ export interface POSStaffMember {
   totalOrders: number
 }
 export type AuditAction =
-  | 'login'
-  | 'logout'
-  | 'pin_change'
-  | 'sale'
-  | 'void'
-  | 'return'
+  'login' | 'logout' | 'pin_change' | 'sale' | 'void' | 'return'
 export interface AuditLogEntry {
   id: string
   staffId: string
@@ -130,6 +125,7 @@ export interface POSCatalogProduct {
   channel?: SalesChannel
   posPrice?: number
   variantId?: string
+  medusaVariantId?: string
   size?: string
   sizeOptionTitle?: string
 }
@@ -450,7 +446,10 @@ export const usePOSStore = create<POSState>()(
           try {
             const stockByVariantId = await fetchPOSStockUpdates()
             set({
-              products: mergePOSStock(get().products, stockByVariantId),
+              products: mergePOSStock(
+                get().products as any,
+                stockByVariantId,
+              ) as POSCatalogProduct[],
             })
           } catch (stockErr: unknown) {
             // Non-fatal — the register is already usable with placeholder
@@ -489,7 +488,10 @@ export const usePOSStore = create<POSState>()(
           try {
             const stockByVariantId = await fetchPOSStockUpdates(true)
             set({
-              products: mergePOSStock(get().products, stockByVariantId),
+              products: mergePOSStock(
+                get().products as any,
+                stockByVariantId,
+              ) as POSCatalogProduct[],
             })
           } catch (stockErr: unknown) {
             console.error('[POS] Stock update failed:', stockErr)
