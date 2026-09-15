@@ -45,8 +45,8 @@ export async function notifyNewOrder(
 export async function sendOrderConfirmationEmail(order: any) {
   try {
     if (!order?.email) return
-    const { subject, html, text } = orderConfirmationEmail(order)
-    await sendMail({ to: order.email, subject, html, text })
+    const { subject, html, text, attachments } = orderConfirmationEmail(order)
+    await sendMail({ to: order.email, subject, html, text, attachments })
   } catch (err) {
     console.error('[order-notifications] order confirmation email failed:', err)
   }

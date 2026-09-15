@@ -7,6 +7,8 @@ import {
   STORE_ADDRESS_LINE1,
   STORE_ADDRESS_LINE2,
 } from './constants'
+import { qrInlineAttachment } from './qr'
+import { signOrderTrackToken } from './api/order-track-token'
 
 const NAVY = '#0A1F44'
 const CORAL = '#E8553A'
@@ -104,6 +106,22 @@ function totalRow(label: string, amount: number, accent = false) {
   `
 }
 
+// Inline QR block — the image itself is attached separately as a `cid:`
+// inline attachment (see lib/qr.ts) rather than a base64 data URI, which
+// some clients (older Outlook builds in particular) strip from HTML email.
+function qrBlock(cid: string, caption: string) {
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;">
+      <tr>
+        <td style="padding:20px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:10px;text-align:center;">
+          <img src="cid:${cid}" width="132" height="132" alt="Order QR code" style="display:block;margin:0 auto 12px;border-radius:6px;" />
+          <p style="margin:0;font-size:12.5px;line-height:1.5;color:${MUTED};">${caption}</p>
+        </td>
+      </tr>
+    </table>
+  `
+}
+
 function ctaButton(label: string, href: string) {
   return `
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:28px;">
@@ -158,23 +176,54 @@ export function orderNumberOf(order: any) {
 
 export function orderConfirmationEmail(order: any) {
   const orderNumber = orderNumberOf(order)
-  const subject = `Order confirmed ${orderNumber} — ${SITE_NAME}`
+  const isPickup = order.metadata?.fulfillment_type === 'pickup'
+  const greetingName = (order.customer?.first_name || '').trim() || 'there'
+  const trackingUrl = `${SITE_URL}/track/${order.id}?t=${signOrderTrackToken(order.id)}`
+  const qrCid = 'order-qr'
+
+  const subject = isPickup
+    ? `Order confirmed ${orderNumber} — ready for collection soon — ${SITE_NAME}`
+    : `Order confirmed ${orderNumber} — ${SITE_NAME}`
+
+  const introHtml = isPickup
+    ? `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Thank you for your order. We have received order <strong style="color:${TEXT};">${orderNumber}</strong> and it is now being prepared for collection in store. We will let you know as soon as it is ready to pick up.
+      </p>
+    `
+    : `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Thank you for your order. We have received order <strong style="color:${TEXT};">${orderNumber}</strong> and it is being prepared for dispatch. You will receive a further email with tracking details once it has shipped.
+      </p>
+    `
+
+  const qrCaption = isPickup
+    ? 'Scan this code at any time to view your order status and confirm when it is ready for collection.'
+    : 'Scan this code at any time to view your order status and tracking details once your order has shipped.'
+
   const html = shell(
     statusBadge('confirmed'),
-    `Thank you for your order, ${(order.customer?.first_name || '').trim() || 'there'}`,
+    `Thank you for your order, ${greetingName}`,
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        We have received order <strong style="color:${TEXT};">${orderNumber}</strong> and it is being prepared. You will receive a further email once it has shipped.
-      </p>
+      ${introHtml}
       ${itemsTable(order.items ?? [])}
       <div style="margin-top:8px;padding-top:8px;border-top:2px solid ${BORDER};">
         ${totalRow('Order total', order.total, true)}
       </div>
-      ${ctaButton('View your order', `${SITE_URL}/orders`)}
+      ${qrBlock(qrCid, qrCaption)}
+      ${ctaButton('View your order', trackingUrl)}
     `,
   )
-  const text = `Order confirmed ${orderNumber} — Total ${fmt(order.total)}. We will email you again once it has shipped.`
-  return { subject, html, text }
+  const text = isPickup
+    ? `Order confirmed ${orderNumber} — Total ${fmt(order.total)}. It is being prepared for collection in store; we will notify you once it is ready. Track it any time at ${trackingUrl}`
+    : `Order confirmed ${orderNumber} — Total ${fmt(order.total)}. We will email you again once it has shipped. Track it any time at ${trackingUrl}`
+
+  return {
+    subject,
+    html,
+    text,
+    attachments: [qrInlineAttachment(trackingUrl, qrCid)],
+  }
 }
 
 export function shippingConfirmationEmail(order: any) {

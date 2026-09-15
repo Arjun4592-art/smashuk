@@ -103,37 +103,6 @@ function useMegaMenuBlogLinks(): Record<string, MegaMenuBlogLink[]> {
   }
   return byMenuKey
 }
-function useMedusaCategories() {
-  const [categories, setCategories] = useState<
-    {
-      id: string
-      name: string
-      handle: string
-    }[]
-  >([])
-  useEffect(() => {
-    async function fetchCategories() {
-      try {
-        const { medusaStore } = await import('@/lib/medusa')
-        const { product_categories } = await medusaStore.store.category.list({
-          limit: 20,
-          fields: 'id,name,handle',
-        })
-        setCategories(
-          (product_categories ?? []).map((c: any) => ({
-            id: c.id,
-            name: c.name,
-            handle: c.handle ?? c.id,
-          })),
-        )
-      } catch {
-        setCategories([])
-      }
-    }
-    fetchCategories()
-  }, [])
-  return categories
-}
 export default function Navbar({
   promoCode = 'SMASH10',
   promoDiscountLabel = '10% off',
@@ -155,7 +124,6 @@ export default function Navbar({
   const user = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const wishlistCount = useWishlistStore((s) => s.items.length)
-  const categories = useMedusaCategories()
   const megaMenuBlogLinks = useMegaMenuBlogLinks()
   useEffect(() => {
     fetch('/api/admin/store-settings')
@@ -511,34 +479,6 @@ export default function Navbar({
           className={`lg:hidden bg-white border-t border-[#E5E7EB] overflow-hidden transition-all duration-300 ${mobileOpen ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}
         >
           <div className='px-4 py-4 space-y-1 max-h-[80vh] overflow-y-auto'>
-            {}
-            {categories.length > 0 && (
-              <div className='pb-3 mb-1 border-b border-[#E5E7EB]'>
-                <p className='text-[10px] font-black text-[#9CA3AF] uppercase tracking-[0.15em] font-montserrat px-4 mb-2'>
-                  Categories
-                </p>
-                <div className='flex flex-wrap gap-1.5 px-2'>
-                  <Link
-                    href='/shop'
-                    onClick={() => setMobileOpen(false)}
-                    className='px-3 py-1.5 bg-[#0A1F44] text-white rounded-full text-[12px] font-semibold font-lato'
-                  >
-                    All
-                  </Link>
-                  {categories.map((cat) => (
-                    <Link
-                      key={cat.id}
-                      href={`/shop?category_id=${cat.id}`}
-                      onClick={() => setMobileOpen(false)}
-                      className='px-3 py-1.5 bg-[#F2F4F7] text-[#4B5563] hover:bg-[#E8553A]/10 hover:text-[#E8553A] rounded-full text-[12px] font-semibold font-lato transition-colors'
-                    >
-                      {cat.name}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {menuKeys.map((key) => {
               const menu = MEGA_MENUS[key]
               const isExpanded = mobileExpanded === key

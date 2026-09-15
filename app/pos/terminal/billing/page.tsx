@@ -62,6 +62,9 @@ export default function BillingPage() {
   const [medusaOrderId, setMedusaOrderId] = useState<string | undefined>(
     undefined,
   )
+  const [trackingToken, setTrackingToken] = useState<string | undefined>(
+    undefined,
+  )
   const [search, setSearch] = useState('')
   const [cat, setCat] = useState('All')
   const [size, setSize] = useState('All sizes')
@@ -364,6 +367,7 @@ export default function BillingPage() {
     const id = `POS-${generateOrderNumber()}`
     const cashierName = user?.name ?? 'Staff'
     let medusaOrderId: string | undefined
+    let trackingToken: string | undefined
     if (items.length > 0) {
       try {
         const { createPOSOrder, fetchDefaultRegion } =
@@ -385,7 +389,7 @@ export default function BillingPage() {
             product_id: (i.product as any).id,
           }
         })
-        const medusaOrder = await createPOSOrder({
+        const orderResult = await createPOSOrder({
           items: orderItems,
           customer_id:
             customer?.id && !customer.id.startsWith('local-')
@@ -416,7 +420,8 @@ export default function BillingPage() {
           manual_discount_amount:
             customDiscount > 0 ? customDiscount : undefined,
         })
-        medusaOrderId = medusaOrder?.id
+        medusaOrderId = orderResult?.order?.id
+        trackingToken = orderResult?.trackingToken
       } catch (err: unknown) {
         console.error('[BillingPage] Medusa order create failed:', err)
         toast.error('Sale not synced to Medusa', {
@@ -447,6 +452,7 @@ export default function BillingPage() {
     }
     setOrderId(id)
     setMedusaOrderId(medusaOrderId)
+    setTrackingToken(trackingToken)
     setShowPayment(false)
     setScreen('receipt')
   }
@@ -455,6 +461,7 @@ export default function BillingPage() {
     setScreen('terminal')
     setOrderId('')
     setMedusaOrderId(undefined)
+    setTrackingToken(undefined)
     setSplitPayments(null)
   }
   const handlePrintReceipt = useCallback(async () => {
@@ -573,6 +580,7 @@ export default function BillingPage() {
         <Receipt
           orderId={orderId}
           medusaOrderId={medusaOrderId}
+          trackingToken={trackingToken}
           items={cartDisplayItems}
           subtotal={subtotal}
           discountAmount={discountTotal}

@@ -9,6 +9,7 @@ import { requireStripe } from '@/lib/stripe-server'
 import { notifyOwner } from '@/lib/email'
 import { adminNewOrderEmail } from '@/lib/email-templates'
 import { sendOrderConfirmationEmail } from '@/lib/api/order-notifications'
+import { signOrderTrackToken } from '@/lib/api/order-track-token'
 // Synthetic emails we generate ourselves for walk-in / no-email customers —
 // never send a "confirmation" to these, they're not real inboxes.
 const isSyntheticEmail = (email?: string) =>
@@ -938,7 +939,7 @@ export async function POST(request: NextRequest) {
     }
     try {
       const orderRes = await medusaServiceFetch(
-        `/admin/orders/${order.id}?fields=id,display_id,email,total,*items`,
+        `/admin/orders/${order.id}?fields=id,display_id,email,total,metadata,*items,customer.first_name,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
       )
       if (orderRes.ok) {
         const { order: fullOrder } = await orderRes.json()
@@ -989,6 +990,10 @@ export async function POST(request: NextRequest) {
       order,
       fulfilled,
       captured,
+      // Signed token for the public, no-login order-status page/QR (see
+      // lib/api/order-track-token.ts + app/(website)/track/[id]) — the POS
+      // receipt needs this alongside order.id to build a working link.
+      trackingToken: signOrderTrackToken(order.id),
     })
   } catch (err: any) {
     console.error('[POS] Orders route error:', err)

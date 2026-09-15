@@ -11,6 +11,7 @@ import {
   getMedusaServiceToken,
   MEDUSA_URL,
 } from './api/medusa-service-token'
+import { signOrderTrackToken } from './api/order-track-token'
 const BUSINESS_DETAILS = {
   name: process.env.BUSINESS_LEGAL_NAME || 'SmashRocker Pro Ltd',
   addressLines: (process.env.BUSINESS_ADDRESS_LINES || '')
@@ -267,7 +268,7 @@ export async function generateInvoiceForOrder(
           ].filter(Boolean) as string[],
         }
       : undefined,
-    trackingUrl: `${SITE_URL}/orders/${encodeURIComponent(order.id)}`,
+    trackingUrl: `${SITE_URL}/track/${encodeURIComponent(order.id)}?t=${signOrderTrackToken(order.id)}`,
   }
   const pdfBuffer = await generateInvoicePdf(invoiceData)
   const url = await uploadPdfToMedusa(pdfBuffer, `${invoiceNumber}.pdf`)

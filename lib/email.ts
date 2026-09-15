@@ -77,7 +77,15 @@ export async function sendMail(opts: {
   replyTo?: string
   attachments?: {
     filename: string
-    path: string
+    path?: string
+    // Pre-encoded (base64) attachments — e.g. a QR code built locally with
+    // lib/qr.ts — skip the fetch-and-resolve step entirely since the bytes
+    // are already in hand.
+    content?: string
+    contentType?: string
+    // Set to embed the file inline (referenced in the HTML via `src="cid:<id>"`)
+    // instead of showing it as a downloadable attachment.
+    inlineContentId?: string
   }[]
 }): Promise<{
   sent: boolean
@@ -97,7 +105,13 @@ export async function sendMail(opts: {
   const from = process.env.EMAIL_FROM || 'onboarding@resend.dev'
   try {
     const attachments = opts.attachments?.length
-      ? await Promise.all(opts.attachments.map(resolveAttachment))
+      ? await Promise.all(
+          opts.attachments.map((a) =>
+            a.content
+              ? Promise.resolve(a)
+              : resolveAttachment(a as { filename: string; path: string }),
+          ),
+        )
       : undefined
     const { error } = await client.emails.send({
       from,

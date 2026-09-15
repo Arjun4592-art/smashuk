@@ -24,6 +24,11 @@ interface ShippingAddress {
 interface Props {
   orderId: string
   medusaOrderId?: string
+  // Signed token for the public, no-login order-status link (see
+  // lib/api/order-track-token.ts) — returned by the order-create API
+  // alongside medusaOrderId. Without it the QR/tracking link is omitted,
+  // since a link without a valid token would just 401.
+  trackingToken?: string
   items: CartDisplayItem[]
   subtotal: number
   discountAmount: number
@@ -75,6 +80,7 @@ function qrDataUrl(text: string): string {
 export default function Receipt({
   orderId,
   medusaOrderId,
+  trackingToken,
   items,
   subtotal,
   discountAmount,
@@ -202,6 +208,7 @@ export default function Receipt({
           <ReceiptBody
             orderId={orderId}
             medusaOrderId={medusaOrderId}
+            trackingToken={trackingToken}
             items={items}
             subtotal={subtotal}
             discountAmount={discountAmount}
@@ -299,6 +306,7 @@ export default function Receipt({
         <ReceiptBody
           orderId={orderId}
           medusaOrderId={medusaOrderId}
+          trackingToken={trackingToken}
           items={items}
           subtotal={subtotal}
           discountAmount={discountAmount}
@@ -362,6 +370,7 @@ export default function Receipt({
 export function ReceiptBody({
   orderId,
   medusaOrderId,
+  trackingToken,
   items,
   subtotal,
   discountAmount,
@@ -386,6 +395,7 @@ export function ReceiptBody({
 }: {
   orderId: string
   medusaOrderId?: string
+  trackingToken?: string
   items: CartDisplayItem[]
   subtotal: number
   discountAmount: number
@@ -419,12 +429,16 @@ export function ReceiptBody({
     ? `**** **** ${giftCardCode.slice(-4)}`
     : ''
   const showShipTo = fulfillmentType === 'ship' && !!shippingAddress?.address_1
-  // The website's order lookup (/api/store/orders) resolves by Medusa's real
-  // order id, not the human-readable POS receipt number — so the tracking
-  // link/QR must use medusaOrderId whenever the sale synced to Medusa, same
-  // as the order-confirmation email (see lib/invoice-service.ts).
-  const trackingUrl = `${SITE_URL}/orders/${encodeURIComponent(medusaOrderId ?? orderId)}`
-  const qrSrc = qrDataUrl(trackingUrl)
+  // Public, no-login order-status page (see app/(website)/track/[id]) — it
+  // only resolves with a real Medusa order id plus its matching signed
+  // token (lib/api/order-track-token.ts), so both must be present or the
+  // link would just 401. If the sale never synced to Medusa, there's no
+  // page to link to, so the QR/tracking link is omitted below.
+  const trackingUrl =
+    medusaOrderId && trackingToken
+      ? `${SITE_URL}/track/${encodeURIComponent(medusaOrderId)}?t=${encodeURIComponent(trackingToken)}`
+      : null
+  const qrSrc = trackingUrl ? qrDataUrl(trackingUrl) : null
   if (printMode) {
     return (
       <div
@@ -905,19 +919,22 @@ export function ReceiptBody({
             Thank you for shopping with us!
           </div>
 
-          {}
-          <img
-            src={qrSrc}
-            alt='Order tracking QR code'
-            width={90}
-            height={90}
-            style={{
-              margin: '3mm auto 1mm',
-              display: 'block',
-            }}
-          />
-          <div>Track Your Order & Join Our</div>
-          <div>Loyalty Programme Here</div>
+          {qrSrc && (
+            <>
+              <img
+                src={qrSrc}
+                alt='Order tracking QR code'
+                width={90}
+                height={90}
+                style={{
+                  margin: '3mm auto 1mm',
+                  display: 'block',
+                }}
+              />
+              <div>Scan to View Order Status</div>
+              <div>No account needed</div>
+            </>
+          )}
         </div>
       </div>
     )
@@ -1135,17 +1152,19 @@ export function ReceiptBody({
       )}
 
       <div className='text-center mt-4'>
-        <a
-          href={trackingUrl}
-          target='_blank'
-          rel='noopener noreferrer'
-          className='text-xs font-medium'
-          style={{
-            color: '#008060',
-          }}
-        >
-          Track this order →
-        </a>
+        {trackingUrl && (
+          <a
+            href={trackingUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='text-xs font-medium'
+            style={{
+              color: '#008060',
+            }}
+          >
+            Track this order →
+          </a>
+        )}
         <p
           className='text-xs mt-1.5'
           style={{

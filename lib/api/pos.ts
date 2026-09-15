@@ -263,7 +263,7 @@ export async function createPOSCustomer(customerData: {
 }
 export async function createPOSOrder(
   payload: CreatePOSOrderPayload,
-): Promise<any> {
+): Promise<{ order: any; trackingToken?: string }> {
   try {
     const res = await fetch('/api/pos/orders', {
       method: 'POST',
@@ -276,7 +276,8 @@ export async function createPOSOrder(
       const err = await res.json().catch(() => ({}))
       throw new Error(err.error ?? err.message ?? 'Order create failed')
     }
-    return (await res.json()).order
+    const data = await res.json()
+    return { order: data.order, trackingToken: data.trackingToken }
   } catch (err: unknown) {
     console.error('[POS] createPOSOrder Error:', err)
     throw new Error(
