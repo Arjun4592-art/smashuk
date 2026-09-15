@@ -31,7 +31,26 @@ export async function GET(req: NextRequest) {
   params.set('order', '-created_at')
   params.set(
     'fields',
-    'id,title,handle,status,thumbnail,metadata,*images,*categories,*variants,variants.id,variants.title,variants.sku,variants.barcode,*variants.prices,*variants.images,*variants.inventory_items,*variants.inventory_items.inventory.location_levels',
+    // PERF: verified against the actual list-rendering code (app/dashboard/
+    // products/page.tsx + lib/api/dashboard.ts's getProducts()) before cutting
+    // anything — `*variants.images` was requested here but NEVER read
+    // anywhere in the list flow (only the product-level `*images` gallery
+    // feeds `imageUrls`, used by CSV export). That's a full per-variant image
+    // gallery, times every variant, times up to 200 products per page, for a
+    // field nothing consumes. Cut.
+    //
+    // Deliberately NOT touched, unlike the storefront/POS fixes alongside
+    // this one:
+    //   - `*variants.prices` and the deep
+    //     `*variants.inventory_items.inventory.location_levels` join — both
+    //     genuinely load-bearing here (price column, stock column), and after
+    //     today's storefront regression from restructuring a Medusa fields
+    //     string without a live instance to test against, I'm not touching
+    //     pricing/inventory field composition again without one.
+    //   - No response caching added. Staff expect the list to reflect an edit
+    //     immediately after saving — unlike the storefront/POS fixes, a stale
+    //     cache here would actively mislead someone mid-edit.
+    'id,title,handle,status,thumbnail,metadata,*images,*categories,*variants,variants.id,variants.title,variants.sku,variants.barcode,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels',
   )
   try {
     const res = await fetch(`${MEDUSA_URL}/admin/products?${params}`, {

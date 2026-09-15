@@ -446,7 +446,10 @@ export const usePOSStore = create<POSState>()(
         })
         try {
           const { fetchPOSProducts } = await import('@/lib/api/pos')
-          const products = await fetchPOSProducts()
+          // force=true: this is the explicit "get me current data" action —
+          // it must bypass the 30s server cache added to /api/pos/products,
+          // or clicking Sync could silently return the same stale snapshot.
+          const products = await fetchPOSProducts(true)
           set({
             products,
             medusaLoading: false,

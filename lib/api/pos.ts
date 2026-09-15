@@ -169,9 +169,13 @@ function mapProductToPOSVariants(p: any): POSProduct[] {
     })
     .filter((v: POSProduct | null): v is POSProduct => v !== null)
 }
-export async function fetchPOSProducts(): Promise<POSProduct[]> {
+export async function fetchPOSProducts(force = false): Promise<POSProduct[]> {
   try {
-    const res = await fetch('/api/pos/products', {
+    // `force` bypasses the server-side cache added to /api/pos/products —
+    // used by the explicit "Sync" action, which exists specifically to
+    // guarantee a fresh read. The normal terminal-load path leaves this off
+    // and benefits from that cache.
+    const res = await fetch(`/api/pos/products${force ? '?force=1' : ''}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

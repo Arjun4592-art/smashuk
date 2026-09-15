@@ -1,10 +1,57 @@
 import type { Product } from '@/types'
+// Medusa's docs specify *variants.calculated_price must be the FIRST entry
+// when combined with inventory fields in the same list — reordered to match
+// after the listing-fields bug above turned out to be exactly this class of
+// issue. This one wasn't actually broken (PDP pricing/stock have been fine),
+// but there's no reason to leave it non-compliant with the documented order.
 export const STORE_PRODUCT_FIELDS =
-  '+description,+metadata,*variants,*variants.prices,*variants.calculated_price,*variants.inventory_quantity,*variants.options,*variants.images,*options,*options.values,*categories,*images,*tags'
-
+  '*variants.calculated_price,+description,+metadata,*variants,*variants.prices,+variants.inventory_quantity,+variants.manage_inventory,*variants.options,*variants.images,*options,*options.values,*categories,*images,*tags'
+// PERF: this is the field set used for every browse/search/listing request
+// (`light=1`).
+//
+// !! BUG FIX — read this before touching this string again !!
+// A previous version of this replaced Medusa's default field projection with
+// a fully explicit list (bare `id,title,handle,thumbnail,...`, no `+`
+// prefixes). That is what broke stock: Medusa's inventory-availability
+// resolver depends on default variant fields (`manage_inventory` in
+// particular) being present in the projection even when nothing downstream
+// reads them directly. Dropping to an explicit list silently dropped those,
+// so every variant's `inventory_quantity` came back null/0 and EVERY product
+// showed "Out of Stock" — confirmed against Medusa's own storefront docs
+// (docs.medusajs.com/resources/storefront-development/products/inventory),
+// which also specify that `*variants.calculated_price` must be the FIRST
+// entry in the fields list when combined with inventory fields.
+//
+// The fix: go back to `+` additions on top of Medusa's defaults — exactly the
+// pattern STORE_PRODUCT_FIELDS above already used, and the pattern this
+// string itself used before that previous edit. Only ADD the few things the
+// listing needs beyond the defaults; never replace the default set outright.
+//
+// Deliberately NOT added, and why:
+//   +description  — full HTML body per product, ~4-6kB each. The grid never
+//                   shows it; only the list-view snippet and quick view do,
+//                   and both now fetch it on demand instead (see
+//                   QuickViewModal.tsx / ProductCard.tsx).
+//   *images       — the whole gallery (5-10 image objects per product) when
+//                   the card only ever renders images[0]. `thumbnail` is part
+//                   of Medusa's default projection already, so it's present
+//                   with no `+` needed.
+//   *variants.prices — the full price-set rows for every variant.
+//                   `calculated_price` gives the one number the card needs
+//                   (plus original_amount for the strike-through) in a single
+//                   object, and is what Medusa recommends storefronts read.
+//                   NOTE: calculated_price is only returned when region_id is
+//                   on the query — see buildProductUrl / the API route, both
+//                   of which always resolve a region, including for `light`.
 export const STORE_PRODUCT_LISTING_FIELDS =
-  'id,title,handle,thumbnail,created_at,updated_at,+description,+metadata,*variants,*variants.prices,*variants.calculated_price,*variants.inventory_quantity,*variants.options,*variants.images,*options,*options.values,*categories,*images,*tags'
-
+  '*variants.calculated_price,+variants.inventory_quantity,+variants.manage_inventory,+metadata,*categories,*tags'
+// Medusa doesn't guarantee category array order, and a product is normally
+// linked to BOTH its sport's top-level category ("Badminton") and a specific
+// sub-category ("Badminton Rackets"). Blindly taking categories[0] can land
+// on the generic top-level one, which then fails every "includes('racket')"
+// / "includes('shoe')" style check downstream and silently falls back to a
+// much broader (and much noisier) filter set. Prefer the more specific,
+// non-top-level category instead.
 const SPORT_CATEGORY_SLUGS = new Set([
   'badminton',
   'tennis',
@@ -20,7 +67,13 @@ function pickCategory(categories: any[] | undefined): {
   const specificOnes = categories.filter(
     (c) => c?.handle && !SPORT_CATEGORY_SLUGS.has(c.handle),
   )
-  
+  // Some products end up linked to more than one specific sub-category — a
+  // known data issue where re-detecting a product's category leaves a stale
+  // "Rackets" link attached alongside the real, more specific one (e.g. a
+  // shoe that's also still tagged "Squash Rackets" from an earlier import
+  // pass). "Rackets" is the least-informative default sub-category, so if
+  // something more specific is also present, trust that one instead of
+  // whichever happens to come first in Medusa's unordered array.
   const preferred =
     specificOnes.find((c) => !/rackets?$/i.test(c.handle ?? '')) ??
     specificOnes[0]
@@ -45,7 +98,10 @@ export function normalizeProduct(p: any): Product {
     : undefined
   const legacySecondGbpPrice =
     gbpPrices.length > 1 ? Math.max(...gbpPrices) : undefined
-
+  // Listing requests no longer ask for *variants.prices, so legacySecondGbpPrice
+  // is undefined there. calculated_price.original_amount is the same number
+  // (the pre-sale / pre-price-list amount) and comes back with the price we
+  // already fetch, so the strike-through survives the slimmer field set.
   const calcOriginal =
     variant?.calculated_price?.original_amount !== undefined &&
     variant?.calculated_price?.original_amount !== null &&
@@ -77,8 +133,17 @@ export function normalizeProduct(p: any): Product {
     rating: Number(p.metadata?.rating ?? 0),
     reviewCount: Number(p.metadata?.reviewCount ?? 0),
     badge: p.metadata?.badge ?? null,
+    // Medusa's own rule (docs.medusajs.com/resources/commerce-modules/
+    // product/variant-inventory): a variant with manage_inventory disabled is
+    // ALWAYS considered in stock — Medusa doesn't track its quantity at all,
+    // so inventory_quantity is meaningless for it and checking `> 0` alone
+    // would wrongly mark it out of stock. This was missing before too; adding
+    // it now since we're already fixing the fields that feed it.
     inStock:
-      p.variants?.some((v: any) => (v.inventory_quantity ?? 0) > 0) ?? false,
+      p.variants?.some(
+        (v: any) =>
+          v.manage_inventory === false || (v.inventory_quantity ?? 0) > 0,
+      ) ?? false,
     tags: p.tags?.map((t: any) => t.value) ?? [],
     createdAt: p.created_at,
     updatedAt: p.updated_at,
@@ -184,7 +249,19 @@ function extractSpecs(metadata: any): {
         typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value),
     }))
 }
-
+// Real Shopify variant options (Size, Grip Size, Size (UK), Weight, Colour,
+// ...) come through the CSV import as genuine Medusa product options
+// (p.options[].title / .values[].value) — NOT as metadata.specifications.
+// extractSpecs() above only ever reads metadata, so this data was invisible
+// to the shop sidebar/filtering even though it's exactly what shoppers
+// expect to filter shoes and rackets by. One spec entry is emitted per
+// distinct option value (not just the first) so a product with several
+// selectable sizes/weights matches a filter on ANY of them — the existing
+// `.some()` based spec-matching in ShopClient already handles multiple
+// entries sharing the same label correctly. Labels that don't map to a
+// known canonical filter (e.g. "Title" on single-variant products,
+// "Denominations" on gift cards) are simply ignored later by
+// canonicalizeSpecLabel — no filtering needed here.
 function extractOptionSpecs(
   options: { title?: string; values?: { value?: string }[] }[] | undefined,
 ): { label: string; value: string }[] {
