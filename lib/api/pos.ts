@@ -5,6 +5,16 @@ export interface POSProduct {
   sku: string
   price: number
   stock: number
+  /**
+   * True only in the brief window between the fast phase rendering this
+   * product and fetchPOSStockUpdates/mergePOSStock resolving with its real
+   * count. `stock` holds an optimistic placeholder while this is true — UI
+   * that shows an exact number (Products tab) should show a neutral
+   * "checking" state instead of that placeholder number; UI that just
+   * gates "can this be added" (billing) doesn't need to check this at all,
+   * since POS already allows selling regardless of stock.
+   */
+  stockPending?: boolean
   category: string
   image?: string
   description?: string
@@ -143,13 +153,25 @@ function extractSizeOptionTitle(variant: any): string | undefined {
 // becomes its own sellable POS card so staff can quick-filter and add the
 // exact size a customer wants, instead of only ever seeing/selling the
 // first variant Medusa happens to return.
-function mapProductToPOSVariants(p: any): POSProduct[] {
+// Placeholder stock used only during the fast phase, where the response
+// carries no inventory data at all (FAST_FIELDS deliberately excludes the
+// inventory join — see app/api/pos/products/route.ts). Optimistic on
+// purpose: POS already lets staff sell an item Medusa shows as genuinely
+// out of stock (see ensureBackorderAllowed in app/api/pos/orders/route.ts),
+// so a brief "looks available" beats a brief, WRONG "out of stock" that
+// could stop a cashier ringing up something actually sitting on the shelf.
+// Real numbers land a moment later via fetchPOSStockUpdates + mergePOSStock.
+const STOCK_PENDING_PLACEHOLDER = 9999
+function mapProductToPOSVariants(
+  p: any,
+  stockPlaceholder?: number,
+): POSProduct[] {
   const variants = Array.isArray(p.variants) ? p.variants : []
   return variants
     .map((variant: any): POSProduct | null => {
       if (!variant?.id) return null
       const price = extractPrice(variant, p.metadata)
-      const stock = extractStock(variant)
+      const stock = stockPlaceholder ?? extractStock(variant)
       return {
         id: p.id,
         name: p.title ?? 'Unknown Product',
@@ -157,6 +179,7 @@ function mapProductToPOSVariants(p: any): POSProduct[] {
         sku: variant?.sku ?? `${p.id}-${variant.id}`,
         price,
         stock,
+        stockPending: stockPlaceholder !== undefined,
         category: p.categories?.[0]?.name ?? 'Uncategorized',
         image: p.thumbnail ?? p.images?.[0]?.url ?? undefined,
         description: p.description ?? undefined,
@@ -169,34 +192,92 @@ function mapProductToPOSVariants(p: any): POSProduct[] {
     })
     .filter((v: POSProduct | null): v is POSProduct => v !== null)
 }
+async function fetchPosProductsPage(qs: string): Promise<{ products: any[] }> {
+  const res = await fetch(`/api/pos/products${qs}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({
+      error: 'Unknown error',
+    }))
+    console.error('[POS] API Error Response:', errorData)
+    throw new Error(
+      errorData.error || `HTTP ${res.status}: Products fetch failed`,
+    )
+  }
+  const data = await res.json()
+  if (!data.products || !Array.isArray(data.products)) {
+    console.warn('[POS] Invalid products response:', data)
+    return { products: [] }
+  }
+  return data
+}
+/**
+ * PERF — the register-usable data. No inventory join, so this is the fast
+ * ~55s-of-cost-free half of what used to be one combined request. Stock on
+ * the returned items is a placeholder (see mapProductToPOSVariants) —
+ * call fetchPOSStockUpdates right after and merge with mergePOSStock.
+ */
+export async function fetchPOSProductsFast(
+  force = false,
+): Promise<POSProduct[]> {
+  try {
+    const data = await fetchPosProductsPage(
+      `?phase=fast${force ? '&force=1' : ''}`,
+    )
+    return (data.products as any[]).flatMap((p) =>
+      mapProductToPOSVariants(p, STOCK_PENDING_PLACEHOLDER),
+    )
+  } catch (err: unknown) {
+    console.error('[POS] fetchPOSProductsFast Error:', err)
+    throw new Error(
+      err instanceof Error ? err.message : 'Failed to fetch products',
+    )
+  }
+}
+/**
+ * PERF — the slow half: real stock, via the deep inventory join. Returns a
+ * lookup by variant id rather than full products, since that's all the
+ * caller needs to merge into what fetchPOSProductsFast already rendered.
+ */
+export async function fetchPOSStockUpdates(
+  force = false,
+): Promise<Map<string, number>> {
+  const data = await fetchPosProductsPage(
+    `?phase=stock${force ? '&force=1' : ''}`,
+  )
+  const stockByVariantId = new Map<string, number>()
+  for (const p of data.products as any[]) {
+    for (const variant of p.variants ?? []) {
+      if (variant?.id) stockByVariantId.set(variant.id, extractStock(variant))
+    }
+  }
+  return stockByVariantId
+}
+/** Applies a fetchPOSStockUpdates() result onto an existing POSProduct list. */
+export function mergePOSStock(
+  products: POSProduct[],
+  stockByVariantId: Map<string, number>,
+): POSProduct[] {
+  return products.map((p) => {
+    const stock = stockByVariantId.get(p.variantId)
+    return stock === undefined ? p : { ...p, stock, stockPending: false }
+  })
+}
+/**
+ * @deprecated Combined fast+stock in one request — this is the original,
+ * slow, single-phase load. Kept only in case something still needs one
+ * complete response in a single call. New code should use
+ * fetchPOSProductsFast + fetchPOSStockUpdates so the register can render
+ * before stock is known.
+ */
 export async function fetchPOSProducts(force = false): Promise<POSProduct[]> {
   try {
-    // `force` bypasses the server-side cache added to /api/pos/products —
-    // used by the explicit "Sync" action, which exists specifically to
-    // guarantee a fresh read. The normal terminal-load path leaves this off
-    // and benefits from that cache.
-    const res = await fetch(`/api/pos/products${force ? '?force=1' : ''}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    })
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({
-        error: 'Unknown error',
-      }))
-      console.error('[POS] API Error Response:', errorData)
-      throw new Error(
-        errorData.error || `HTTP ${res.status}: Products fetch failed`,
-      )
-    }
-    const data = await res.json()
-    if (!data.products || !Array.isArray(data.products)) {
-      console.warn('[POS] Invalid products response:', data)
-      return []
-    }
-    const mapped = (data.products as any[]).flatMap(mapProductToPOSVariants)
-    return mapped
+    const data = await fetchPosProductsPage(force ? '?force=1' : '')
+    return (data.products as any[]).flatMap(mapProductToPOSVariants)
   } catch (err: unknown) {
     console.error('[POS] fetchPOSProducts Error:', err)
     throw new Error(

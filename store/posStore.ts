@@ -415,19 +415,42 @@ export const usePOSStore = create<POSState>()(
         },
       ],
       loadMedusaProducts: async () => {
-        if (get().products.length > 0) return
+        // Guard on medusaLoading too, not just products.length — two
+        // near-simultaneous calls to this (React StrictMode double-invoking
+        // effects in dev is the usual cause) could both pass the old
+        // products.length check before either had set anything, firing the
+        // full-catalogue fetch twice. This is exactly what a DevTools
+        // capture caught: two ~55s, ~10-16MB "products" requests back to
+        // back on one page load.
+        if (get().products.length > 0 || get().medusaLoading) return
         set({
           medusaLoading: true,
           medusaError: null,
         })
         try {
-          const { fetchPOSProducts } = await import('@/lib/api/pos')
-          const products = await fetchPOSProducts()
+          const { fetchPOSProductsFast, fetchPOSStockUpdates, mergePOSStock } =
+            await import('@/lib/api/pos')
+          // Phase 1: render the register now, without waiting on the
+          // expensive inventory join. Stock on these is an optimistic
+          // placeholder (see lib/api/pos.ts) until phase 2 lands.
+          const fastProducts = await fetchPOSProductsFast()
           set({
-            products,
+            products: fastProducts,
             medusaLoading: false,
             loadRetries: 0,
           })
+          // Phase 2: real stock, in the background — merges in whenever it
+          // resolves without blocking anything the cashier is already doing.
+          try {
+            const stockByVariantId = await fetchPOSStockUpdates()
+            set({
+              products: mergePOSStock(get().products, stockByVariantId),
+            })
+          } catch (stockErr: unknown) {
+            // Non-fatal — the register is already usable with placeholder
+            // stock, and POS allows selling regardless of stock anyway.
+            console.error('[POS] Stock update failed:', stockErr)
+          }
         } catch (err: unknown) {
           const message =
             err instanceof Error ? err.message : 'Failed to load products'
@@ -445,16 +468,26 @@ export const usePOSStore = create<POSState>()(
           medusaError: null,
         })
         try {
-          const { fetchPOSProducts } = await import('@/lib/api/pos')
-          // force=true: this is the explicit "get me current data" action —
-          // it must bypass the 30s server cache added to /api/pos/products,
-          // or clicking Sync could silently return the same stale snapshot.
-          const products = await fetchPOSProducts(true)
+          const { fetchPOSProductsFast, fetchPOSStockUpdates, mergePOSStock } =
+            await import('@/lib/api/pos')
+          // force=true throughout: this is the explicit "get me current
+          // data" action — it must bypass the 30s server cache added to
+          // /api/pos/products, or clicking Sync could silently return the
+          // same stale snapshot it started with.
+          const fastProducts = await fetchPOSProductsFast(true)
           set({
-            products,
+            products: fastProducts,
             medusaLoading: false,
             loadRetries: 0,
           })
+          try {
+            const stockByVariantId = await fetchPOSStockUpdates(true)
+            set({
+              products: mergePOSStock(get().products, stockByVariantId),
+            })
+          } catch (stockErr: unknown) {
+            console.error('[POS] Stock update failed:', stockErr)
+          }
         } catch (err: unknown) {
           const message =
             err instanceof Error ? err.message : 'Failed to sync products'

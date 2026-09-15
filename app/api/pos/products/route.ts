@@ -32,13 +32,45 @@ async function requirePosSession(): Promise<boolean> {
 //     against, I'm not touching pricing/inventory composition again blind.
 //     If you want this optimized, it needs testing against your actual
 //     backend — happy to do it with you watching the result, not solo.
-const PRODUCT_FIELDS =
-  'id,title,thumbnail,status,*categories,*variants,*variants.prices,variants.sku,variants.id,variants.title,*variants.options,variants.options.value,*variants.options.option,variants.options.option.title,*variants.inventory_items,*variants.inventory_items.inventory,*variants.inventory_items.inventory.location_levels,*sales_channels'
+// PERF — split into two phases.
+//
+// The single combined field set below carried
+// `*variants.inventory_items.inventory.location_levels` — the deep,
+// multi-hop join across the Inventory module that both Medusa's own
+// community and its docs call out as expensive. Across the whole catalogue
+// (~1700 products, several variants each) this was measured at 55+ seconds
+// and 16+MB in production (see the DevTools capture that prompted this).
+// That's not a field-trimming problem like the earlier fixes — it's a real,
+// unavoidable cost of computing live stock for every variant in one shot.
+//
+// Rather than touch how that number is COMPUTED (which is exactly the kind
+// of change that broke storefront stock earlier today), this splits WHEN it
+// arrives:
+//   - FAST_FIELDS: everything the register needs to be usable — name,
+//     price, category, options, sales channel — with NO inventory join.
+//     This is what makes the grid appear.
+//   - STOCK_FIELDS: just enough to compute per-variant stock, fetched
+//     right after and merged in once it lands.
+// Same two Medusa queries as before, same total data, same computation —
+// just not both blocking the register from showing anything until both are
+// done. See store/posStore.ts for how the two responses get merged, and why
+// showing a brief optimistic stock number during that gap is safe: POS
+// already lets staff sell out-of-stock items on purpose (see
+// ensureBackorderAllowed in app/api/pos/orders/route.ts) — stock here has
+// always been advisory, never a hard checkout gate.
+const FAST_FIELDS =
+  'id,title,thumbnail,status,*categories,*variants,*variants.prices,variants.sku,variants.id,variants.title,*variants.options,variants.options.value,*variants.options.option,variants.options.option.title,*sales_channels'
+const STOCK_FIELDS =
+  'id,*variants.id,*variants.inventory_items,*variants.inventory_items.inventory,*variants.inventory_items.inventory.location_levels'
 const PAGE_SIZE = 200
 const CONCURRENCY = 5
-async function fetchPage(offset: number, cacheInit: RequestInit) {
+async function fetchPage(
+  offset: number,
+  fields: string,
+  cacheInit: RequestInit,
+) {
   const response = await medusaServiceFetch(
-    `/admin/products?limit=${PAGE_SIZE}&offset=${offset}&status[]=published&fields=${PRODUCT_FIELDS}`,
+    `/admin/products?limit=${PAGE_SIZE}&offset=${offset}&status[]=published&fields=${fields}`,
     cacheInit,
   )
   if (!response.ok) {
@@ -50,6 +82,20 @@ async function fetchPage(offset: number, cacheInit: RequestInit) {
     products: (data.products ?? []) as any[],
     count: typeof data.count === 'number' ? data.count : 0,
   }
+}
+async function fetchAllPages(fields: string, cacheInit: RequestInit) {
+  const first = await fetchPage(0, fields, cacheInit)
+  const allProducts: any[] = [...first.products]
+  const offsets: number[] = []
+  for (let o = PAGE_SIZE; o < first.count; o += PAGE_SIZE) offsets.push(o)
+  for (let i = 0; i < offsets.length; i += CONCURRENCY) {
+    const batch = offsets.slice(i, i + CONCURRENCY)
+    const results = await Promise.all(
+      batch.map((offset) => fetchPage(offset, fields, cacheInit)),
+    )
+    for (const r of results) allProducts.push(...r.products)
+  }
+  return allProducts
 }
 export async function GET(req: NextRequest) {
   if (!(await requirePosSession())) {
@@ -73,29 +119,21 @@ export async function GET(req: NextRequest) {
   const cacheInit: RequestInit = force
     ? { cache: 'no-store' }
     : { next: { revalidate: 30 } }
+  // `phase=fast` (product+price, no inventory join) renders the register.
+  // `phase=stock` (inventory only) follows a moment later and gets merged
+  // in client-side. No `phase` param = old combined behaviour, kept for any
+  // caller that genuinely wants one complete response.
+  const phase = req.nextUrl.searchParams.get('phase')
   try {
-    // The store has grown past a single page of results — a flat
-    // `limit=200` cut the catalog off there and silently dropped every
-    // product after it from the POS (no error, they just never showed up
-    // in search, filters, or scanning). Page through everything Medusa has.
-    //
-    // PERF: this used to be a `while(true)` loop — one page awaited, THEN
-    // the next requested, serially, for as many ~200-product pages as the
-    // catalogue needs (getting close to 10 round trips at ~1700 products),
-    // each carrying the same heavy field set. Fetch the first page to learn
-    // `count`, then fire the rest concurrently in small batches — same
-    // total number of Medusa calls, but they overlap instead of queueing.
-    const first = await fetchPage(0, cacheInit)
-    const allProducts: any[] = [...first.products]
-    const offsets: number[] = []
-    for (let o = PAGE_SIZE; o < first.count; o += PAGE_SIZE) offsets.push(o)
-    for (let i = 0; i < offsets.length; i += CONCURRENCY) {
-      const batch = offsets.slice(i, i + CONCURRENCY)
-      const results = await Promise.all(
-        batch.map((offset) => fetchPage(offset, cacheInit)),
-      )
-      for (const r of results) allProducts.push(...r.products)
+    if (phase === 'stock') {
+      const allProducts = await fetchAllPages(STOCK_FIELDS, cacheInit)
+      return NextResponse.json({
+        products: allProducts,
+      })
     }
+    const fields =
+      phase === 'fast' ? FAST_FIELDS : FAST_FIELDS + ',' + STOCK_FIELDS
+    const allProducts = await fetchAllPages(fields, cacheInit)
     const products = allProducts.filter(
       (p: any) => inferSellingChannel(p.sales_channels) !== 'website',
     )

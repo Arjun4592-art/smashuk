@@ -144,9 +144,20 @@ export default function ProductsPage() {
           </div>
         ) : (
           filtered.map((p, i) => {
-            const isOut = p.stock === 0
-            const isLow = p.stock > 0 && p.stock <= 3
-            const stockColor = isOut ? '#D82C0D' : isLow ? '#B7791F' : '#008060'
+            // Fast-phase products carry an optimistic placeholder stock (see
+            // lib/api/pos.ts) until the real count lands a moment later —
+            // `stockPending` says so explicitly, so this shows a neutral
+            // "checking" state instead of a made-up number or a false
+            // "Out of stock".
+            const isOut = !p.stockPending && p.stock === 0
+            const isLow = !p.stockPending && p.stock > 0 && p.stock <= 3
+            const stockColor = p.stockPending
+              ? '#8C9196'
+              : isOut
+                ? '#D82C0D'
+                : isLow
+                  ? '#B7791F'
+                  : '#008060'
             return (
               <div key={p.variantId ?? p.id}>
                 {}
@@ -205,13 +216,15 @@ export default function ProductsPage() {
                       color: stockColor,
                     }}
                   >
-                    {isOut
-                      ? 'Out'
-                      : !showStockCount
-                        ? '—'
-                        : isLow
-                          ? `${p.stock} left`
-                          : `${p.stock}`}
+                    {p.stockPending
+                      ? '…'
+                      : isOut
+                        ? 'Out'
+                        : !showStockCount
+                          ? '—'
+                          : isLow
+                            ? `${p.stock} left`
+                            : `${p.stock}`}
                   </span>
                   <span
                     className='text-[10px] px-1.5 py-0.5 rounded font-medium w-fit'
@@ -267,13 +280,15 @@ export default function ProductsPage() {
                         color: stockColor,
                       }}
                     >
-                      {isOut
-                        ? 'Out of stock'
-                        : !showStockCount
-                          ? ''
-                          : isLow
-                            ? `${p.stock} left`
-                            : `${p.stock} in stock`}
+                      {p.stockPending
+                        ? 'Checking stock…'
+                        : isOut
+                          ? 'Out of stock'
+                          : !showStockCount
+                            ? ''
+                            : isLow
+                              ? `${p.stock} left`
+                              : `${p.stock} in stock`}
                     </p>
                   </div>
                 </div>
