@@ -2,9 +2,45 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import type { AuthCookiePayload, UserRole } from '@/types'
 import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
+
 const DASHBOARD_ROLES: UserRole[] = ['admin']
 const POS_ROLES: UserRole[] = ['admin', 'staff']
 const PROTECTED_WEBSITE_ROUTES = ['/checkout', '/orders', '/profile']
+
+// ── Maintenance mode ──────────────────────────────────────────────
+// Set MAINTENANCE_MODE=true in env to put the storefront under
+// construction for customers. Dashboard, POS and API stay untouched.
+const MAINTENANCE_MODE = process.env.MAINTENANCE_MODE === 'true'
+
+// Set MAINTENANCE_BYPASS_SECRET in env, then visit once:
+//   https://yoursite.com/?preview=<that secret>
+// It sets a cookie so you keep seeing the real site while customers see
+// the "under construction" page.
+const BYPASS_SECRET = process.env.MAINTENANCE_BYPASS_SECRET
+const BYPASS_COOKIE = 'srp_preview'
+
+// Paths that skip maintenance mode entirely — admin surfaces + infra.
+const MAINTENANCE_EXEMPT = [
+  '/dashboard',
+  '/pos',
+  '/api',
+  '/maintenance',
+  '/_next',
+  '/favicon.ico',
+  '/robots.txt',
+  '/sitemap.xml',
+  '/manifest.webmanifest',
+]
+
+function isMaintenanceExempt(pathname: string) {
+  return (
+    MAINTENANCE_EXEMPT.some(
+      (p) => pathname === p || pathname.startsWith(`${p}/`),
+    ) ||
+    /\.(svg|png|jpg|jpeg|webp|ico|css|js|txt|json|xml|woff2?)$/.test(pathname)
+  )
+}
+
 function getCookiePayload(
   request: NextRequest,
   cookieName: string,
@@ -17,6 +53,7 @@ function getCookiePayload(
     return null
   }
 }
+
 function getValidatedBearerToken(request: NextRequest): string | null {
   const authHeader = request.headers.get('authorization')
   if (!authHeader?.startsWith('Bearer ')) return null
@@ -24,8 +61,38 @@ function getValidatedBearerToken(request: NextRequest): string | null {
   if (!token || token.split('.').length !== 3) return null
   return token
 }
+
 export function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl
+  const { pathname, searchParams } = request.nextUrl
+
+  // ── Maintenance mode gate — runs before everything else ──
+  if (MAINTENANCE_MODE && !isMaintenanceExempt(pathname)) {
+    // One-time preview link: ?preview=SECRET sets the bypass cookie.
+    const previewParam = searchParams.get('preview')
+    if (BYPASS_SECRET && previewParam === BYPASS_SECRET) {
+      const cleanUrl = request.nextUrl.clone()
+      cleanUrl.searchParams.delete('preview')
+      const response = NextResponse.redirect(cleanUrl)
+      response.cookies.set(BYPASS_COOKIE, BYPASS_SECRET, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 30, // 30 days
+        path: '/',
+      })
+      return response
+    }
+
+    const bypassCookie = request.cookies.get(BYPASS_COOKIE)?.value
+    const hasBypass = BYPASS_SECRET && bypassCookie === BYPASS_SECRET
+
+    if (!hasBypass) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/maintenance'
+      return NextResponse.rewrite(url)
+    }
+  }
+
   const websiteAuth = getCookiePayload(
     request,
     SURFACE_COOKIES.website.authCookie,
@@ -168,23 +235,7 @@ export function proxy(request: NextRequest) {
   }
   return NextResponse.next()
 }
+
 export const config = {
-  matcher: [
-    '/api/auth/:path*',
-    '/api/dashboard/:path*',
-    '/api/admin/:path*',
-    '/api/pos/:path*',
-    '/dashboard/:path*',
-    '/pos/:path*',
-    '/cart',
-    '/cart/:path*',
-    '/checkout',
-    '/checkout/:path*',
-    '/orders',
-    '/orders/:path*',
-    '/profile',
-    '/profile/:path*',
-    '/login',
-    '/register',
-  ],
+  matcher: ['/((?!_next/static|_next/image).*)'],
 }
