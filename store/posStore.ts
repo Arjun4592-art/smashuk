@@ -93,7 +93,12 @@ export interface POSStaffMember {
   totalOrders: number
 }
 export type AuditAction =
-  'login' | 'logout' | 'pin_change' | 'sale' | 'void' | 'return'
+  | 'login'
+  | 'logout'
+  | 'pin_change'
+  | 'sale'
+  | 'void'
+  | 'return'
 export interface AuditLogEntry {
   id: string
   staffId: string
@@ -118,6 +123,7 @@ export interface POSCatalogProduct {
   sku: string
   price: number
   stock: number
+  stockPending?: boolean
   category: string
   image?: string
   description?: string
