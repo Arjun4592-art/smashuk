@@ -125,6 +125,53 @@ export async function getOrders(params?: {
     count: data.count,
   }
 }
+export interface AbandonedCheckout {
+  id: string
+  customer: string
+  email: string
+  itemCount: number
+  value: number
+  currencyCode: string
+  lastActivity: string
+  lastActivityRaw: string
+  recoveryUrl: string
+}
+export async function getAbandonedCheckouts(params?: {
+  limit?: number
+  offset?: number
+  minutes?: number
+}) {
+  const data = await api<any>('/api/admin/abandoned-checkouts', {
+    limit: params?.limit,
+    offset: params?.offset,
+    minutes: params?.minutes,
+  })
+  if (!data.available) {
+    return { checkouts: [] as AbandonedCheckout[], count: 0, available: false }
+  }
+  return {
+    checkouts: (data.abandoned_checkouts ?? []).map(
+      (c: any): AbandonedCheckout => ({
+        id: c.id,
+        customer: c.customer_name?.trim() || c.email || 'Guest',
+        email: c.email ?? '',
+        itemCount: c.item_count ?? 0,
+        value: c.value ?? 0,
+        currencyCode: (c.currency_code ?? 'gbp').toUpperCase(),
+        lastActivity: new Date(c.updated_at).toLocaleString('en-GB', {
+          day: 'numeric',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        lastActivityRaw: c.updated_at,
+        recoveryUrl: `/cart?recover=${c.id}`,
+      }),
+    ),
+    count: data.count ?? 0,
+    available: true,
+  }
+}
 export async function getOrder(id: string) {
   const data = await api<any>(`/api/admin/orders/${id}`)
   return data.order

@@ -13,6 +13,7 @@ import {
 } from '@/lib/api/dashboard'
 import { toast } from 'sonner'
 import { compressImageForUpload } from '@/lib/image-compress'
+import ImageCropModal from '@/components/dashboard/ImageCropModal'
 function buildAutoMetaTitle(name: string, brand: string): string {
   const withBrand =
     brand && !name.toLowerCase().includes(brand.toLowerCase())
@@ -228,6 +229,14 @@ export default function AddProductPage() {
   const [crossSellLoading, setCrossSellLoading] = useState(false)
   const [images, setImages] = useState<UploadedImage[]>([])
   const [dragOver, setDragOver] = useState(false)
+  // Files waiting to go through the resize/crop modal, processed one at a
+  // time. Each pending file gets an object URL that must be revoked once
+  // it's either confirmed (handed off to uploadImage) or cancelled.
+  const [cropQueue, setCropQueue] = useState<{ file: File; src: string }[]>([])
+  const [cropTotal, setCropTotal] = useState(0)
+  useEffect(() => {
+    if (cropQueue.length === 0 && cropTotal !== 0) setCropTotal(0)
+  }, [cropQueue.length, cropTotal])
   useEffect(() => {
     async function loadCategories() {
       try {
@@ -394,16 +403,31 @@ export default function AddProductPage() {
     setCrossSellSearch('')
     setCrossSeachResults([])
   }
-  const addImages = async (files: FileList | File[]) => {
-    const newImages: UploadedImage[] = Array.from(files).map((file) => ({
+  const addImages = (files: FileList | File[]) => {
+    const list = Array.from(files).filter((f) => f.type.startsWith('image/'))
+    if (!list.length) return
+    const queued = list.map((file) => ({
       file,
-      preview: URL.createObjectURL(file),
-      uploading: true,
+      src: URL.createObjectURL(file),
     }))
-    setImages((prev) => [...prev, ...newImages])
-    for (const img of newImages) {
-      uploadImage(img)
+    setCropTotal((prev) => prev + queued.length)
+    setCropQueue((prev) => [...prev, ...queued])
+  }
+  // Called once the resize/crop modal confirms a file: adds it to the grid
+  // and kicks off the actual upload, then advances the queue to the next
+  // pending file (if any).
+  const handleCropConfirm = (croppedFile: File) => {
+    const newImage: UploadedImage = {
+      file: croppedFile,
+      preview: URL.createObjectURL(croppedFile),
+      uploading: true,
     }
+    setImages((prev) => [...prev, newImage])
+    uploadImage(newImage)
+    setCropQueue((prev) => prev.slice(1))
+  }
+  const handleCropCancel = () => {
+    setCropQueue((prev) => prev.slice(1))
   }
   const uploadImage = async (img: UploadedImage) => {
     try {
@@ -816,6 +840,27 @@ export default function AddProductPage() {
   ]
   return (
     <div className='max-w-275 mx-auto space-y-5'>
+      {cropQueue.length > 0 && (
+        <ImageCropModal
+          key={cropQueue[0].src}
+          imageSrc={cropQueue[0].src}
+          fileName={cropQueue[0].file.name}
+          fileType={cropQueue[0].file.type}
+          progressLabel={
+            cropTotal > 1
+              ? `${cropTotal - cropQueue.length + 1} of ${cropTotal}`
+              : undefined
+          }
+          onCancel={() => {
+            URL.revokeObjectURL(cropQueue[0].src)
+            handleCropCancel()
+          }}
+          onConfirm={(croppedFile) => {
+            URL.revokeObjectURL(cropQueue[0].src)
+            handleCropConfirm(croppedFile)
+          }}
+        />
+      )}
       {}
       <div className='flex items-center justify-between'>
         <div className='flex items-center gap-3'>

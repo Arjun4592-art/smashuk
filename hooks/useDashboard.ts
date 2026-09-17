@@ -6,6 +6,7 @@ import {
   getDashboardStats,
   getInventory,
   getDiscounts,
+  getAbandonedCheckouts,
   type DashboardStats,
 } from '@/lib/api/dashboard'
 function useAsync<T>(fetcher: () => Promise<T>, deps: any[] = []) {
@@ -85,4 +86,14 @@ export function useInventory(params?: {
 }
 export function useDiscounts(params?: { limit?: number; offset?: number }) {
   return useAsync(() => getDiscounts(params), [params?.limit, params?.offset])
+}
+export function useAbandonedCheckouts(params?: {
+  limit?: number
+  offset?: number
+  minutes?: number
+}) {
+  return useAsync(
+    () => getAbandonedCheckouts(params),
+    [params?.limit, params?.offset, params?.minutes],
+  )
 }
