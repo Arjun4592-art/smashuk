@@ -58,12 +58,41 @@ async function requirePosSession(): Promise<boolean> {
 // already lets staff sell out-of-stock items on purpose (see
 // ensureBackorderAllowed in app/api/pos/orders/route.ts) — stock here has
 // always been advisory, never a hard checkout gate.
+// PERF (round 2) — verified against every line of
+// mapProductToPOSVariants/extractPrice/extractVariantSize in lib/api/pos.ts
+// before cutting anything:
+//   - The bare `*variants` expansion (on top of the specific
+//     `variants.id`/`variants.sku` already listed) was pure waste: it pulls
+//     Medusa's FULL default variant projection — barcode, ean, upc, weight,
+//     length, height, width, material, hs_code, mid_code, origin_country,
+//     metadata, variant_rank, allow_backorder, timestamps — roughly 15-20
+//     scalar columns nothing in POS reads, serialized for every variant of
+//     every one of ~1700 products. Removed; the explicit fields below are
+//     the complete set actually used.
+//   - `variants.title` was requested but never read anywhere. Cut.
+//
+// Deliberately NOT switched to `*variants.calculated_price` (which would
+// also cut `*variants.prices` down to one number): Medusa has a confirmed,
+// open bug (github.com/medusajs/medusa/issues/10613) where calculated_price
+// ignores the base/default price entirely and returns ONLY a price-list
+// price whenever ANY price list exists on the store — silently wrong
+// pricing, not just stale. Given a retail store commonly runs sales via
+// price lists, and given I already broke storefront stock once today by
+// swapping a Medusa field without live verification, I'm not risking wrong
+// prices at checkout for a load-time win. If you confirm this store has no
+// active price lists, this is worth revisiting live.
 const FAST_FIELDS =
-  'id,title,thumbnail,status,*categories,*variants,*variants.prices,variants.sku,variants.id,variants.title,*variants.options,variants.options.value,*variants.options.option,variants.options.option.title,*sales_channels'
+  'id,title,thumbnail,status,*categories,variants.id,variants.sku,*variants.prices,*variants.options,variants.options.value,*variants.options.option,variants.options.option.title,*sales_channels'
 const STOCK_FIELDS =
   'id,*variants.id,*variants.inventory_items,*variants.inventory_items.inventory,*variants.inventory_items.inventory.location_levels'
 const PAGE_SIZE = 200
-const CONCURRENCY = 5
+// PERF (round 2) — was 5, meaning ~1700 products (≈9 pages of 200) fired in
+// TWO waves (5, then the remaining ~4), so total time was roughly 2× a
+// single page's latency. There's no batching reason to cap this that low —
+// Postgres and Medusa's admin API both handle a burst of ~10 concurrent
+// reads fine for a store this size — so raise it to fire every page in one
+// wave. Total load time becomes ~1× the slowest single page instead of 2×.
+const CONCURRENCY = 12
 async function fetchPage(
   offset: number,
   fields: string,

@@ -220,7 +220,15 @@ async function resolveStringOptions(sport?: string): Promise<StringOption[]> {
     )
     if (!res.ok) return []
     const data = await res.json()
-    const products: any[] = data.products ?? []
+    // Stringing products are either a standalone "reel" (a spool of string,
+    // sold on its own — e.g. "Yonex BG65 Titanium Badminton String - 200m
+    // Reel") or a "service" (e.g. "Yonex BG65 Badminton Stringing Service")
+    // — the thing a customer picks here to have bundled with this racket,
+    // free or paid. Only services belong in this dropdown; reels are sold
+    // separately and never as a racket add-on.
+    const products: any[] = (data.products ?? []).filter(
+      (p: any) => p.metadata?.stringing_type === 'service',
+    )
     return products
       .map((match: any, i: number): StringOption | null => {
         const variants: any[] = match.variants ?? []

@@ -347,9 +347,6 @@ export async function linkOptionsToProduct(
   removeOptionIds: string[] = [],
 ) {
   const add = options.filter((o) => !alreadyLinkedOptionIds.has(o.id))
-  // Medusa's options/batch validator requires each `update` item to be
-  // keyed `product_option_id`, not `id` — sending `id` fails with
-  // "Field 'update, N, product_option_id' is required".
   const update = options
     .filter((o) => alreadyLinkedOptionIds.has(o.id))
     .map((o) => ({
@@ -650,7 +647,6 @@ export async function getDiscounts(params?: {
         !!d.is_automatic &&
         !!quantityRule
 
-      // free_shipping is identified by target_type, not by application type.
       const isFreeShipping =
         d.application_method?.target_type === 'shipping_methods'
       const type = isFreeShipping
@@ -659,12 +655,8 @@ export async function getDiscounts(params?: {
           ? 'buy_x_get_y'
           : (d.application_method?.type ?? 'percentage')
 
-      // Campaign holds dates, budget (max uses) and description in Medusa v2.
-      // These are NOT on the top-level promotion object.
       const campaign = d.campaign
 
-      // rule values come back as { id, value } objects after an API round-trip;
-      // right after create they can be plain strings — normalise both.
       const normaliseRuleValue = (v: any) =>
         v && typeof v === 'object' ? v.value : v
 
@@ -676,8 +668,7 @@ export async function getDiscounts(params?: {
         minQuantity: normaliseRuleValue(quantityRule?.values?.[0]) ?? null,
         minOrderAmount: normaliseRuleValue(subtotalRule?.values?.[0]) ?? 0,
         maxUses: campaign?.budget?.limit ?? null,
-        usedCount: d.usage_count ?? 0,
-        // Dates live on campaign, not the top-level promotion.
+        usedCount: campaign?.budget?.used ?? 0,
         startsAt: campaign?.starts_at
           ? new Date(campaign.starts_at).toISOString().split('T')[0]
           : '',

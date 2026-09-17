@@ -496,11 +496,6 @@ function buildPromotionPayload(
     form.maxUses
   const campaign = hasCampaign
     ? {
-        // When editing a promotion that already has a campaign, pass its id
-        // so Medusa updates that campaign in place instead of trying to
-        // create a brand new one with a name that's already taken by the
-        // existing campaign — this was the cause of "Failed to update
-        // discount" on save.
         ...(existingCampaignId ? { id: existingCampaignId } : {}),
         name: form.code,
         ...(form.description
@@ -627,10 +622,6 @@ function AddDiscountPageContent() {
   useEffect(() => {
     loadGroups()
   }, [])
-  // Customer segments (VIP, Active, At Risk, ...) — same definitions as the
-  // Customers > Segments tab. These aren't real Medusa customer groups, so
-  // "using" one here creates (or reuses) an actual group with that segment's
-  // current members, which is what the discount engine can target.
   const [availableSegments, setAvailableSegments] = useState<
     {
       id: string
@@ -661,8 +652,6 @@ function AddDiscountPageContent() {
     customerCount: number
     customers: { id: string; name: string; email: string }[]
   }) => {
-    // A group for this segment already exists (e.g. created earlier) —
-    // just toggle it on/off rather than creating a duplicate.
     const existingGroup = availableGroups.find((g) => g.name === segment.label)
     if (existingGroup) {
       toggleSelectedGroup({ id: existingGroup.id, name: existingGroup.name })
@@ -690,7 +679,10 @@ function AddDiscountPageContent() {
         customerCount: segment.customers.length,
       }
       setAvailableGroups((prev) => [...prev, newGroup])
-      setSelectedGroups((prev) => [...prev, { id: newGroup.id, name: newGroup.name }])
+      setSelectedGroups((prev) => [
+        ...prev,
+        { id: newGroup.id, name: newGroup.name },
+      ])
     } catch {
       setSaveError('Failed to create group from segment')
     } finally {
@@ -698,6 +690,9 @@ function AddDiscountPageContent() {
     }
   }
   const [autoRules, setAutoRules] = useState<AutoRule[]>([])
+  const [minReqType, setMinReqType] = useState<'none' | 'amount' | 'quantity'>(
+    'none',
+  )
   const [autoEnabled, setAutoEnabled] = useState(false)
   const [productModalRuleId, setProductModalRuleId] = useState<string | null>(
     null,
@@ -851,7 +846,115 @@ function AddDiscountPageContent() {
           customerEligibility: customerGroupRule ? 'specific' : 'all',
         }))
         setAutoEnabled(!!p.is_automatic)
+        setMinReqType(
+          subtotalRule && !isQuantityDiscount
+            ? 'amount'
+            : quantityRule && !isQuantityDiscount
+              ? 'quantity'
+              : 'none',
+        )
         setExistingCampaignId(p.campaign?.id ?? null)
+
+        if (p.is_automatic && !isQuantityDiscount) {
+          const restoredRules: AutoRule[] = []
+
+          if (subtotalRule) {
+            restoredRules.push({
+              id: `restored-min_amount-${subtotalRule.id ?? Date.now()}`,
+              type: 'min_amount',
+              value: String(
+                Number(
+                  subtotalRule.values?.[0]?.value ??
+                    subtotalRule.values?.[0] ??
+                    '',
+                ),
+              ),
+            })
+          }
+          if (quantityRule) {
+            restoredRules.push({
+              id: `restored-min_quantity-${quantityRule.id ?? Date.now()}`,
+              type: 'min_quantity',
+              value: String(
+                quantityRule.values?.[0]?.value ??
+                  quantityRule.values?.[0] ??
+                  '',
+              ),
+            })
+          }
+
+          const productRule = (p.rules ?? []).find(
+            (r: any) => r.attribute === 'product_id',
+          )
+          if (productRule?.values?.length) {
+            const productIds: string[] = productRule.values.map(
+              (v: any) => v.value ?? v,
+            )
+            let selectedProducts: {
+              id: string
+              title: string
+              thumbnail?: string
+            }[] = []
+            try {
+              const results = await Promise.all(
+                productIds.map(async (pid: string) => {
+                  const r = await fetch(`/api/admin/products/${pid}`)
+                  if (!r.ok) return { id: pid, title: pid }
+                  const d = await r.json()
+                  const prod = d.product ?? d
+                  return {
+                    id: pid,
+                    title: prod.title ?? pid,
+                    thumbnail: prod.thumbnail ?? undefined,
+                  }
+                }),
+              )
+              selectedProducts = results
+            } catch {
+              selectedProducts = productIds.map((pid) => ({
+                id: pid,
+                title: pid,
+              }))
+            }
+            restoredRules.push({
+              id: `restored-specific_product-${productRule.id ?? Date.now()}`,
+              type: 'specific_product',
+              value: '',
+              selectedProducts,
+            })
+          }
+
+          const categoryRule = (p.rules ?? []).find(
+            (r: any) => r.attribute === 'product_category_id',
+          )
+          if (categoryRule?.values?.length) {
+            restoredRules.push({
+              id: `restored-specific_category-${categoryRule.id ?? Date.now()}`,
+              type: 'specific_category',
+              value: String(
+                categoryRule.values?.[0]?.value ??
+                  categoryRule.values?.[0] ??
+                  '',
+              ),
+            })
+          }
+
+          const firstOrderRule = (p.rules ?? []).find(
+            (r: any) =>
+              r.attribute === 'customer_order_count' &&
+              r.operator === 'eq' &&
+              (r.values ?? []).some((v: any) => String(v?.value ?? v) === '0'),
+          )
+          if (firstOrderRule) {
+            restoredRules.push({
+              id: `restored-first_order-${firstOrderRule.id ?? Date.now()}`,
+              type: 'first_order',
+              value: '',
+            })
+          }
+
+          if (!cancelled) setAutoRules(restoredRules)
+        }
         if (customerGroupRule?.values?.length) {
           const ids: string[] = customerGroupRule.values.map(
             (v: any) => v.value ?? v,
@@ -1346,7 +1449,13 @@ function AddDiscountPageContent() {
                 checked={autoEnabled}
                 onChange={() => {
                   setAutoEnabled((v) => !v)
-                  if (autoEnabled) setAutoRules([])
+                  if (autoEnabled) {
+                    setAutoRules([])
+                  } else {
+                    update('minOrderAmount', '')
+                    update('minQuantity', '')
+                    setMinReqType('none')
+                  }
                 }}
               />
             </div>
@@ -1512,93 +1621,93 @@ function AddDiscountPageContent() {
           </SectionCard>
 
           {}
-          <SectionCard>
-            <SectionTitle>Minimum Requirements</SectionTitle>
-            <div className='space-y-2.5'>
-              {[
-                {
-                  id: 'none',
-                  label: 'No minimum requirements',
-                },
-                {
-                  id: 'amount',
-                  label: 'Minimum purchase amount (£)',
-                },
-                {
-                  id: 'quantity',
-                  label: 'Minimum quantity of items',
-                },
-              ].map((opt) => {
-                const isChecked =
-                  opt.id === 'none'
-                    ? !form.minOrderAmount && !form.minQuantity
-                    : opt.id === 'amount'
-                      ? !!form.minOrderAmount
-                      : !!form.minQuantity
-                return (
-                  <label
-                    key={opt.id}
-                    className={`flex items-start gap-3 cursor-pointer p-3.5 border rounded-xl transition-all duration-150 ${isChecked ? 'border-[#008060]/30 bg-[#F2F7F5]' : 'border-[#E1E3E5] hover:bg-[#FAFAFA]'}`}
-                  >
-                    <input
-                      type='radio'
-                      name='minReq'
-                      checked={isChecked}
-                      onChange={() => {
-                        if (opt.id === 'none') {
-                          update('minOrderAmount', '')
-                          update('minQuantity', '')
-                        } else if (opt.id === 'amount') {
-                          update('minQuantity', '')
-                          update('minOrderAmount', '999')
-                        } else {
-                          update('minOrderAmount', '')
-                          update('minQuantity', '2')
-                        }
-                      }}
-                      className='mt-0.5 accent-[#008060] w-4 h-4 shrink-0'
-                    />
-                    <div className='flex-1'>
-                      <span className='text-[13px] text-[#202223]'>
-                        {opt.label}
-                      </span>
-                      {opt.id === 'amount' && form.minOrderAmount && (
-                        <div className='mt-2.5 max-w-[180px]'>
-                          <Input
-                            prefix='£'
-                            type='number'
-                            value={form.minOrderAmount}
-                            onChange={(e) =>
-                              update(
-                                'minOrderAmount',
-                                (e.target as HTMLInputElement).value,
-                              )
-                            }
-                            min='0'
-                          />
-                        </div>
-                      )}
-                      {opt.id === 'quantity' && form.minQuantity && (
-                        <div className='mt-2.5 max-w-[180px]'>
-                          <Input
-                            type='number'
-                            value={form.minQuantity}
-                            onChange={(e) =>
-                              update(
-                                'minQuantity',
-                                (e.target as HTMLInputElement).value,
-                              )
-                            }
-                            min='1'
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </label>
-                )
-              })}
-            </div>
-          </SectionCard>
+          {!autoEnabled && (
+            <SectionCard>
+              <SectionTitle>Minimum Requirements</SectionTitle>
+              <div className='space-y-2.5'>
+                {[
+                  {
+                    id: 'none',
+                    label: 'No minimum requirements',
+                  },
+                  {
+                    id: 'amount',
+                    label: 'Minimum purchase amount (£)',
+                  },
+                  {
+                    id: 'quantity',
+                    label: 'Minimum quantity of items',
+                  },
+                ].map((opt) => {
+                  const isChecked = opt.id === minReqType
+                  return (
+                    <label
+                      key={opt.id}
+                      className={`flex items-start gap-3 cursor-pointer p-3.5 border rounded-xl transition-all duration-150 ${isChecked ? 'border-[#008060]/30 bg-[#F2F7F5]' : 'border-[#E1E3E5] hover:bg-[#FAFAFA]'}`}
+                    >
+                      <input
+                        type='radio'
+                        name='minReq'
+                        checked={isChecked}
+                        onChange={() => {
+                          setMinReqType(
+                            opt.id as 'none' | 'amount' | 'quantity',
+                          )
+                          if (opt.id === 'none') {
+                            update('minOrderAmount', '')
+                            update('minQuantity', '')
+                          } else if (opt.id === 'amount') {
+                            update('minQuantity', '')
+                            update('minOrderAmount', '999')
+                          } else {
+                            update('minOrderAmount', '')
+                            update('minQuantity', '2')
+                          }
+                        }}
+                        className='mt-0.5 accent-[#008060] w-4 h-4 shrink-0'
+                      />
+                      <div className='flex-1'>
+                        <span className='text-[13px] text-[#202223]'>
+                          {opt.label}
+                        </span>
+                        {opt.id === 'amount' && minReqType === 'amount' && (
+                          <div className='mt-2.5 max-w-[180px]'>
+                            <Input
+                              prefix='£'
+                              type='number'
+                              value={form.minOrderAmount}
+                              onChange={(e) =>
+                                update(
+                                  'minOrderAmount',
+                                  (e.target as HTMLInputElement).value,
+                                )
+                              }
+                              min='0'
+                            />
+                          </div>
+                        )}
+                        {opt.id === 'quantity' && minReqType === 'quantity' && (
+                          <div className='mt-2.5 max-w-[180px]'>
+                            <Input
+                              type='number'
+                              value={form.minQuantity}
+                              onChange={(e) =>
+                                update(
+                                  'minQuantity',
+                                  (e.target as HTMLInputElement).value,
+                                )
+                              }
+                              min='1'
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          )}
 
           {}
           <SectionCard>

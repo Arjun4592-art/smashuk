@@ -4,7 +4,6 @@ import { safeJson } from '@/lib/api/safe-json'
 
 const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 
-// ─── GET /api/admin/discounts/[id] ───────────────────────────────────────────
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -16,9 +15,12 @@ export async function GET(
   }
 
   try {
-    const res = await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
-      headers: { Authorization: authorization },
-    })
+    const res = await fetch(
+      `${MEDUSA_URL}/admin/promotions/${id}?fields=*rules,*application_method,*campaign,*campaign.budget`,
+      {
+        headers: { Authorization: authorization },
+      },
+    )
     const data = await safeJson(
       res,
       'app/api/admin/discounts/[id]/route.ts GET',
@@ -36,7 +38,6 @@ export async function GET(
   }
 }
 
-// ─── PATCH /api/admin/discounts/[id] ─────────────────────────────────────────
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -50,7 +51,6 @@ export async function PATCH(
   try {
     const body = await req.json()
 
-    // ── 1. Campaign upsert ──────────────────────────────────────────────────
     let campaignId: string | undefined
 
     if (body.campaign) {
@@ -99,7 +99,6 @@ export async function PATCH(
       }
     }
 
-    // ── 2. Build promotion patch payload ────────────────────────────────────
     const { status, campaign, ...rest } = body
 
     const promotionPayload: any = {
@@ -111,7 +110,6 @@ export async function PATCH(
     if (rest.rules?.length > 0) promotionPayload.rules = rest.rules
     if (campaignId) promotionPayload.campaign_id = campaignId
 
-    // ── 3. PATCH the promotion ──────────────────────────────────────────────
     const res = await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
       method: 'POST',
       headers: {
@@ -131,7 +129,6 @@ export async function PATCH(
       )
     }
 
-    // ── 4. Sync status separately ───────────────────────────────────────────
     if (status !== undefined) {
       try {
         await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
@@ -154,7 +151,6 @@ export async function PATCH(
   }
 }
 
-// ─── DELETE /api/admin/discounts/[id] ────────────────────────────────────────
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -166,21 +162,69 @@ export async function DELETE(
   }
 
   try {
+    let campaignId: string | undefined
+    try {
+      const lookupRes = await fetch(
+        `${MEDUSA_URL}/admin/promotions/${id}?fields=id,campaign.id`,
+        { headers: { Authorization: authorization } },
+      )
+      if (lookupRes.ok) {
+        const lookupData = await safeJson(
+          lookupRes,
+          'app/api/admin/discounts/[id]/route.ts DELETE lookup',
+        )
+        campaignId = lookupData?.promotion?.campaign?.id
+      }
+    } catch (lookupErr: any) {
+      console.warn(
+        '[API] discount DELETE campaign lookup failed:',
+        lookupErr.message,
+      )
+    }
+
     const res = await fetch(`${MEDUSA_URL}/admin/promotions/${id}`, {
       method: 'DELETE',
       headers: { Authorization: authorization },
     })
-    if (res.status === 204 || res.status === 200) {
-      return NextResponse.json({ deleted: true })
+    if (res.status !== 204 && res.status !== 200) {
+      const data = await safeJson(
+        res,
+        'app/api/admin/discounts/[id]/route.ts DELETE',
+      )
+      return NextResponse.json(
+        { error: data.message ?? 'Failed to delete discount' },
+        { status: res.status },
+      )
     }
-    const data = await safeJson(
-      res,
-      'app/api/admin/discounts/[id]/route.ts DELETE',
-    )
-    return NextResponse.json(
-      { error: data.message ?? 'Failed to delete discount' },
-      { status: res.status },
-    )
+
+    if (campaignId) {
+      try {
+        const campaignRes = await fetch(
+          `${MEDUSA_URL}/admin/campaigns/${campaignId}?fields=id,promotions.id`,
+          { headers: { Authorization: authorization } },
+        )
+        if (campaignRes.ok) {
+          const campaignData = await safeJson(
+            campaignRes,
+            'app/api/admin/discounts/[id]/route.ts DELETE campaign check',
+          )
+          const remainingPromotions = campaignData?.campaign?.promotions ?? []
+          if (remainingPromotions.length === 0) {
+            await fetch(`${MEDUSA_URL}/admin/campaigns/${campaignId}`, {
+              method: 'DELETE',
+              headers: { Authorization: authorization },
+            })
+          }
+        }
+      } catch (cleanupErr: any) {
+        console.warn(
+          '[API] discount DELETE campaign cleanup failed:',
+          cleanupErr.message,
+        )
+      }
+    }
+
+    return NextResponse.json({ deleted: true })
   } catch (err: any) {
     console.error('[API] discount DELETE error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })

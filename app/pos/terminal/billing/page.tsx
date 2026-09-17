@@ -1,8 +1,14 @@
 'use client'
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { usePOSStore } from '@/store/posStore'
 import { useAuthStore } from '@/store/authStore'
+import {
+  fetchPOSIndex,
+  fetchPOSDetailsForVariants,
+  type POSIndexEntry,
+  type POSDetailEntry,
+} from '@/lib/api/pos'
 import ProductSearch from '@/components/pos/ProductSearch'
 import CategoryFilter from '@/components/pos/CategoryFilter'
 import ProductGrid, { POSProduct } from '@/components/pos/ProductGrid'
@@ -107,9 +113,11 @@ export default function BillingPage() {
     orderNote,
     fulfillmentType,
     shippingAddress,
+    // Kept in the store and still loaded in the background (see the
+    // effect below) for other POS surfaces (returns, saved carts,
+    // analytics) that still read the full catalogue — just no longer used
+    // for this screen's own rendering, which is index/details-driven now.
     products,
-    medusaLoading,
-    medusaError,
     soundOnScan,
     autoPrintReceipt,
     addItem,
@@ -120,7 +128,6 @@ export default function BillingPage() {
     voidSale,
     completeOrder,
     addRevenueEntry,
-    syncMedusaProducts,
     loadMedusaProducts,
   } = usePOSStore()
   useEffect(() => {
@@ -134,24 +141,91 @@ export default function BillingPage() {
       }
     : null
   useEffect(() => {
-    // Only fetches if products aren't already loaded — avoids re-pulling the
-    // full ~1700-product catalog (with heavy inventory fields) every time
-    // this page mounts/is navigated back to. Use the retry/refresh button
-    // (syncMedusaProducts) for an explicit forced resync.
-    loadMedusaProducts()
+    // Still triggered here (not removed) because other POS surfaces
+    // (returns, saved carts, analytics) read the full catalogue from this
+    // store and expect billing to have kicked off the load, same as
+    // before. This screen itself no longer waits on it or reads from it —
+    // see the index/details state below.
+    //
+    // Delayed a few seconds rather than fired immediately: a DevTools
+    // capture showed this full-catalogue request (still heavy — it's the
+    // deep inventory join across ~1700 products, not something touched
+    // today) competing for the same connection as the index/details calls
+    // that actually matter for this screen appearing quickly. Firing it
+    // after the critical path has had a moment to complete means it no
+    // longer competes with what the cashier is actually waiting on.
+    const timer = setTimeout(() => {
+      loadMedusaProducts()
+    }, 3000)
+    return () => clearTimeout(timer)
   }, [loadMedusaProducts])
+  // ── Search-index architecture ──────────────────────────────────────────
+  // Replaces reading the full ~1700-product `products` array (from
+  // usePOSStore, above) for search/scan/category/size filtering on this
+  // screen. See app/api/pos/index/route.ts for the full reasoning — short
+  // version: that full-catalogue load is what made this screen take 30+
+  // seconds, and Medusa's own admin search (q=) doesn't cover variant SKU
+  // (a confirmed, open Medusa limitation), so a naive "just search Medusa
+  // directly" rebuild would have silently broken barcode scanning. Instead:
+  //   1. `indexEntries` — name/sku/category/size only, no price or stock,
+  //      loaded once, small enough to be fast and to filter instantly.
+  //   2. Whatever the current search/category/size narrows `indexEntries`
+  //      down to, `detailsByVariantId` fetches REAL price + live stock for
+  //      just that narrow set — never the whole catalogue.
+  const [indexEntries, setIndexEntries] = useState<POSIndexEntry[]>([])
+  const [indexLoading, setIndexLoading] = useState(true)
+  const [indexError, setIndexError] = useState<string | null>(null)
+  const [detailsByVariantId, setDetailsByVariantId] = useState<
+    Map<string, POSDetailEntry>
+  >(new Map())
+  // Set whenever EITHER the index or a details fetch had to fall back to
+  // the local offline cache — i.e. the shop's connection to the server
+  // itself is down, not just Medusa being slow. This must stay visible
+  // and explicit: prices/stock shown while this is true may be minutes
+  // old, and staff need to know that, not just see numbers that look
+  // normal. Cleared the next time either fetch succeeds live.
+  const [offlineSince, setOfflineSince] = useState<number | null>(null)
+  // Guards against a real bug a DevTools capture caught: this effect fired
+  // /api/pos/index TWICE on one page load (React StrictMode double-invoking
+  // effects in dev is the usual cause — same class of bug already fixed in
+  // store/posStore.ts's loadMedusaProducts). A `useState` guard isn't
+  // reliable here because both near-simultaneous calls can read the old
+  // state before either has set it; a ref is checked and set synchronously,
+  // so the second call sees the first one already in flight.
+  const indexLoadInFlight = useRef(false)
+  const loadIndex = useCallback(async () => {
+    if (indexLoadInFlight.current) return
+    indexLoadInFlight.current = true
+    setIndexLoading(true)
+    setIndexError(null)
+    try {
+      const { entries, fromCache, cachedAt } = await fetchPOSIndex()
+      setIndexEntries(entries)
+      setOfflineSince(fromCache ? (cachedAt ?? Date.now()) : null)
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to load products'
+      console.error('[POS] Index load failed:', message)
+      setIndexError(message)
+    } finally {
+      setIndexLoading(false)
+      indexLoadInFlight.current = false
+    }
+  }, [])
+  useEffect(() => {
+    loadIndex()
+  }, [loadIndex])
+  // All of this now runs over `indexEntries` (name/sku/category/size only)
+  // instead of the full `products` catalogue — same exact matching logic as
+  // before, just against a far smaller, instantly-available object.
   const CATEGORIES = Array.from(
     new Set(
-      products
+      indexEntries
         .map((p) => p.category)
         .filter((c): c is string => Boolean(c) && c !== 'Uncategorized'),
     ),
   ).sort((a, b) => a.localeCompare(b))
-  // Sizes are scoped to the selected category so the chip row only ever
-  // shows sizes that actually exist among the products currently in view.
-  // Grouped by their source option (Size / Size (UK) / Weight / Grip Size
-  // ...) so unrelated units don't get mixed into one flat list.
-  const productsInCat = products.filter(
+  const productsInCat = indexEntries.filter(
     (p) => cat === 'All' || p.category === cat,
   )
   const SIZE_TITLES = Array.from(
@@ -177,18 +251,84 @@ export default function BillingPage() {
       setSizeGroup(null)
     }
   }, [SIZE_TITLES.join(','), sizeGroup])
-  const filtered = products.filter((p) => {
-    const matchCat = cat === 'All' || p.category === cat
-    const matchSize =
-      size === 'All sizes' ||
-      (p.size === size && p.sizeOptionTitle === sizeTitle)
+  // Cap the default ("All", no search) view — fetching live price+stock for
+  // literally the whole catalogue on an unfiltered screen would defeat the
+  // entire point of this rework. Typing a search or picking a category
+  // narrows well below this in practice; this cap only bites on the
+  // deliberately-broad default view.
+  const MAX_VISIBLE = 60
+  const matchedIndexEntries = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const matchSearch =
-      !q ||
-      (p.name ?? '').toLowerCase().includes(q) ||
-      (p.sku ?? '').toLowerCase().includes(q)
-    return matchCat && matchSize && matchSearch
-  })
+    return indexEntries.filter((p) => {
+      const matchCat = cat === 'All' || p.category === cat
+      const matchSize =
+        size === 'All sizes' ||
+        (p.size === size && p.sizeOptionTitle === sizeTitle)
+      const matchSearch =
+        !q ||
+        (p.name ?? '').toLowerCase().includes(q) ||
+        (p.sku ?? '').toLowerCase().includes(q)
+      return matchCat && matchSize && matchSearch
+    })
+  }, [indexEntries, cat, size, sizeTitle, search])
+  const visibleIndexEntries = matchedIndexEntries.slice(0, MAX_VISIBLE)
+  const hiddenCount = matchedIndexEntries.length - visibleIndexEntries.length
+  // Debounced: fetch live price+stock only for what's actually about to be
+  // shown, and only after typing settles for a moment, so scanning through
+  // a search string doesn't fire a request per keystroke.
+  useEffect(() => {
+    const productIds = Array.from(
+      new Set(visibleIndexEntries.map((e) => e.productId)),
+    )
+    const variantIds = visibleIndexEntries.map((e) => e.variantId)
+    if (productIds.length === 0) return
+    const timer = setTimeout(() => {
+      fetchPOSDetailsForVariants(productIds, variantIds)
+        .then(({ byVariantId, fromCache, cachedAt }) => {
+          setDetailsByVariantId((prev) => {
+            const merged = new Map(prev)
+            for (const [k, v] of byVariantId) merged.set(k, v)
+            return merged
+          })
+          if (fromCache) setOfflineSince(cachedAt ?? Date.now())
+          else setOfflineSince(null)
+        })
+        .catch((err) => {
+          console.error('[POS] Details fetch failed:', err)
+        })
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [visibleIndexEntries.map((e) => e.productId).join(',')])
+  const detailsLoading =
+    visibleIndexEntries.length > 0 &&
+    visibleIndexEntries.some((e) => !detailsByVariantId.has(e.variantId))
+  const STOCK_PENDING_PLACEHOLDER = 9999
+  function toPOSProduct(entry: POSIndexEntry): POSProduct {
+    const detail = detailsByVariantId.get(entry.variantId)
+    return {
+      id: entry.productId,
+      name: entry.name,
+      brand: entry.brand,
+      sku: entry.sku,
+      price: detail?.price ?? 0,
+      // Optimistic placeholder until the real count lands — same reasoning
+      // as the /api/pos/products fast/stock split: POS already lets staff
+      // sell an item Medusa shows as out of stock, so a brief "looks
+      // available" beats a brief, wrong "out of stock".
+      stock: detail?.stock ?? STOCK_PENDING_PLACEHOLDER,
+      category: entry.category,
+      image: detail?.image,
+      channel: detail?.channel ?? 'both',
+      variantId: entry.variantId,
+      size: entry.size,
+      sizeOptionTitle: entry.sizeOptionTitle,
+      pricePending: !detail,
+    }
+  }
+  const filtered = useMemo(
+    () => visibleIndexEntries.map(toPOSProduct),
+    [visibleIndexEntries, detailsByVariantId],
+  )
   // The size filter chips above already let staff narrow to one exact
   // variant when they know it, but with no size picked `filtered` still
   // has one row per variant — a shoe in 6 sizes showed as 6 identical
@@ -220,14 +360,20 @@ export default function BillingPage() {
   const [variantPickerFor, setVariantPickerFor] = useState<POSProduct[] | null>(
     null,
   )
-  const handleScanSubmit = (raw: string) => {
+  const [scanLookupPending, setScanLookupPending] = useState(false)
+  const handleScanSubmit = async (raw: string) => {
     const q = raw.trim().toLowerCase()
     if (!q) return
+    // Matching runs over indexEntries (name/sku/category/size only) —
+    // identical logic to before, just against the small index instead of
+    // the full catalogue. This is also why scanning stays reliable: it
+    // never depends on Medusa's own admin search, which doesn't cover SKU
+    // (see app/api/pos/index/route.ts).
     const bySku =
-      products.find((p) => p.sku.toLowerCase() === q) ??
-      products.find((p) => p.sku.toLowerCase().includes(q))
-    const byExactName = products.find((p) => p.name.toLowerCase() === q)
-    const partialMatches = products.filter(
+      indexEntries.find((p) => p.sku.toLowerCase() === q) ??
+      indexEntries.find((p) => p.sku.toLowerCase().includes(q))
+    const byExactName = indexEntries.find((p) => p.name.toLowerCase() === q)
+    const partialMatches = indexEntries.filter(
       (p) =>
         (p.name ?? '').toLowerCase().includes(q) ||
         (p.sku ?? '').toLowerCase().includes(q),
@@ -245,16 +391,66 @@ export default function BillingPage() {
       })
       return
     }
-    handleAdd(match)
-    setSearch('')
-    if (match.stock <= 0) {
-      toast(`${match.name} added — out of stock, selling anyway`, {
-        duration: 1800,
+    // A scan is about to be sold — it needs REAL price and stock, not the
+    // index (which carries neither) and not a placeholder. This is a small,
+    // single-product Medusa call, not the full catalogue, so it's fast even
+    // though it's a genuine network round trip.
+    setScanLookupPending(true)
+    try {
+      const { byVariantId, fromCache, cachedAt } =
+        await fetchPOSDetailsForVariants([match.productId], [match.variantId])
+      const detail = byVariantId.get(match.variantId)
+      if (!detail) {
+        toast.error(`Could not confirm price for ${match.name}`, {
+          description: fromCache
+            ? "Offline, and this item isn't in the local cache yet — try again once reconnected."
+            : 'Not added — try scanning again.',
+        })
+        return
+      }
+      setDetailsByVariantId((prev) =>
+        new Map(prev).set(match.variantId, detail),
+      )
+      if (fromCache) setOfflineSince(cachedAt ?? Date.now())
+      const posProduct: POSProduct = {
+        id: match.productId,
+        name: match.name,
+        brand: match.brand,
+        sku: match.sku,
+        price: detail.price,
+        stock: detail.stock,
+        category: match.category,
+        image: detail.image,
+        channel: detail.channel,
+        variantId: match.variantId,
+        size: match.size,
+        sizeOptionTitle: match.sizeOptionTitle,
+      }
+      handleAdd(posProduct)
+      setSearch('')
+      // A scan while offline is the one moment this needs to be louder than
+      // the background banner — this specific item is about to be sold at
+      // a price that could be minutes old.
+      if (fromCache) {
+        toast(`${match.name} added at last-known price — you're offline`, {
+          duration: 3000,
+        })
+      } else if (detail.stock <= 0) {
+        toast(`${match.name} added — out of stock, selling anyway`, {
+          duration: 1800,
+        })
+      } else {
+        toast.success(`${match.name} added`, {
+          duration: 1200,
+        })
+      }
+    } catch (err) {
+      console.error('[POS] Scan detail lookup failed:', err)
+      toast.error(`Could not add ${match.name}`, {
+        description: 'Network error confirming price — try again.',
       })
-    } else {
-      toast.success(`${match.name} added`, {
-        duration: 1200,
-      })
+    } finally {
+      setScanLookupPending(false)
     }
   }
   const handleAdd = useCallback(
@@ -643,7 +839,35 @@ export default function BillingPage() {
     >
       {}
       <div className='flex-1 min-h-0 flex flex-col overflow-hidden p-3 gap-2.5'>
-        {medusaError && (
+        {offlineSince !== null && (
+          <div
+            className='flex items-center justify-between px-3 py-2 rounded-lg text-xs'
+            style={{
+              background: '#FFF8E5',
+              border: '1px solid #F5D67A',
+              color: '#946200',
+            }}
+          >
+            <span>
+              You're offline — showing prices/stock last synced{' '}
+              {new Date(offlineSince).toLocaleTimeString('en-GB', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+              . Card payments will not work until reconnected.
+            </span>
+            <button
+              onClick={() => {
+                loadIndex()
+              }}
+              className='font-medium underline ml-2 shrink-0'
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {indexError && (
           <div
             className='flex items-center justify-between px-3 py-2 rounded-lg text-xs'
             style={{
@@ -652,9 +876,9 @@ export default function BillingPage() {
               color: '#D82C0D',
             }}
           >
-            <span>Products failed to load: {medusaError}</span>
+            <span>Products failed to load: {indexError}</span>
             <button
-              onClick={() => syncMedusaProducts()}
+              onClick={() => loadIndex()}
               className='font-medium underline ml-2'
             >
               Retry
@@ -662,7 +886,7 @@ export default function BillingPage() {
           </div>
         )}
 
-        {medusaLoading && (
+        {indexLoading && (
           <div
             className='flex items-center gap-2 px-3 py-2 rounded-lg text-xs'
             style={{
@@ -751,9 +975,15 @@ export default function BillingPage() {
           />
         )}
         <div className='flex-1 min-h-0 overflow-y-auto'>
+          {hiddenCount > 0 && (
+            <p className='text-[11px] px-1 pb-1.5' style={{ color: '#8C9196' }}>
+              Showing {MAX_VISIBLE} of {matchedIndexEntries.length} matches —
+              type to search or pick a category to narrow it down.
+            </p>
+          )}
           <ProductGrid
             products={gridProducts}
-            isLoading={medusaLoading}
+            isLoading={indexLoading}
             onAdd={(p) => {
               const group = productGroups.get(p.id) ?? [p]
               if (group.length > 1) {

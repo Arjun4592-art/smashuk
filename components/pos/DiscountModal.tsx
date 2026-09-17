@@ -7,18 +7,9 @@ interface Props {
   onClose: () => void
 }
 type DiscountType = 'percent' | 'fixed' | 'coupon'
-const COUPON_ERROR_MESSAGES: Record<string, string> = {
-  not_started: 'This coupon is not active yet',
-  expired: 'This coupon has expired',
-  min_amount: 'Order total is below this coupon\u2019s minimum amount',
-  min_quantity: 'Cart doesn\u2019t meet this coupon\u2019s minimum quantity',
-  customer_group: 'This coupon is restricted to specific customers',
-}
 export default function DiscountModal({ onClose }: Props) {
   const {
     subtotal,
-    itemCount,
-    customer,
     customDiscount,
     couponCode,
     couponDiscount,
@@ -52,15 +43,9 @@ export default function DiscountModal({ onClose }: Props) {
       setCheckingCoupon(true)
       setCouponError('')
       try {
-        const result = await validateCoupon(code, {
-          subtotal,
-          quantity: itemCount,
-          customerId: customer?.id,
-        })
+        const result = await validateCoupon(code)
         if (!result.valid || !result.type || result.value == null) {
-          setCouponError(
-            COUPON_ERROR_MESSAGES[result.reason ?? ''] ?? 'Invalid coupon code',
-          )
+          setCouponError('Invalid coupon code')
           return
         }
         const discountAmt =

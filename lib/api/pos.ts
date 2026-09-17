@@ -1,3 +1,10 @@
+import {
+  saveIndexSnapshot,
+  loadIndexSnapshot,
+  saveDetailEntries,
+  loadDetailEntries,
+} from '@/lib/pos/offline-cache'
+
 export interface POSProduct {
   id: string
   name: string
@@ -257,12 +264,17 @@ export async function fetchPOSStockUpdates(
   }
   return stockByVariantId
 }
-/** Applies a fetchPOSStockUpdates() result onto an existing POSProduct list. */
-export function mergePOSStock(
-  products: POSProduct[],
-  stockByVariantId: Map<string, number>,
-): POSProduct[] {
+/**
+ * Applies a fetchPOSStockUpdates() result onto an existing product list.
+ * Generic so it works for both the full POSProduct shape used here and the
+ * trimmed-down POSCatalogProduct shape the store keeps in state — only
+ * `variantId`/`stock`/`stockPending` are actually read or written.
+ */
+export function mergePOSStock<
+  T extends { variantId?: string; stock: number; stockPending?: boolean },
+>(products: T[], stockByVariantId: Map<string, number>): T[] {
   return products.map((p) => {
+    if (!p.variantId) return p
     const stock = stockByVariantId.get(p.variantId)
     return stock === undefined ? p : { ...p, stock, stockPending: false }
   })
@@ -589,5 +601,167 @@ export async function emailPOSReceipt(payload: EmailReceiptPayload): Promise<{
     throw new Error(
       err instanceof Error ? err.message : 'Failed to email receipt',
     )
+  }
+}
+// ──────────────────────────────────────────────────────────────────────
+// Search-index architecture for the billing screen (see
+// app/api/pos/index/route.ts for the full reasoning — short version:
+// Medusa's admin q= search doesn't cover variant SKU, which barcode
+// scanning depends on, so search/scan/category/size filtering all run
+// over this tiny index client-side instead of relying on that).
+// ──────────────────────────────────────────────────────────────────────
+export interface POSIndexEntry {
+  productId: string
+  variantId: string
+  sku: string
+  name: string
+  brand: string
+  category: string
+  size?: string
+  sizeOptionTitle?: string
+}
+export interface POSDetailEntry {
+  productId: string
+  variantId: string
+  price: number
+  stock: number
+  image?: string
+  channel: 'both' | 'online_only' | 'pos_only'
+}
+/** The full name/sku/category/size index — small, cacheable, fetched once. */
+export interface POSIndexResult {
+  entries: POSIndexEntry[]
+  /** True when this came from the local offline cache, not a live fetch. */
+  fromCache: boolean
+  /** ms-epoch the cached copy was last successfully refreshed, if offline. */
+  cachedAt: number | null
+}
+/**
+ * The name/sku/category/size index — small, cacheable, fetched once.
+ *
+ * On success, silently mirrors the result into IndexedDB. On failure (the
+ * shop's own connection is down, not just Medusa being slow — a genuinely
+ * unreachable /api/pos/index request), falls back to that mirror instead of
+ * leaving the billing screen with nothing to search. The caller (billing
+ * page) uses `fromCache`/`cachedAt` to show a clear "you're offline, this
+ * may be a few minutes old" banner — this must never be silent, since
+ * staff need to know they might be looking at a stale catalogue.
+ */
+export async function fetchPOSIndex(): Promise<POSIndexResult> {
+  try {
+    const res = await fetch('/api/pos/index', { method: 'GET' })
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}))
+      throw new Error(
+        errorData.error || `HTTP ${res.status}: Index fetch failed`,
+      )
+    }
+    const data = await res.json()
+    const entries: POSIndexEntry[] = Array.isArray(data.entries)
+      ? data.entries
+      : []
+    void saveIndexSnapshot(entries)
+    return { entries, fromCache: false, cachedAt: null }
+  } catch (err) {
+    const cached = await loadIndexSnapshot()
+    if (cached && cached.entries.length > 0) {
+      console.error(
+        '[POS] Index fetch failed, using offline cache from',
+        new Date(cached.savedAt ?? 0).toISOString(),
+        err,
+      )
+      return {
+        entries: cached.entries as POSIndexEntry[],
+        fromCache: true,
+        cachedAt: cached.savedAt,
+      }
+    }
+    throw err
+  }
+}
+export interface POSDetailsResult {
+  byVariantId: Map<string, POSDetailEntry>
+  fromCache: boolean
+  cachedAt: number | null
+}
+/**
+ * Live price + stock for a SPECIFIC, narrow set of product ids — whatever
+ * the current search/category/size filter over the index actually matched.
+ * Never call this with the whole catalogue's ids; it exists specifically
+ * because that's expensive and this isn't, for a small id list.
+ *
+ * On success, mirrors each result into IndexedDB (keyed by variant, with a
+ * timestamp). On failure, falls back to whatever's cached for the
+ * requested variants — which may be incomplete (a variant never
+ * successfully fetched before simply won't be in the result, same as
+ * "still loading" to every caller, so it correctly stays in the neutral
+ * pending state rather than showing a fabricated price). `fromCache` /
+ * `cachedAt` tell the caller to show an offline banner — this must never
+ * be silent, since a stale PRICE (unlike stock, which is already advisory
+ * everywhere in this app) could genuinely be wrong.
+ */
+export async function fetchPOSDetails(
+  productIds: string[],
+): Promise<POSDetailsResult> {
+  if (productIds.length === 0) {
+    return { byVariantId: new Map(), fromCache: false, cachedAt: null }
+  }
+  const unique = Array.from(new Set(productIds))
+  try {
+    const res = await fetch(
+      `/api/pos/details?ids=${unique.map(encodeURIComponent).join(',')}`,
+    )
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}))
+      throw new Error(
+        errorData.error || `HTTP ${res.status}: Details fetch failed`,
+      )
+    }
+    const data = await res.json()
+    const byVariantId = new Map<string, POSDetailEntry>()
+    const toCache: Record<string, POSDetailEntry> = {}
+    for (const entry of (data.entries ?? []) as POSDetailEntry[]) {
+      byVariantId.set(entry.variantId, entry)
+      toCache[entry.variantId] = entry
+    }
+    void saveDetailEntries(toCache)
+    return { byVariantId, fromCache: false, cachedAt: null }
+  } catch (err) {
+    console.error('[POS] Details fetch failed, trying offline cache:', err)
+    // We don't have the variant ids up front (only product ids), so pull
+    // whatever's cached under EACH requested product id's variants isn't
+    // possible without the index — instead, the cache is keyed by variant
+    // id directly (see saveDetailEntries above), so ask for exactly the
+    // variant ids the caller actually needs. Callers of fetchPOSDetails
+    // only have product ids at this point, so this cache lookup is done
+    // per-variant by the caller instead — see fetchPOSDetailsForVariants
+    // below, which billing/page.tsx uses for the cache-aware path.
+    throw err
+  }
+}
+/**
+ * Same as fetchPOSDetails, but keyed by variant id (not product id) so a
+ * failed network call can fall back to exactly the cached variants it
+ * needs. Use this from UI code; fetchPOSDetails stays as the thinner
+ * product-id-based primitive other callers may still want.
+ */
+export async function fetchPOSDetailsForVariants(
+  productIds: string[],
+  variantIds: string[],
+): Promise<POSDetailsResult> {
+  try {
+    return await fetchPOSDetails(productIds)
+  } catch (err) {
+    const cached = await loadDetailEntries(variantIds)
+    if (cached.size === 0) throw err
+    const byVariantId = new Map<string, POSDetailEntry>()
+    let oldestSavedAt: number | null = null
+    for (const [variantId, { detail, savedAt }] of cached) {
+      byVariantId.set(variantId, detail as POSDetailEntry)
+      if (oldestSavedAt === null || savedAt < oldestSavedAt) {
+        oldestSavedAt = savedAt
+      }
+    }
+    return { byVariantId, fromCache: true, cachedAt: oldestSavedAt }
   }
 }

@@ -19,6 +19,8 @@ export interface POSProduct {
   // product has more than one variant, so the tile can say "5 sizes"
   // instead of showing one specific (and misleading) size.
   variantCountOverride?: number
+  /** True while live price/stock is still being fetched for this tile. */
+  pricePending?: boolean
 }
 interface Props {
   products: POSProduct[]
@@ -87,8 +89,11 @@ export default function ProductGrid({ products, onAdd, isLoading }: Props) {
   return (
     <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2'>
       {products.map((p) => {
-        const isOut = p.stock === 0
-        const isLow = p.stock > 0 && p.stock <= 3
+        // price and stock arrive together from /api/pos/details, so
+        // pricePending covers both — avoids a misleading "9999 in stock" /
+        // false "Out of stock" during the brief window before it lands.
+        const isOut = !p.pricePending && p.stock === 0
+        const isLow = !p.pricePending && p.stock > 0 && p.stock <= 3
         return (
           <button
             key={p.variantId ?? p.id}
@@ -98,6 +103,7 @@ export default function ProductGrid({ products, onAdd, isLoading }: Props) {
                 ? `${p.name}${p.size ? ` — ${p.size}` : ''} (out of stock — will still be sold)`
                 : `${p.name}${p.size ? ` — ${p.size}` : ''}`
             }
+            disabled={p.pricePending}
             className='flex flex-col p-3 rounded-lg border text-left transition-all'
             style={{
               background: '#FFFFFF',
@@ -200,11 +206,17 @@ export default function ProductGrid({ products, onAdd, isLoading }: Props) {
             <p
               className='text-sm font-semibold mb-1'
               style={{
-                color: '#202223',
+                color: p.pricePending ? '#8C9196' : '#202223',
               }}
             >
-              {CURRENCY_SYMBOL}
-              {p.price.toLocaleString('en-GB')}
+              {p.pricePending ? (
+                '…'
+              ) : (
+                <>
+                  {CURRENCY_SYMBOL}
+                  {p.price.toLocaleString('en-GB')}
+                </>
+              )}
             </p>
 
             {}
@@ -226,13 +238,15 @@ export default function ProductGrid({ products, onAdd, isLoading }: Props) {
                     color: isOut ? '#D82C0D' : isLow ? '#B7791F' : '#6D7175',
                   }}
                 >
-                  {isOut
-                    ? 'Out of stock'
-                    : showStockCount
-                      ? isLow
-                        ? `Only ${p.stock} left`
-                        : `${p.stock} in stock`
-                      : ''}
+                  {p.pricePending
+                    ? ''
+                    : isOut
+                      ? 'Out of stock'
+                      : showStockCount
+                        ? isLow
+                          ? `Only ${p.stock} left`
+                          : `${p.stock} in stock`
+                        : ''}
                 </p>
               </div>
             )}

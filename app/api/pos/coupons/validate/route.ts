@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
+import {
+  customerHasPriorOrders,
+  isFirstOrderRule,
+} from '@/lib/api/customer-order-history'
 
 async function requirePosSession(): Promise<boolean> {
   const cookieStore = await cookies()
@@ -22,9 +26,6 @@ async function safeJson(res: Response) {
   }
 }
 
-// Medusa stores rule values as either plain scalars (right after create) or
-// as `{ id, value }` objects once they come back from the API — normalize
-// both shapes to a flat array of strings.
 function normalizeRuleValues(values: any[] | undefined): string[] {
   return (values ?? []).map((v) => (v && typeof v === 'object' ? v.value : v))
 }
@@ -48,7 +49,6 @@ function compareNumeric(
     case 'ne':
       return actual !== target
     default:
-      // Unknown operator — don't block on something we don't understand.
       return true
   }
 }
@@ -64,10 +64,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing coupon code' }, { status: 400 })
   }
 
-  // Order context the POS cart already has at the point of applying a
-  // coupon — used to check the promotion's rules/campaign window, since POS
-  // orders don't go through a real Medusa cart (see `/store/carts/:id/promotions`
-  // on the website checkout).
   const subtotalParam = params.get('subtotal')
   const quantityParam = params.get('quantity')
   const customerId = params.get('customerId')?.trim() || undefined
@@ -97,8 +93,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ valid: false }, { status: 200 })
     }
 
-    // The list endpoint doesn't reliably include rules/campaign, so fetch
-    // the full promotion the same way the dashboard discount editor does.
     const detailRes = await medusaServiceFetch(
       `/admin/promotions/${promoSummary.id}`,
     )
@@ -117,7 +111,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ valid: false }, { status: 200 })
     }
 
-    // --- Campaign date window ---
     const now = Date.now()
     const campaign = promo.campaign
     if (campaign?.starts_at && now < new Date(campaign.starts_at).getTime()) {
@@ -133,17 +126,10 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // --- Rule checks ---
-    // NOTE: `specific_product`, `specific_category` and `first_order` rules
-    // can't be verified here yet — POS orders don't build a real cart, so we
-    // don't have per-line-item data or order history at this point. Those
-    // rule types are intentionally skipped (not enforced) rather than
-    // rejecting every coupon that happens to use them. Fully covering them
-    // needs the bigger fix: routing POS checkout through a real Medusa cart
-    // and its `/store/carts/:id/promotions` endpoint, same as the website.
     const rules: any[] = promo.rules ?? []
     let needsCustomerGroupCheck = false
     let customerGroupSatisfied = false
+    let needsFirstOrderCheck = false
 
     for (const rule of rules) {
       const values = normalizeRuleValues(rule.values)
@@ -179,9 +165,6 @@ export async function GET(req: NextRequest) {
       if (rule.attribute === 'customer.groups.id') {
         needsCustomerGroupCheck = true
         if (!customerId || customerId.startsWith('local-')) {
-          // No real Medusa customer attached to the sale (either no
-          // customer selected, or a POS-only walk-in) — can't satisfy a
-          // customer-group-restricted coupon.
           continue
         }
         try {
@@ -201,6 +184,10 @@ export async function GET(req: NextRequest) {
           console.error('[POS] Coupon customer-group lookup failed:', groupErr)
         }
       }
+
+      if (isFirstOrderRule(rule)) {
+        needsFirstOrderCheck = true
+      }
     }
 
     if (needsCustomerGroupCheck && !customerGroupSatisfied) {
@@ -208,6 +195,22 @@ export async function GET(req: NextRequest) {
         { valid: false, reason: 'customer_group' },
         { status: 200 },
       )
+    }
+
+    if (needsFirstOrderCheck) {
+      if (!customerId || customerId.startsWith('local-')) {
+        return NextResponse.json(
+          { valid: false, reason: 'first_order' },
+          { status: 200 },
+        )
+      }
+      const hasOrders = await customerHasPriorOrders(customerId)
+      if (hasOrders) {
+        return NextResponse.json(
+          { valid: false, reason: 'first_order' },
+          { status: 200 },
+        )
+      }
     }
 
     return NextResponse.json({

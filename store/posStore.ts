@@ -118,6 +118,12 @@ export interface POSCatalogProduct {
   sku: string
   price: number
   stock: number
+  /**
+   * True only in the brief window between the fast phase rendering this
+   * product and stock updates resolving with its real count. UI that shows
+   * an exact number should show a neutral "checking" state instead of the
+   * placeholder in `stock` while this is true.
+   */
   stockPending?: boolean
   category: string
   image?: string
@@ -125,7 +131,6 @@ export interface POSCatalogProduct {
   channel?: SalesChannel
   posPrice?: number
   variantId?: string
-  medusaVariantId?: string
   size?: string
   sizeOptionTitle?: string
 }
@@ -446,10 +451,7 @@ export const usePOSStore = create<POSState>()(
           try {
             const stockByVariantId = await fetchPOSStockUpdates()
             set({
-              products: mergePOSStock(
-                get().products as any,
-                stockByVariantId,
-              ) as POSCatalogProduct[],
+              products: mergePOSStock(get().products, stockByVariantId),
             })
           } catch (stockErr: unknown) {
             // Non-fatal — the register is already usable with placeholder
@@ -488,10 +490,7 @@ export const usePOSStore = create<POSState>()(
           try {
             const stockByVariantId = await fetchPOSStockUpdates(true)
             set({
-              products: mergePOSStock(
-                get().products as any,
-                stockByVariantId,
-              ) as POSCatalogProduct[],
+              products: mergePOSStock(get().products, stockByVariantId),
             })
           } catch (stockErr: unknown) {
             console.error('[POS] Stock update failed:', stockErr)
