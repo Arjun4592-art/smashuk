@@ -47,7 +47,7 @@ export default function NewsletterForm({
   }
   return <div>
       <form onSubmit={handleSubmit} className='flex gap-3 max-w-md mx-auto'>
-        <input type='email' value={email} onChange={e => setEmail(e.target.value)} placeholder='Enter your email address' disabled={status === 'loading'} className='flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#E8553A] transition-colors font-lato' />
+        <input type='email' value={email} onChange={e => setEmail(e.target.value)} placeholder='Enter your email address' disabled={status === 'loading'} className='flex-1 min-w-0 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#E8553A] transition-colors font-lato' />
         <button type='submit' disabled={status === 'loading'} className='bg-[#E8553A] hover:bg-[#D4441F] disabled:opacity-50 text-white font-montserrat font-bold px-6 py-3 rounded-xl transition-colors whitespace-nowrap'>
           {status === 'loading' ? 'Subscribing...' : 'Subscribe'}
         </button>
