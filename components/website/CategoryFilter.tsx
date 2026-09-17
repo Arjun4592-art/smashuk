@@ -152,7 +152,7 @@ export default function CategoryFilter() {
           onTouchStart={pause}
           onTouchEnd={resumeAfterTouch}
           onTouchCancel={resumeAfterTouch}
-          className='flex gap-3 sm:gap-4 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scrollbar-none touch-pan-x overscroll-x-contain'
+          className='flex gap-3 sm:gap-4 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none touch-pan-x overscroll-x-contain'
           style={{
             WebkitOverflowScrolling: 'touch',
           }}
