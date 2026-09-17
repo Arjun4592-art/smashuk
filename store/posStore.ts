@@ -120,9 +120,12 @@ export interface POSCatalogProduct {
   stock: number
   /**
    * True only in the brief window between the fast phase rendering this
-   * product and stock updates resolving with its real count. UI that shows
-   * an exact number should show a neutral "checking" state instead of the
-   * placeholder in `stock` while this is true.
+   * product and fetchPOSStockUpdates/mergePOSStock resolving with its real
+   * count. `stock` holds an optimistic placeholder while this is true — UI
+   * that shows an exact number (Products tab) should show a neutral
+   * "checking" state instead of that placeholder number; UI that just
+   * gates "can this be added" (billing) doesn't need to check this at all,
+   * since POS already allows selling regardless of stock.
    */
   stockPending?: boolean
   category: string
@@ -451,7 +454,15 @@ export const usePOSStore = create<POSState>()(
           try {
             const stockByVariantId = await fetchPOSStockUpdates()
             set({
-              products: mergePOSStock(get().products, stockByVariantId),
+              // get().products is POSCatalogProduct[] per the store's field
+              // type, but on this path it was populated a few lines up
+              // directly from fetchPOSProductsFast(), so it's always really
+              // POSProduct[] here — the cast just bridges the store's wider
+              // public type to mergePOSStock's narrower signature.
+              products: mergePOSStock(
+                get().products as import('@/lib/api/pos').POSProduct[],
+                stockByVariantId,
+              ),
             })
           } catch (stockErr: unknown) {
             // Non-fatal — the register is already usable with placeholder
@@ -490,7 +501,13 @@ export const usePOSStore = create<POSState>()(
           try {
             const stockByVariantId = await fetchPOSStockUpdates(true)
             set({
-              products: mergePOSStock(get().products, stockByVariantId),
+              // Same as loadMedusaProducts: products here is real
+              // POSProduct[] (just set from fetchPOSProductsFast above), the
+              // store field's POSCatalogProduct[] type is just wider.
+              products: mergePOSStock(
+                get().products as import('@/lib/api/pos').POSProduct[],
+                stockByVariantId,
+              ),
             })
           } catch (stockErr: unknown) {
             console.error('[POS] Stock update failed:', stockErr)

@@ -228,21 +228,22 @@ export default function BillingPage() {
   const productsInCat = indexEntries.filter(
     (p) => cat === 'All' || p.category === cat,
   )
+  // Each entry can carry MORE THAN ONE size-like dimension at once (e.g. a
+  // racket with both Weight and Grip Size on the same variant) — see
+  // app/api/pos/index/route.ts's extractSizes for why this is an array
+  // rather than a single value. Flatten across all of them when building
+  // the title/value chip lists so every dimension is browsable, not just
+  // whichever happened to be first.
   const SIZE_TITLES = Array.from(
-    new Set(
-      productsInCat
-        .map((p) => p.sizeOptionTitle)
-        .filter((t): t is string => Boolean(t)),
-    ),
+    new Set(productsInCat.flatMap((p:any) => p.sizes.map((s:any) => s.title))),
   ).sort((a, b) => a.localeCompare(b))
   const sizeValuesForTitle = (title: string) =>
     sortSizeValues(
       Array.from(
         new Set(
-          productsInCat
-            .filter((p) => p.sizeOptionTitle === title)
-            .map((p) => p.size)
-            .filter((s): s is string => Boolean(s)),
+          productsInCat.flatMap((p:any) =>
+            p.sizes.filter((s:any) => s.title === title).map((s:any) => s.value),
+          ),
         ),
       ),
     )
@@ -256,14 +257,14 @@ export default function BillingPage() {
   // entire point of this rework. Typing a search or picking a category
   // narrows well below this in practice; this cap only bites on the
   // deliberately-broad default view.
-  const MAX_VISIBLE = 60
+  const MAX_VISIBLE = 100
   const matchedIndexEntries = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return indexEntries.filter((p) => {
+    return indexEntries.filter((p:any) => {
       const matchCat = cat === 'All' || p.category === cat
       const matchSize =
         size === 'All sizes' ||
-        (p.size === size && p.sizeOptionTitle === sizeTitle)
+        p.sizes.some((s:any) => s.title === sizeTitle && s.value === size)
       const matchSearch =
         !q ||
         (p.name ?? '').toLowerCase().includes(q) ||
@@ -303,8 +304,26 @@ export default function BillingPage() {
     visibleIndexEntries.length > 0 &&
     visibleIndexEntries.some((e) => !detailsByVariantId.has(e.variantId))
   const STOCK_PENDING_PLACEHOLDER = 9999
+  // A tile only has room to show ONE size label. When a specific size
+  // dimension is being filtered on (sizeTitle set), show that one — it's
+  // what the staff member is currently browsing by. Otherwise fall back to
+  // the first dimension the variant has, purely for a compact label; this
+  // doesn't affect which dimensions are searchable/filterable (that's
+  // matchSize above, which checks all of them).
+  function pickDisplaySize(entry: POSIndexEntry): {
+    size?: string
+    sizeOptionTitle?: string
+  } {
+    if (entry.sizes.length === 0) return {}
+    const forActiveTitle = sizeTitle
+      ? entry.sizes.find((s) => s.title === sizeTitle)
+      : undefined
+    const chosen = forActiveTitle ?? entry.sizes[0]
+    return { size: chosen.value, sizeOptionTitle: chosen.title }
+  }
   function toPOSProduct(entry: POSIndexEntry): POSProduct {
     const detail = detailsByVariantId.get(entry.variantId)
+    const displaySize = pickDisplaySize(entry)
     return {
       id: entry.productId,
       name: entry.name,
@@ -320,8 +339,8 @@ export default function BillingPage() {
       image: detail?.image,
       channel: detail?.channel ?? 'both',
       variantId: entry.variantId,
-      size: entry.size,
-      sizeOptionTitle: entry.sizeOptionTitle,
+      size: displaySize.size,
+      sizeOptionTitle: displaySize.sizeOptionTitle,
       pricePending: !detail,
     }
   }
@@ -423,8 +442,7 @@ export default function BillingPage() {
         image: detail.image,
         channel: detail.channel,
         variantId: match.variantId,
-        size: match.size,
-        sizeOptionTitle: match.sizeOptionTitle,
+        ...pickDisplaySize(match),
       }
       handleAdd(posProduct)
       setSearch('')
@@ -1101,7 +1119,7 @@ export default function BillingPage() {
         }}
       >
         <div
-          className='flex items-center gap-1.5 px-3 py-2 shrink-0'
+          className='flex items-center gap-1.5 px-3 py-2 shrink-0 overflow-x-auto'
           style={{
             background: '#FFFFFF',
             borderBottom: '1px solid #E1E3E5',
@@ -1199,7 +1217,7 @@ export default function BillingPage() {
 
           <button
             onClick={() => setShowDiscount(true)}
-            className='p-1.5 rounded border transition-all'
+            className='flex items-center gap-1 px-2 py-1.5 rounded text-xs border transition-all shrink-0'
             title='Add discount'
             style={{
               borderColor:
@@ -1221,11 +1239,12 @@ export default function BillingPage() {
               <path d='M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z' />
               <line x1='7' y1='7' x2='7.01' y2='7' />
             </svg>
+            <span className='whitespace-nowrap'>Discount</span>
           </button>
 
           <button
             onClick={() => setShowGiftCard(true)}
-            className='p-1.5 rounded border transition-all'
+            className='flex items-center gap-1 px-2 py-1.5 rounded text-xs border transition-all shrink-0'
             title='Redeem gift card'
             style={{
               borderColor: giftCardCode ? '#008060' : '#E1E3E5',
@@ -1247,6 +1266,7 @@ export default function BillingPage() {
               <circle cx='7.5' cy='12' r='2' />
               <path d='M14 10h4M14 14h4' />
             </svg>
+            <span className='whitespace-nowrap'>Gift Card</span>
           </button>
 
           <button

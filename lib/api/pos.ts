@@ -133,28 +133,30 @@ const SIZE_LIKE_OPTION_TITLE = /size|weight|grip/i
 function normalizeSizeLabel(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ').replace(/\s*\(/g, ' (')
 }
-function extractVariantSize(variant: any): string | undefined {
+/**
+ * A variant can carry MORE THAN ONE size-like dimension at once — e.g. a
+ * racket variant distinguished by both Weight ("4U") AND Grip Size ("G4")
+ * as two separate options on the same variant. The previous version used
+ * `.find()` (first match only), so a variant with two such dimensions was
+ * only ever discoverable under whichever one happened to come first in
+ * Medusa's array — the other silently never matched any filter.
+ * `.filter()` returns all of them; mapProductToPOSVariants below turns
+ * each into its own POSProduct card (same variant/SKU, since POSProduct's
+ * shape only holds one size label at a time) so every dimension is
+ * filterable.
+ */
+function extractSizeDimensions(
+  variant: any,
+): { title: string; value: string }[] {
   const options = variant?.options
-  if (!Array.isArray(options)) return undefined
-  const sizeOpt = options.find((o: any) =>
-    SIZE_LIKE_OPTION_TITLE.test(o?.option?.title ?? ''),
-  )
-  if (sizeOpt?.value) return normalizeSizeLabel(String(sizeOpt.value))
-  return undefined
-}
-// Same lookup as extractVariantSize, but also returns which option
-// (Size / Size (UK) / Weight / Grip Size...) the value came from, so the
-// POS filter can group values by their actual option type instead of
-// dumping UK shoe sizes, badminton racket weights and grip sizes into one
-// flat mixed list.
-function extractSizeOptionTitle(variant: any): string | undefined {
-  const options = variant?.options
-  if (!Array.isArray(options)) return undefined
-  const sizeOpt = options.find((o: any) =>
-    SIZE_LIKE_OPTION_TITLE.test(o?.option?.title ?? ''),
-  )
-  const title = sizeOpt?.option?.title
-  return title ? String(title).trim() : undefined
+  if (!Array.isArray(options)) return []
+  return options
+    .filter((o: any) => SIZE_LIKE_OPTION_TITLE.test(o?.option?.title ?? ''))
+    .filter((o: any) => o?.value)
+    .map((o: any) => ({
+      title: String(o.option.title).trim(),
+      value: normalizeSizeLabel(String(o.value)),
+    }))
 }
 // One product can have several variants (e.g. one per shoe size) — each
 // becomes its own sellable POS card so staff can quick-filter and add the
@@ -169,35 +171,69 @@ function extractSizeOptionTitle(variant: any): string | undefined {
 // could stop a cashier ringing up something actually sitting on the shelf.
 // Real numbers land a moment later via fetchPOSStockUpdates + mergePOSStock.
 const STOCK_PENDING_PLACEHOLDER = 9999
+// Ported from lib/api/store.ts's pickCategory (the storefront's fix for a
+// known Medusa data issue — see app/api/pos/index/route.ts for the full
+// explanation). Products can be linked to both a generic "Rackets"
+// category and their real, specific one (e.g. "Badminton Rackets"), and
+// Medusa doesn't guarantee array order, so picking categories[0] blindly
+// put a chunk of racket products under the wrong bucket.
+const SPORT_CATEGORY_SLUGS = new Set([
+  'badminton',
+  'tennis',
+  'padel',
+  'squash',
+  'clothing',
+])
+function pickCategoryName(categories: any[] | undefined): string {
+  if (!categories || categories.length === 0) return 'Uncategorized'
+  const specificOnes = categories.filter(
+    (c: any) => c?.handle && !SPORT_CATEGORY_SLUGS.has(c.handle),
+  )
+  const preferred =
+    specificOnes.find((c: any) => !/rackets?$/i.test(c.handle ?? '')) ??
+    specificOnes[0]
+  const chosen = preferred ?? categories[0]
+  return chosen?.name ?? 'Uncategorized'
+}
 function mapProductToPOSVariants(
   p: any,
   stockPlaceholder?: number,
 ): POSProduct[] {
   const variants = Array.isArray(p.variants) ? p.variants : []
-  return variants
-    .map((variant: any): POSProduct | null => {
-      if (!variant?.id) return null
-      const price = extractPrice(variant, p.metadata)
-      const stock = stockPlaceholder ?? extractStock(variant)
-      return {
-        id: p.id,
-        name: p.title ?? 'Unknown Product',
-        brand: p.metadata?.brand ?? 'Unknown',
-        sku: variant?.sku ?? `${p.id}-${variant.id}`,
-        price,
-        stock,
-        stockPending: stockPlaceholder !== undefined,
-        category: p.categories?.[0]?.name ?? 'Uncategorized',
-        image: p.thumbnail ?? p.images?.[0]?.url ?? undefined,
-        description: p.description ?? undefined,
-        channel: (p.metadata?.channel as any) ?? 'both',
-        variantId: variant.id,
-        medusaVariantId: variant.id,
-        size: extractVariantSize(variant),
-        sizeOptionTitle: extractSizeOptionTitle(variant),
-      }
-    })
-    .filter((v: POSProduct | null): v is POSProduct => v !== null)
+  return variants.flatMap((variant: any): POSProduct[] => {
+    if (!variant?.id) return []
+    const price = extractPrice(variant, p.metadata)
+    const stock = stockPlaceholder ?? extractStock(variant)
+    const base = {
+      id: p.id,
+      name: p.title ?? 'Unknown Product',
+      brand: p.metadata?.brand ?? 'Unknown',
+      sku: variant?.sku ?? `${p.id}-${variant.id}`,
+      price,
+      stock,
+      stockPending: stockPlaceholder !== undefined,
+      category: pickCategoryName(p.categories),
+      image: p.thumbnail ?? p.images?.[0]?.url ?? undefined,
+      description: p.description ?? undefined,
+      channel: (p.metadata?.channel as any) ?? 'both',
+      variantId: variant.id,
+      medusaVariantId: variant.id,
+    }
+    const dims = extractSizeDimensions(variant)
+    // No size-like option at all — one plain card, same as before.
+    if (dims.length === 0) {
+      return [{ ...base, size: undefined, sizeOptionTitle: undefined }]
+    }
+    // One card PER dimension so each is independently filterable/findable
+    // (e.g. the same racket variant shows once under "Weight" and once
+    // under "Grip Size") — same underlying variant/SKU either way, so
+    // adding either card to a sale sells the exact same real item.
+    return dims.map((d) => ({
+      ...base,
+      size: d.value,
+      sizeOptionTitle: d.title,
+    }))
+  })
 }
 async function fetchPosProductsPage(qs: string): Promise<{ products: any[] }> {
   const res = await fetch(`/api/pos/products${qs}`, {
@@ -264,17 +300,12 @@ export async function fetchPOSStockUpdates(
   }
   return stockByVariantId
 }
-/**
- * Applies a fetchPOSStockUpdates() result onto an existing product list.
- * Generic so it works for both the full POSProduct shape used here and the
- * trimmed-down POSCatalogProduct shape the store keeps in state — only
- * `variantId`/`stock`/`stockPending` are actually read or written.
- */
-export function mergePOSStock<
-  T extends { variantId?: string; stock: number; stockPending?: boolean },
->(products: T[], stockByVariantId: Map<string, number>): T[] {
+/** Applies a fetchPOSStockUpdates() result onto an existing POSProduct list. */
+export function mergePOSStock(
+  products: POSProduct[],
+  stockByVariantId: Map<string, number>,
+): POSProduct[] {
   return products.map((p) => {
-    if (!p.variantId) return p
     const stock = stockByVariantId.get(p.variantId)
     return stock === undefined ? p : { ...p, stock, stockPending: false }
   })
@@ -610,6 +641,10 @@ export async function emailPOSReceipt(payload: EmailReceiptPayload): Promise<{
 // scanning depends on, so search/scan/category/size filtering all run
 // over this tiny index client-side instead of relying on that).
 // ──────────────────────────────────────────────────────────────────────
+export interface POSSizeDimension {
+  title: string
+  value: string
+}
 export interface POSIndexEntry {
   productId: string
   variantId: string
@@ -617,8 +652,8 @@ export interface POSIndexEntry {
   name: string
   brand: string
   category: string
-  size?: string
-  sizeOptionTitle?: string
+  /** Every size-like dimension this variant has — usually one, sometimes more. */
+  sizes: POSSizeDimension[]
 }
 export interface POSDetailEntry {
   productId: string

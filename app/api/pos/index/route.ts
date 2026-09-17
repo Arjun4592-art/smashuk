@@ -62,26 +62,61 @@ async function fetchPage(offset: number, cacheInit: RequestInit) {
   }
 }
 
+// Ported verbatim from lib/api/store.ts's pickCategory (the storefront's
+// proven fix for a known Medusa data issue): products can end up linked to
+// BOTH a generic "Rackets" category AND their real, specific one (e.g.
+// "Badminton Rackets") — a stale leftover from an earlier re-categorising
+// pass. Medusa returns `categories` in no guaranteed order, so picking
+// categories[0] blindly (what this route did before) put a large chunk of
+// racket products under a generic "Rackets" bucket instead of their sport-
+// specific one — exactly the bug that made "Badminton Rackets"/"Tennis"/
+// "Squash" appear empty in POS while the website (which already had this
+// fix) showed them fine.
+const SPORT_CATEGORY_SLUGS = new Set([
+  'badminton',
+  'tennis',
+  'padel',
+  'squash',
+  'clothing',
+])
+function pickCategoryName(categories: any[] | undefined): string {
+  if (!categories || categories.length === 0) return 'Uncategorized'
+  const specificOnes = categories.filter(
+    (c) => c?.handle && !SPORT_CATEGORY_SLUGS.has(c.handle),
+  )
+  const preferred =
+    specificOnes.find((c) => !/rackets?$/i.test(c.handle ?? '')) ??
+    specificOnes[0]
+  const chosen = preferred ?? categories[0]
+  return chosen?.name ?? 'Uncategorized'
+}
 const SIZE_LIKE_OPTION_TITLE = /size|weight|grip/i
 function normalizeSizeLabel(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ').replace(/\s*\(/g, ' (')
 }
-function extractSize(variant: any): {
-  size?: string
-  sizeOptionTitle?: string
-} {
+export interface POSSizeDimension {
+  title: string
+  value: string
+}
+/**
+ * A variant can carry MORE THAN ONE size-like dimension at once — e.g. a
+ * racket variant distinguished by both Weight ("4U") AND Grip Size ("G4")
+ * as two separate options on the same variant. The earlier version of
+ * this used `.find()`, which returns only the FIRST matching option —
+ * silently dropping whichever dimension didn't happen to come first in
+ * Medusa's array, making that variant unfindable when filtering by the
+ * dropped dimension. `.filter()` keeps all of them.
+ */
+function extractSizes(variant: any): POSSizeDimension[] {
   const options = variant?.options
-  if (!Array.isArray(options)) return {}
-  const sizeOpt = options.find((o: any) =>
-    SIZE_LIKE_OPTION_TITLE.test(o?.option?.title ?? ''),
-  )
-  if (!sizeOpt?.value) return {}
-  return {
-    size: normalizeSizeLabel(String(sizeOpt.value)),
-    sizeOptionTitle: sizeOpt?.option?.title
-      ? String(sizeOpt.option.title).trim()
-      : undefined,
-  }
+  if (!Array.isArray(options)) return []
+  return options
+    .filter((o: any) => SIZE_LIKE_OPTION_TITLE.test(o?.option?.title ?? ''))
+    .filter((o: any) => o?.value)
+    .map((o: any) => ({
+      title: String(o.option.title).trim(),
+      value: normalizeSizeLabel(String(o.value)),
+    }))
 }
 
 export interface POSIndexEntry {
@@ -91,8 +126,8 @@ export interface POSIndexEntry {
   name: string
   brand: string
   category: string
-  size?: string
-  sizeOptionTitle?: string
+  /** Every size-like dimension this variant has — usually one, sometimes more. */
+  sizes: POSSizeDimension[]
 }
 
 export async function GET() {
@@ -121,10 +156,9 @@ export async function GET() {
     const entries: POSIndexEntry[] = []
     for (const p of allProducts) {
       if (inferSellingChannel(p.sales_channels) === 'website') continue
-      const category = p.categories?.[0]?.name ?? 'Uncategorized'
+      const category = pickCategoryName(p.categories)
       for (const variant of p.variants ?? []) {
         if (!variant?.id) continue
-        const { size, sizeOptionTitle } = extractSize(variant)
         entries.push({
           productId: p.id,
           variantId: variant.id,
@@ -132,8 +166,7 @@ export async function GET() {
           name: p.title ?? 'Unknown Product',
           brand: p.metadata?.brand ?? 'Unknown',
           category,
-          size,
-          sizeOptionTitle,
+          sizes: extractSizes(variant),
         })
       }
     }

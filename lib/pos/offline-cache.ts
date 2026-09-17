@@ -1,5 +1,29 @@
 'use client'
 
+// ARCHITECTURE — why this exists, and what it does and doesn't solve.
+//
+// This does NOT make POS work fully offline. A card payment still needs a
+// real connection to whatever payment gateway processes it — no amount of
+// local caching changes that. What this DOES fix: today, if the shop's
+// WiFi/internet drops for even a moment while a cashier is mid-search, the
+// billing screen has nothing to show — every fetch just fails. This module
+// keeps a local copy of the last successful index + product-detail
+// responses, so a brief connectivity drop degrades to "search still works,
+// prices might be a few minutes old" instead of "screen is broken".
+//
+// Deliberately built as a small IndexedDB wrapper with the browser's native
+// API rather than adding a library (idb, Dexie, etc.) or a full
+// Service-Worker/PWA setup (Serwist et al — the standard approach in 2026
+// for full offline-first Next.js apps). A full PWA conversion changes how
+// the whole site is served and cached, is a much bigger and riskier change
+// to make blind on a live payment system, and mostly helps a DIFFERENT
+// case than the one that matters here: reloading the page while fully
+// offline. That's rare in practice compared to "network blips while the
+// tab is already open", which is what this targets. If you later want the
+// stronger guarantee (works even after a reload with zero connectivity),
+// that's better built as part of the desktop app's own local database,
+// which was already the plan — a real local DB there does this properly,
+// rather than retrofitting a full PWA onto the web version now.
 const DB_NAME = 'pos-offline-cache'
 const DB_VERSION = 1
 const INDEX_STORE = 'index-entries'

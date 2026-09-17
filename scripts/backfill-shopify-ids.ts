@@ -70,6 +70,8 @@ interface MedusaVariant {
   id: string
   sku: string | null
   metadata: Record<string, any> | null
+  title?: string | null
+  options?: { value: string }[]
 }
 interface MedusaProduct {
   id: string
@@ -83,7 +85,7 @@ async function fetchAllMedusaProducts(token: string): Promise<MedusaProduct[]> {
   let offset = 0
   while (true) {
     const res = await fetch(
-      `${MEDUSA_URL}/admin/products?limit=${limit}&offset=${offset}&fields=id,title,variants.id,variants.sku,variants.metadata`,
+      `${MEDUSA_URL}/admin/products?limit=${limit}&offset=${offset}&fields=id,title,variants.id,variants.sku,variants.metadata,variants.title,variants.options.value`,
       { headers: medusaHeaders(token) },
     )
     if (!res.ok)
@@ -102,6 +104,10 @@ async function fetchAllMedusaProducts(token: string): Promise<MedusaProduct[]> {
 interface ShopifyVariant {
   id: number
   sku: string | null
+  title?: string | null
+  option1?: string | null
+  option2?: string | null
+  option3?: string | null
 }
 interface ShopifyProduct {
   id: number
@@ -139,21 +145,49 @@ async function main() {
   ])
   const medusaProducts = await fetchAllMedusaProducts(medusaToken)
 
+  // Shopify itself sometimes reuses one SKU across several variants — e.g.
+  // every size of a shirt sharing the same SKU (or, worse, a copy-paste
+  // typo reusing a SKU across two entirely different products). Matching
+  // blindly on SKU alone would risk linking the wrong physical
+  // variant/product — e.g. tying a Medusa "L / Black" variant to Shopify's
+  // "XS / Black" listing. So every SKU keeps ALL of its Shopify candidates
+  // here; disambiguation by size/colour options happens per-Medusa-variant
+  // below, and anything still ambiguous after that is skipped rather than
+  // guessed.
   const shopifyBySku = new Map<
     string,
-    { productId: number; variantId: number }
+    { productId: number; variantId: number; options: Set<string> }[]
   >()
+  function optionSet(
+    o1?: string | null,
+    o2?: string | null,
+    o3?: string | null,
+  ): Set<string> {
+    return new Set(
+      [o1, o2, o3]
+        .filter((x): x is string => !!x)
+        .map((x) => x.trim().toLowerCase()),
+    )
+  }
   for (const p of shopifyProducts) {
     for (const v of p.variants ?? []) {
       if (!v.sku) continue
-      if (shopifyBySku.has(v.sku)) {
-        console.warn(
-          `⚠️  Duplicate Shopify SKU "${v.sku}" — keeping first match.`,
-        )
-        continue
-      }
-      shopifyBySku.set(v.sku, { productId: p.id, variantId: v.id })
+      const list = shopifyBySku.get(v.sku) ?? []
+      list.push({
+        productId: p.id,
+        variantId: v.id,
+        options: optionSet(v.option1, v.option2, v.option3),
+      })
+      shopifyBySku.set(v.sku, list)
     }
+  }
+  const duplicateSkuCount = [...shopifyBySku.values()].filter(
+    (l) => l.length > 1,
+  ).length
+  if (duplicateSkuCount > 0) {
+    console.warn(
+      `⚠️  ${duplicateSkuCount} SKU(s) are reused across multiple Shopify variants — will disambiguate by size/colour options per match, skipping any that stay ambiguous.\n`,
+    )
   }
 
   type Update = {
@@ -168,6 +202,11 @@ async function main() {
   const updates: Update[] = []
   let alreadyTagged = 0
   let noMatch = 0
+  const ambiguous: {
+    productTitle: string
+    variantTitle: string
+    sku: string
+  }[] = []
 
   for (const p of medusaProducts) {
     for (const v of p.variants ?? []) {
@@ -179,10 +218,35 @@ async function main() {
         alreadyTagged++
         continue
       }
-      const match = shopifyBySku.get(v.sku)
-      if (!match) {
+      const candidates = shopifyBySku.get(v.sku)
+      if (!candidates || candidates.length === 0) {
         noMatch++
         continue
+      }
+      let match = candidates[0]
+      if (candidates.length > 1) {
+        const mset = optionSet(
+          ...((v.options ?? []).map((o) => o.value) as [
+            string?,
+            string?,
+            string?,
+          ]),
+        )
+        const exact = candidates.filter((c) => {
+          if (c.options.size !== mset.size) return false
+          for (const x of c.options) if (!mset.has(x)) return false
+          return true
+        })
+        if (exact.length === 1) {
+          match = exact[0]
+        } else {
+          ambiguous.push({
+            productTitle: p.title,
+            variantTitle: v.title ?? '',
+            sku: v.sku,
+          })
+          continue
+        }
       }
       updates.push({
         productId: p.id,
@@ -203,7 +267,23 @@ async function main() {
   console.log(`   Medusa variants checked: ${totalVariants}`)
   console.log(`   Already tagged: ${alreadyTagged}`)
   console.log(`   No SKU / no Shopify match: ${noMatch}`)
+  console.log(
+    `   Ambiguous (duplicate SKU, options didn't disambiguate — skipped): ${ambiguous.length}`,
+  )
   console.log(`   To be tagged: ${updates.length}`)
+  if (ambiguous.length > 0) {
+    console.log(`\n   Ambiguous — review manually, none of these were touched:`)
+    ambiguous
+      .slice(0, 20)
+      .forEach((a) =>
+        console.log(
+          `   - ${a.productTitle} → variant "${a.variantTitle}" (SKU ${a.sku})`,
+        ),
+      )
+    if (ambiguous.length > 20)
+      console.log(`   ...and ${ambiguous.length - 20} more`)
+    console.log('')
+  }
 
   if (!APPLY || updates.length === 0) {
     updates
