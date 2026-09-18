@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { getAllCollections } from '@/lib/collections-data'
+import { SITE_URL as REAL_SITE_URL } from '@/lib/constants'
 const Icons = {
   search: (
     <svg
@@ -271,7 +272,7 @@ interface SEOPage {
   noIndex: boolean
   score: number
 }
-const SITE_URL = 'https://smashuk.co.uk'
+const SITE_URL = REAL_SITE_URL
 function calcScore(page: Partial<SEOPage>): number {
   let score = 0
   if (page.metaTitle) score += 25
@@ -384,7 +385,7 @@ export default function DashboardSEOPage() {
     defaultOgImage: '',
     googleVerification: '',
     bingVerification: '',
-    robotsTxt: `User-agent: *\nAllow: /\nDisallow: /dashboard/\nDisallow: /pos/\nDisallow: /api/\n\nSitemap: https://smashuk.co.uk/sitemap.xml`,
+    robotsTxt: `User-agent: *\nAllow: /\nDisallow: /dashboard/\nDisallow: /pos/\nDisallow: /api/\n\nSitemap: ${SITE_URL}/sitemap.xml`,
     twitterHandle: '@smashuk',
     facebookAppId: '',
   })
@@ -966,7 +967,7 @@ export default function DashboardSEOPage() {
                     defaultOgImage: e.target.value,
                   }))
                 }
-                placeholder='https://smashuk.co.uk/og-image.jpg'
+                placeholder='https://example.com/og-image.jpg'
                 className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
               />
             </div>
@@ -1070,7 +1071,7 @@ export default function DashboardSEOPage() {
                 </div>
                 <div className='p-3 bg-[#F6F6F7]'>
                   <p className='text-[10.5px] text-[#8C9196] uppercase tracking-wide'>
-                    smashpro.co.uk
+                    {SITE_URL.replace(/^https?:\/\//, '')}
                   </p>
                   <p className='text-[13px] font-semibold text-[#202223] mt-0.5'>
                     Smash Racket Pro — Premium Racket Sports Equipment UK
@@ -1106,7 +1107,7 @@ export default function DashboardSEOPage() {
                   onClick={() =>
                     setGlobalSettings((s) => ({
                       ...s,
-                      robotsTxt: `User-agent: *\nAllow: /\nDisallow: /dashboard/\nDisallow: /pos/\nDisallow: /api/\n\nSitemap: https://smashuk.co.uk/sitemap.xml`,
+                      robotsTxt: `User-agent: *\nAllow: /\nDisallow: /dashboard/\nDisallow: /pos/\nDisallow: /api/\n\nSitemap: ${SITE_URL}/sitemap.xml`,
                     }))
                   }
                   className='flex items-center gap-1 text-[12px] text-[#008060] hover:text-[#006e52] bg-transparent border-none cursor-pointer transition-colors'
@@ -1206,12 +1207,12 @@ export default function DashboardSEOPage() {
               {
                 title: 'Organization Schema',
                 desc: 'Applied to all pages — identifies your business to Google',
-                code: `{\n  "@context": "https://schema.org",\n  "@type": "Organization",\n  "name": "Smash Racket Pro",\n  "url": "https://smashuk.co.uk",\n  "logo": "https://smashuk.co.uk/icons/logo.png"\n}`,
+                code: `{\n  "@context": "https://schema.org",\n  "@type": "Organization",\n  "name": "Smash Racket Pro",\n  "url": "${SITE_URL}",\n  "logo": "${SITE_URL}/icons/logo.png"\n}`,
               },
               {
                 title: 'WebSite Schema',
                 desc: 'Enables Google Sitelinks Searchbox in search results',
-                code: `{\n  "@context": "https://schema.org",\n  "@type": "WebSite",\n  "name": "Smash Racket Pro",\n  "url": "https://smashuk.co.uk",\n  "potentialAction": {\n    "@type": "SearchAction",\n    "target": "https://smashuk.co.uk/shop?q={search_term_string}"\n  }\n}`,
+                code: `{\n  "@context": "https://schema.org",\n  "@type": "WebSite",\n  "name": "Smash Racket Pro",\n  "url": "${SITE_URL}",\n  "potentialAction": {\n    "@type": "SearchAction",\n    "target": "${SITE_URL}/shop?q={search_term_string}"\n  }\n}`,
               },
               {
                 title: 'Product Schema',
@@ -1404,7 +1405,7 @@ export default function DashboardSEOPage() {
                   type='text'
                   value={editingPage.ogImage}
                   onChange={(e) => updateEditing('ogImage', e.target.value)}
-                  placeholder='https://smashuk.co.uk/og-image.jpg (1200×630)'
+                  placeholder='https://example.com/og-image.jpg (1200×630)'
                   className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
                 />
               </div>

@@ -11,9 +11,9 @@ import {
   approveOrderReturn,
   rejectOrderReturn,
   getShippingLabel,
-  resendOrderConfirmation,
 } from '@/lib/api/dashboard'
-import ReturnOrderModal from '@/components/dashboard/ReturnOrderModal'
+import ReturnExchangeModal from '@/components/dashboard/ReturnExchangeModal'
+import OrderTimeline from '@/components/dashboard/OrderTimeline'
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-[#FFC453]/20 text-[#916A00]',
   completed: 'bg-[#008060]/10 text-[#008060]',
@@ -94,38 +94,6 @@ export default function OrderDetailPage({
   >(null)
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [returnActionLoading, setReturnActionLoading] = useState('')
-  const [resendLoading, setResendLoading] = useState(false)
-  const [customerMenuOpen, setCustomerMenuOpen] = useState(false)
-  const [addressCopied, setAddressCopied] = useState(false)
-  const handleResendConfirmation = async () => {
-    setCustomerMenuOpen(false)
-    setResendLoading(true)
-    try {
-      const { to } = await resendOrderConfirmation(id)
-      toast.success(`Confirmation email resent to ${to}`)
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to resend confirmation email')
-    } finally {
-      setResendLoading(false)
-    }
-  }
-  const handleCopyAddress = (addr: any) => {
-    const text = [
-      addr.address_1,
-      addr.address_2,
-      [addr.city, addr.province, addr.postal_code].filter(Boolean).join(', '),
-      addr.country_code?.toUpperCase(),
-    ]
-      .filter(Boolean)
-      .join('\n')
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        setAddressCopied(true)
-        setTimeout(() => setAddressCopied(false), 1500)
-      })
-      .catch(() => toast.error('Failed to copy address'))
-  }
   const fetchOrder = useCallback(async () => {
     setLoading(true)
     setError('')
@@ -205,14 +173,21 @@ export default function OrderDetailPage({
     }
   }
   const handleProcessReturn = async (
-    items: {
-      item_id: string
-      quantity: number
-    }[],
+    items: { item_id: string; quantity: number }[],
     reason: string,
+    shippingOption: 'label' | 'no_shipping',
+    trackingNumber?: string,
+    shippingCarrier?: string,
     refundAmount?: number,
   ) => {
-    await processOrderReturn(id, items, reason, undefined, refundAmount)
+    const note = [
+      shippingOption === 'no_shipping' ? 'No shipping required' : null,
+      trackingNumber ? `Tracking: ${trackingNumber}` : null,
+      shippingCarrier ? `Carrier: ${shippingCarrier}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    await processOrderReturn(id, items, reason, note || undefined, refundAmount)
     toast.success('Return processed and refund issued')
     setShowReturnModal(false)
     await fetchOrder()
@@ -664,39 +639,9 @@ export default function OrderDetailPage({
         {}
         <div className='space-y-5'>
           <div className='bg-white border border-[#E1E3E5] rounded-xl p-5'>
-            <div className='flex items-center justify-between mb-3'>
-              <h2 className='text-[14px] font-semibold text-[#202223]'>
-                Customer
-              </h2>
-              <div className='relative'>
-                <button
-                  onClick={() => setCustomerMenuOpen((p) => !p)}
-                  className='w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#F6F6F7] text-[#6D7175]'
-                  aria-label='Customer options'
-                >
-                  ⋯
-                </button>
-                {customerMenuOpen && (
-                  <>
-                    <div
-                      className='fixed inset-0 z-10'
-                      onClick={() => setCustomerMenuOpen(false)}
-                    />
-                    <div className='absolute right-0 top-8 z-20 w-56 bg-white border border-[#E1E3E5] rounded-lg shadow-lg py-1'>
-                      <button
-                        onClick={handleResendConfirmation}
-                        disabled={resendLoading || !order.email}
-                        className='w-full text-left px-3.5 py-2 text-[13px] text-[#202223] hover:bg-[#F6F6F7] disabled:opacity-50 disabled:cursor-not-allowed'
-                      >
-                        {resendLoading
-                          ? 'Sending…'
-                          : 'Resend confirmation email'}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
+            <h2 className='text-[14px] font-semibold text-[#202223] mb-3'>
+              Customer
+            </h2>
             <p className='text-[13.5px] font-medium text-[#202223]'>
               {customerName}
             </p>
@@ -706,39 +651,13 @@ export default function OrderDetailPage({
                 {order.customer.phone}
               </p>
             )}
-            <div className='flex gap-2 mt-3'>
-              {order.email && (
-                <a
-                  href={`mailto:${order.email}`}
-                  className='flex-1 text-center px-3 py-1.5 border border-[#E1E3E5] text-[#202223] hover:bg-[#F6F6F7] text-[12.5px] font-medium rounded-lg transition-colors'
-                >
-                  ✉️ Email details
-                </a>
-              )}
-              {order.customer?.phone && (
-                <a
-                  href={`tel:${order.customer.phone}`}
-                  className='flex-1 text-center px-3 py-1.5 border border-[#E1E3E5] text-[#202223] hover:bg-[#F6F6F7] text-[12.5px] font-medium rounded-lg transition-colors'
-                >
-                  📞 Phone details
-                </a>
-              )}
-            </div>
           </div>
 
           {order.shipping_address && (
             <div className='bg-white border border-[#E1E3E5] rounded-xl p-5'>
-              <div className='flex items-center justify-between mb-3'>
-                <h2 className='text-[14px] font-semibold text-[#202223]'>
-                  Shipping Address
-                </h2>
-                <button
-                  onClick={() => handleCopyAddress(order.shipping_address)}
-                  className='text-[11px] font-medium text-[#008060] hover:underline whitespace-nowrap'
-                >
-                  {addressCopied ? 'Copied ✓' : 'Copy'}
-                </button>
-              </div>
+              <h2 className='text-[14px] font-semibold text-[#202223] mb-3'>
+                Shipping Address
+              </h2>
               <p className='text-[13px] text-[#202223] leading-relaxed'>
                 {order.shipping_address.address_1}
                 {order.shipping_address.address_2
@@ -791,11 +710,12 @@ export default function OrderDetailPage({
               )}
             </div>
           )}
+          <OrderTimeline order={order} onCommentAdded={fetchOrder} />
         </div>
       </div>
 
       {showReturnModal && (
-        <ReturnOrderModal
+        <ReturnExchangeModal
           order={order}
           remainingQty={remainingReturnQty}
           onSubmit={handleProcessReturn}

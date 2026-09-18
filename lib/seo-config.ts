@@ -1,5 +1,6 @@
 import 'server-only'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
+import { SITE_URL } from '@/lib/constants'
 export const DEFAULT_SEO: Record<string, any> = {
   home: {
     metaTitle: 'Smash Racket Pro — Premium Sports Equipment UK',
@@ -8,7 +9,7 @@ export const DEFAULT_SEO: Record<string, any> = {
     metaKeywords:
       'sports equipment uk, badminton rackets, squash rackets, sports shop uk, smash racket pro',
     ogImage: '',
-    canonical: 'https://smashpro.co.uk',
+    canonical: SITE_URL,
     noIndex: false,
   },
   shop: {
@@ -18,7 +19,7 @@ export const DEFAULT_SEO: Record<string, any> = {
     metaKeywords:
       'buy sports online uk, sports equipment shop, smash racket pro',
     ogImage: '',
-    canonical: 'https://smashpro.co.uk/shop',
+    canonical: `${SITE_URL}/shop`,
     noIndex: false,
   },
   collections: {
@@ -28,7 +29,7 @@ export const DEFAULT_SEO: Record<string, any> = {
     metaKeywords:
       'sports collections uk, badminton collections, tennis collections, smash racket pro',
     ogImage: '',
-    canonical: 'https://smashpro.co.uk/collections',
+    canonical: `${SITE_URL}/collections`,
     noIndex: false,
   },
   about: {
@@ -37,7 +38,7 @@ export const DEFAULT_SEO: Record<string, any> = {
       'Smash Racket Pro is your trusted UK sports equipment store. We stock premium gear for all racket sports.',
     metaKeywords: 'smash racket pro about, uk sports store',
     ogImage: '',
-    canonical: 'https://smashpro.co.uk/about',
+    canonical: `${SITE_URL}/about`,
     noIndex: false,
   },
   contact: {
@@ -46,7 +47,7 @@ export const DEFAULT_SEO: Record<string, any> = {
       'Get in touch with Smash Racket Pro for orders, returns, and enquiries.',
     metaKeywords: 'smash racket pro contact, sports equipment enquiry',
     ogImage: '',
-    canonical: 'https://smashpro.co.uk/contact',
+    canonical: `${SITE_URL}/contact`,
     noIndex: false,
   },
   'local-store': {
@@ -57,7 +58,7 @@ export const DEFAULT_SEO: Record<string, any> = {
     metaKeywords:
       'manchester racket shop, racket restringing manchester, badminton restring manchester, tennis racket restring, racket stringing service uk, racket demo service, badminton shop manchester, tennis shop manchester, padel shop manchester, squash shop manchester, racket sports store near me, string a racket manchester, hulme high street sports shop',
     ogImage: '',
-    canonical: 'https://smashpro.co.uk/local-store',
+    canonical: `${SITE_URL}/local-store`,
     noIndex: false,
   },
 }

@@ -571,7 +571,7 @@ export default function SettingsPage() {
                       website: v,
                     }))
                   }
-                  placeholder='https://smashpro.co.uk'
+                  placeholder='https://yourdomain.com'
                   icon={Icons.globe}
                 />
               </div>

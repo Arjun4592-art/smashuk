@@ -7,8 +7,13 @@ import {
   getOrder,
   updateOrderStatus,
   getShippingLabel,
+  processOrderReturn,
+  approveOrderReturn,
+  rejectOrderReturn,
 } from '@/lib/api/dashboard'
 import { getDisplayOrderStatus } from '@/lib/order-status'
+import OrderTimeline from '@/components/dashboard/OrderTimeline'
+import ReturnExchangeModal from '@/components/dashboard/ReturnExchangeModal'
 const ORDER_STATUS_STYLES: Record<string, string> = {
   pending: 'bg-[#FFC453]/20 text-[#916A00]',
   confirmed: 'bg-[#2C6ECB]/10 text-[#2C6ECB]',
@@ -349,6 +354,8 @@ export default function OrderDetailPage({
   const [copied, setCopied] = useState(false)
   const [note, setNote] = useState('')
   const [savingNote, setSavingNote] = useState(false)
+  const [showReturnModal, setShowReturnModal] = useState(false)
+  const [returnActionLoading, setReturnActionLoading] = useState('')
   useEffect(() => {
     async function load() {
       setLoading(true)
@@ -363,12 +370,15 @@ export default function OrderDetailPage({
     }
     load()
   }, [id])
+  const reloadOrder = async () => {
+    const data = await getOrder(id)
+    setOrder(data)
+  }
   const handleAction = async (action: string) => {
     setActionLoading(true)
     try {
       await updateOrderStatus(id, action)
-      const data = await getOrder(id)
-      setOrder(data)
+      await reloadOrder()
     } catch (err: unknown) {
       alert(
         'Action failed: ' +
@@ -383,6 +393,69 @@ export default function OrderDetailPage({
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
+
+  const remainingReturnQty: Record<string, number> = {}
+  for (const item of order?.items ?? []) {
+    remainingReturnQty[item.id] = item.quantity
+  }
+  for (const record of order?.metadata?.returns ?? []) {
+    if (record.status === 'rejected') continue
+    for (const line of record.items) {
+      remainingReturnQty[line.item_id] =
+        (remainingReturnQty[line.item_id] ?? 0) - line.quantity
+    }
+  }
+
+  const handleProcessReturn = async (
+    items: { item_id: string; quantity: number }[],
+    reason: string,
+    shippingOption: 'label' | 'no_shipping',
+    trackingNumber?: string,
+    shippingCarrier?: string,
+    refundAmount?: number,
+  ) => {
+    const noteStr = [
+      shippingOption === 'no_shipping' ? 'No shipping required' : null,
+      trackingNumber ? `Tracking: ${trackingNumber}` : null,
+      shippingCarrier ? `Carrier: ${shippingCarrier}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    await processOrderReturn(
+      id,
+      items,
+      reason,
+      noteStr || undefined,
+      refundAmount,
+    )
+    setShowReturnModal(false)
+    await reloadOrder()
+  }
+
+  const handleApproveReturn = async (returnId: string) => {
+    setReturnActionLoading(returnId)
+    try {
+      await approveOrderReturn(id, returnId)
+      await reloadOrder()
+    } catch (err: any) {
+      alert(err.message ?? 'Failed to approve return')
+    } finally {
+      setReturnActionLoading('')
+    }
+  }
+
+  const handleRejectReturn = async (returnId: string) => {
+    setReturnActionLoading(returnId)
+    try {
+      await rejectOrderReturn(id, returnId)
+      await reloadOrder()
+    } catch (err: any) {
+      alert(err.message ?? 'Failed to reject return')
+    } finally {
+      setReturnActionLoading('')
+    }
+  }
+
   if (loading)
     return (
       <div className='space-y-5 animate-pulse max-w-6xl mx-auto'>
@@ -493,6 +566,18 @@ export default function OrderDetailPage({
           >
             {order.payment_status}
           </span>
+          <button
+            onClick={() =>
+              window.open(
+                `/dashboard/orders/${id}/packing-slip`,
+                '_blank',
+                'noopener,noreferrer',
+              )
+            }
+            className='inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all cursor-pointer border border-[#E1E3E5] text-[#6D7175] bg-white hover:bg-[#F6F6F7]'
+          >
+            🖨️ Packing Slip
+          </button>
           {!isPickup &&
             order.fulfillment_status &&
             order.fulfillment_status !== 'not_fulfilled' &&
@@ -517,6 +602,15 @@ export default function OrderDetailPage({
               {act.label}
             </button>
           ))}
+          {order.payment_status !== 'not_paid' &&
+            Object.values(remainingReturnQty).some((qty) => qty > 0) && (
+              <button
+                onClick={() => setShowReturnModal(true)}
+                className='inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all cursor-pointer border border-[#008060] text-[#008060] bg-white hover:bg-[#F2F7F5]'
+              >
+                ↩ Process Return
+              </button>
+            )}
         </div>
       </div>
 
@@ -941,8 +1035,70 @@ export default function OrderDetailPage({
               </div>
             </Card>
           )}
+          {(order?.metadata?.returns?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader title='Returns' />
+              <div className='px-5 py-4 space-y-3'>
+                {[...order.metadata.returns].reverse().map((r: any) => (
+                  <div
+                    key={r.id}
+                    className='p-3 rounded-xl border border-[#E1E3E5]'
+                  >
+                    <div className='flex items-center justify-between mb-1'>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold capitalize ${r.status === 'refunded' ? 'bg-[#008060]/10 text-[#008060]' : r.status === 'rejected' ? 'bg-[#D82C0D]/10 text-[#D82C0D]' : 'bg-[#FFC453]/20 text-[#916A00]'}`}
+                      >
+                        {r.status}
+                      </span>
+                      <span className='text-[11px] text-[#8C9196] capitalize'>
+                        {r.source}
+                      </span>
+                    </div>
+                    <p className='text-[12.5px] text-[#202223] mb-0.5'>
+                      {r.items
+                        .map((i: any) => `${i.quantity}× ${i.title}`)
+                        .join(', ')}
+                    </p>
+                    <p className='text-[11.5px] text-[#8C9196]'>
+                      {r.reason} · £{(r.refund_amount / 100).toFixed(2)}
+                    </p>
+                    {r.status === 'requested' && (
+                      <div className='flex gap-2 mt-2'>
+                        <button
+                          onClick={() => handleApproveReturn(r.id)}
+                          disabled={!!returnActionLoading}
+                          className='px-3 py-1.5 bg-[#008060] hover:bg-[#006e52] text-white text-[12px] font-medium rounded-lg transition-colors disabled:opacity-50'
+                        >
+                          {returnActionLoading === r.id
+                            ? 'Refunding…'
+                            : 'Approve & Refund'}
+                        </button>
+                        <button
+                          onClick={() => handleRejectReturn(r.id)}
+                          disabled={!!returnActionLoading}
+                          className='px-3 py-1.5 border border-[#D82C0D] text-[#D82C0D] hover:bg-[#FFF4F4] text-[12px] font-medium rounded-lg transition-colors disabled:opacity-50'
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+          <OrderTimeline order={order} onCommentAdded={reloadOrder} />
         </div>
       </div>
+
+      {showReturnModal && (
+        <ReturnExchangeModal
+          order={order}
+          remainingQty={remainingReturnQty}
+          onSubmit={handleProcessReturn}
+          onClose={() => setShowReturnModal(false)}
+        />
+      )}
     </div>
   )
 }
