@@ -187,6 +187,13 @@ export async function getShippingLabel(id: string): Promise<{
 }> {
   return api(`/api/admin/orders/${id}/shipping-label`)
 }
+export async function resendOrderConfirmation(id: string): Promise<{
+  sent: boolean
+  to: string
+  sentAt: string
+}> {
+  return mutate(`/api/admin/orders/${id}/resend-confirmation`, 'POST')
+}
 export async function processOrderReturn(
   id: string,
   items: {
