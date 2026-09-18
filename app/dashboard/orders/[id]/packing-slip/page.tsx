@@ -2,6 +2,13 @@
 
 import { use, useEffect, useState } from 'react'
 import { getOrder } from '@/lib/api/dashboard'
+import {
+  SITE_LOGO,
+  STORE_DISPLAY_NAME,
+  STORE_ADDRESS_LINE1,
+  STORE_ADDRESS_LINE2,
+  CONTACT_EMAIL,
+} from '@/lib/constants'
 
 function fmt(amount: number, currency = 'GBP') {
   const symbol =
@@ -105,22 +112,30 @@ export default function PackingSlipPage({
 
       {/* Packing Slip Content */}
       <div className='max-w-2xl mx-auto p-8 pt-20 print:pt-0'>
+        {/* Logo */}
+        <div className='flex justify-center mb-6'>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={SITE_LOGO}
+            alt={STORE_DISPLAY_NAME}
+            className='h-14 w-auto'
+          />
+        </div>
+
         {/* Header */}
-        <div className='flex items-start justify-between mb-8 pb-6 border-b border-gray-300'>
+        <div className='flex items-start justify-between mb-8 pb-4 border-b-2 border-[#1e2a6e]'>
           <div>
-            <h1 className='text-2xl font-bold text-gray-900'>
-              SmashRocker Pro Ltd
+            <h1 className='text-2xl font-bold text-[#1e2a6e] tracking-tight'>
+              Packing Slip
             </h1>
-            <p className='text-sm text-gray-500 mt-1'>sales@smashuk.co</p>
+            <p className='text-sm text-gray-500 mt-1'>
+              SmashRocker Pro Ltd &bull; {CONTACT_EMAIL.toLowerCase()}
+            </p>
           </div>
           <div className='text-right'>
-            <h2 className='text-xl font-semibold text-gray-700'>
-              Packing Slip
-            </h2>
-            <p className='text-sm text-gray-500 mt-1'>
+            <h2 className='text-xl font-bold text-[#c8202f]'>
               #{order.display_id ?? id.slice(-6)}
-            </p>
-            <p className='text-sm text-gray-500'>{orderDate}</p>
+            </h2>
           </div>
         </div>
 
@@ -128,7 +143,7 @@ export default function PackingSlipPage({
         <div className='grid grid-cols-2 gap-8 mb-8'>
           {/* Ship To */}
           <div>
-            <p className='text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2'>
+            <p className='text-xs font-semibold text-[#1e2a6e] uppercase tracking-wider mb-2'>
               Ship To
             </p>
             <p className='text-sm font-semibold text-gray-900'>
@@ -160,7 +175,7 @@ export default function PackingSlipPage({
 
           {/* Order Info */}
           <div>
-            <p className='text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2'>
+            <p className='text-xs font-semibold text-[#1e2a6e] uppercase tracking-wider mb-2'>
               Order Info
             </p>
             <div className='space-y-1.5'>
@@ -195,14 +210,14 @@ export default function PackingSlipPage({
         {/* Items Table */}
         <table className='w-full mb-6'>
           <thead>
-            <tr className='border-b-2 border-gray-800'>
-              <th className='text-left text-xs font-semibold text-gray-500 uppercase tracking-wider pb-2 pr-4'>
+            <tr className='border-b-2 border-[#1e2a6e]'>
+              <th className='text-left text-xs font-semibold text-[#1e2a6e] uppercase tracking-wider pb-2 pr-4'>
                 Item
               </th>
-              <th className='text-center text-xs font-semibold text-gray-500 uppercase tracking-wider pb-2 px-4'>
+              <th className='text-center text-xs font-semibold text-[#1e2a6e] uppercase tracking-wider pb-2 px-4'>
                 Qty
               </th>
-              <th className='text-right text-xs font-semibold text-gray-500 uppercase tracking-wider pb-2 pl-4'>
+              <th className='text-right text-xs font-semibold text-[#1e2a6e] uppercase tracking-wider pb-2 pl-4'>
                 Price
               </th>
             </tr>
@@ -266,7 +281,7 @@ export default function PackingSlipPage({
               <span>{fmt(order.tax_total, currency)}</span>
             </div>
           )}
-          <div className='flex justify-between text-base font-bold text-gray-900 pt-2 border-t border-gray-300'>
+          <div className='flex justify-between text-base font-bold text-[#1e2a6e] pt-2 border-t-2 border-[#1e2a6e]'>
             <span>Total</span>
             <span>{fmt(order.total ?? 0, currency)}</span>
           </div>
@@ -284,11 +299,19 @@ export default function PackingSlipPage({
 
         {/* Footer */}
         <div className='mt-10 pt-6 border-t border-gray-200 text-center'>
-          <p className='text-xs text-gray-400'>
-            Thank you for shopping with SmashRocker Pro Ltd
+          <p className='text-sm font-semibold text-[#1e2a6e]'>
+            Thank you for shopping with
           </p>
-          <p className='text-xs text-gray-400 mt-1'>
-            Questions? Contact us at sales@smashuk.co
+          <p className='text-sm font-semibold text-[#1e2a6e]'>
+            SmashRocker Pro Ltd
+          </p>
+          <p className='text-xs text-gray-400 mt-3'>
+            Questions? {CONTACT_EMAIL.toLowerCase()}
+          </p>
+          <p className='text-xs text-gray-400 mt-6'>
+            Smash Racket Pro, {STORE_ADDRESS_LINE1},
+            <br />
+            {STORE_ADDRESS_LINE2}
           </p>
         </div>
       </div>

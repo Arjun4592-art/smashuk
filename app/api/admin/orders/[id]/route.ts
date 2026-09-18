@@ -53,12 +53,14 @@ export async function GET(
   const { id } = await params
   try {
     const FIELDS =
+      'id,display_id,email,created_at,metadata,payment_status,' +
       '*items,*payment_collections.payments,fulfillment_status,' +
       'subtotal,total,discount_total,shipping_total,tax_total,' +
       'customer.first_name,customer.last_name,customer.phone,' +
       'shipping_address.address_1,shipping_address.address_2,shipping_address.city,' +
       'shipping_address.province,shipping_address.postal_code,shipping_address.country_code'
     const FALLBACK_FIELDS =
+      'id,display_id,email,created_at,metadata,payment_status,' +
       '*items,*payment_collections.payments,fulfillment_status,' +
       'subtotal,total,discount_total,shipping_total,tax_total'
     async function fetchOrder(fields: string) {
