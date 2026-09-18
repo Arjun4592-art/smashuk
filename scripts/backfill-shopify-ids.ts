@@ -1,6 +1,13 @@
 import * as dotenv from 'dotenv'
 import * as path from 'path'
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
+// Which env file to load — defaults to .env.local, but pass a different one
+// (e.g. .env.production) via the ENV_FILE variable, so this can be pointed
+// at production without hand-editing .env.local:
+//   PowerShell:  $env:ENV_FILE=".env.production"; npx tsx scripts/backfill-shopify-ids.ts
+//   bash/zsh:    ENV_FILE=.env.production npx tsx scripts/backfill-shopify-ids.ts
+const ENV_FILE = process.env.ENV_FILE || '.env.local'
+dotenv.config({ path: path.resolve(process.cwd(), ENV_FILE), override: true })
+console.log(`   (using env file: ${ENV_FILE})`)
 
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
@@ -300,7 +307,7 @@ async function main() {
 
   let ok = 0
   let failed = 0
-  for (const u of updates) {
+  for (const [i, u] of updates.entries()) {
     const res = await fetch(
       `${MEDUSA_URL}/admin/products/${u.productId}/variants/${u.variantId}`,
       {
@@ -315,6 +322,9 @@ async function main() {
         }),
       },
     )
+    if ((i + 1) % 50 === 0 || i === updates.length - 1) {
+      console.log(`   ...${i + 1}/${updates.length} processed`)
+    }
     if (res.ok) ok++
     else {
       failed++

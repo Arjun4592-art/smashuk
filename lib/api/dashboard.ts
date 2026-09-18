@@ -181,6 +181,12 @@ export async function updateOrderStatus(id: string, action: string) {
     action,
   })
 }
+export async function getShippingLabel(id: string): Promise<{
+  label_url: string
+  tracking_number: string | null
+}> {
+  return api(`/api/admin/orders/${id}/shipping-label`)
+}
 export async function processOrderReturn(
   id: string,
   items: {

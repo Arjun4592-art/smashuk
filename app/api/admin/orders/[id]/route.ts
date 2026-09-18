@@ -326,8 +326,10 @@ export async function PATCH(
             const orderData = await orderRes.json().catch(() => ({}))
             const fullOrder = orderData?.order
             if (fullOrder?.email) {
-              const { subject, html, text } =
-                shippingConfirmationEmail(fullOrder)
+              const { subject, html, text } = shippingConfirmationEmail(
+                fullOrder,
+                { trackingNumber: data?.royalMailTrackingNumber },
+              )
               await sendMail({
                 to: fullOrder.email,
                 subject,

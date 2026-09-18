@@ -19,7 +19,7 @@ const BORDER = '#E5E7EB'
 
 const fmt = (n: number) => '£' + (Number(n) || 0).toFixed(2)
 
-// Small coloured pill shown above the heading — 'confirmed' | 'shipped' | 'refunded' | 'welcome' | 'admin'
+
 function statusBadge(
   kind:
     | 'confirmed'
@@ -226,7 +226,10 @@ export function orderConfirmationEmail(order: any) {
   }
 }
 
-export function shippingConfirmationEmail(order: any) {
+export function shippingConfirmationEmail(
+  order: any,
+  opts: { trackingNumber?: string } = {},
+) {
   const orderNumber = orderNumberOf(order)
   const subject = `Your order ${orderNumber} has shipped — ${SITE_NAME}`
   const address = order.shipping_address
@@ -241,13 +244,27 @@ export function shippingConfirmationEmail(order: any) {
         .filter(Boolean)
         .join(', ')
     : ''
+  const trackingNumber =
+    opts.trackingNumber ?? order.fulfillments?.[0]?.tracking_numbers?.[0]
+  const royalMailTrackUrl = trackingNumber
+    ? `https:
+    : null
   const html = shell(
     statusBadge('shipped'),
     'Your order has shipped',
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Order <strong style="color:${TEXT};">${orderNumber}</strong> has left our warehouse and is on its way to you.
+        Order <strong style="color:${TEXT};">${orderNumber}</strong> has left our warehouse and is on its way to you via Royal Mail.
       </p>
+      ${
+        trackingNumber
+          ? `
+        <div style="margin-top:16px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
+          <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Royal Mail tracking number</p>
+          <p style="margin:0;font-size:14px;font-weight:600;color:${TEXT};">${trackingNumber}</p>
+        </div>`
+          : ''
+      }
       ${itemsTable(order.items ?? [])}
       ${
         addressLine
@@ -258,10 +275,10 @@ export function shippingConfirmationEmail(order: any) {
         </div>`
           : ''
       }
-      ${ctaButton('Track your order', `${SITE_URL}/orders`)}
+      ${ctaButton('Track your order', royalMailTrackUrl ?? `${SITE_URL}/orders`)}
     `,
   )
-  const text = `Order ${orderNumber} has shipped.${addressLine ? ` Shipping to: ${addressLine}` : ''}`
+  const text = `Order ${orderNumber} has shipped.${trackingNumber ? ` Royal Mail tracking number: ${trackingNumber}.` : ''}${addressLine ? ` Shipping to: ${addressLine}` : ''}`
   return { subject, html, text }
 }
 
@@ -481,7 +498,7 @@ export function adminShippingEmail(order: any) {
   return { subject, html, text }
 }
 
-// Sent to the store owner/admin inbox when a customer is notified the order is out for delivery.
+
 export function adminOutForDeliveryEmail(order: any) {
   const orderNumber = orderNumberOf(order)
   const customerName =
@@ -505,7 +522,7 @@ export function adminOutForDeliveryEmail(order: any) {
   return { subject, html, text }
 }
 
-// Sent to the store owner/admin inbox when an order is marked delivered.
+
 export function adminDeliveryEmail(order: any) {
   const orderNumber = orderNumberOf(order)
   const customerName =
@@ -529,7 +546,7 @@ export function adminDeliveryEmail(order: any) {
   return { subject, html, text }
 }
 
-// Sent to the store owner/admin inbox when an order is cancelled.
+
 export function adminCancelledEmail(order: any) {
   const orderNumber = orderNumberOf(order)
   const customerName =
@@ -553,7 +570,7 @@ export function adminCancelledEmail(order: any) {
   return { subject, html, text }
 }
 
-// Sent to the store owner/admin inbox when a refund is processed.
+
 export function adminRefundEmail(order: any, refundAmount: number) {
   const orderNumber = orderNumberOf(order)
   const customerName =
@@ -578,7 +595,7 @@ export function adminRefundEmail(order: any, refundAmount: number) {
   return { subject, html, text }
 }
 
-// Sent to the store owner/admin inbox when a new customer account is created.
+
 export function adminWelcomeEmail(customer: {
   first_name?: string
   last_name?: string
@@ -604,10 +621,10 @@ export function adminWelcomeEmail(customer: {
   const text = `New customer account created — ${name} (${customer.email}). Welcome email sent.`
   return { subject, html, text }
 }
-// Sent to the store owner/admin inbox when a Stripe PaymentIntent fails
-// (card declined, authentication failed, etc). Fired from the Stripe
-// webhook — this is the only place a failed attempt is visible, since a
-// failed payment never reaches the website's own /complete step.
+
+
+
+
 export function adminPaymentFailedEmail(opts: {
   paymentIntentId: string
   amount: number
@@ -635,9 +652,9 @@ export function adminPaymentFailedEmail(opts: {
   return { subject, html, text }
 }
 
-// Sent to the store owner/admin inbox when a customer disputes/chargebacks
-// a charge. Time-sensitive — Stripe requires evidence submitted by
-// evidenceDueBy or the dispute is auto-lost.
+
+
+
 export function adminDisputeEmail(opts: {
   chargeId: string
   paymentIntentId?: string
@@ -661,7 +678,7 @@ export function adminDisputeEmail(opts: {
       <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
         Submit evidence (proof of delivery, communication, etc.) in the Stripe Dashboard under Payments → Disputes before the deadline above, or the dispute is automatically lost.
       </p>
-      ${ctaButton('Open in Stripe Dashboard', `https://dashboard.stripe.com/payments/${opts.paymentIntentId ?? opts.chargeId}`)}
+      ${ctaButton('Open in Stripe Dashboard', `https:
     `,
   )
   const text = `Dispute opened for ${fmt(opts.amount)} ${opts.currency.toUpperCase()}. Reason: ${opts.reason}. Charge: ${opts.chargeId}. Respond by: ${opts.evidenceDueBy ? opts.evidenceDueBy.toISOString() : 'see Stripe dashboard'}.`
@@ -700,7 +717,7 @@ export function adminNewOrderEmail(
   return { subject, html, text }
 }
 
-// Sent to the customer who asked to be notified when a product is back in stock.
+
 export function stockNotifyCustomerEmail(productName: string) {
   const subject = `We'll email you when "${productName}" is back in stock`
   const html = shell(

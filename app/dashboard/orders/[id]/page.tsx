@@ -10,6 +10,7 @@ import {
   processOrderReturn,
   approveOrderReturn,
   rejectOrderReturn,
+  getShippingLabel,
 } from '@/lib/api/dashboard'
 import ReturnOrderModal from '@/components/dashboard/ReturnOrderModal'
 const STATUS_STYLES: Record<string, string> = {
@@ -64,6 +65,22 @@ export default function OrderDetailPage({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [actionLoading, setActionLoading] = useState('')
+  const [labelLoading, setLabelLoading] = useState(false)
+  const handlePrintLabel = async () => {
+    setLabelLoading(true)
+    try {
+      const { label_url } = await getShippingLabel(id)
+      if (!label_url) {
+        toast.error('Royal Mail has not returned a label URL yet.')
+        return
+      }
+      window.open(label_url, '_blank', 'noopener,noreferrer')
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to fetch shipping label')
+    } finally {
+      setLabelLoading(false)
+    }
+  }
   const [confirmAction, setConfirmAction] = useState<
     | null
     | 'confirm'
@@ -291,6 +308,18 @@ export default function OrderDetailPage({
                 {actionLoading === 'fulfill'
                   ? 'Fulfilling…'
                   : 'Mark as Fulfilled'}
+              </button>
+            )}
+          {!isPickup &&
+            order.fulfillment_status &&
+            order.fulfillment_status !== 'not_fulfilled' &&
+            order.fulfillment_status !== 'canceled' && (
+              <button
+                onClick={handlePrintLabel}
+                disabled={labelLoading}
+                className='px-3.5 py-2 border border-[#2C6ECB] text-[#2C6ECB] hover:bg-[#EBF3FC] text-[13px] font-medium rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap'
+              >
+                {labelLoading ? 'Fetching label…' : 'Print Shipping Label'}
               </button>
             )}
           {!isPickup && isReadyToDispatch && order.status !== 'canceled' && (
