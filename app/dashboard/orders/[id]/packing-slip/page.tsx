@@ -82,11 +82,39 @@ export default function PackingSlipPage({
       {/* Print styles */}
       <style>{`
         @media print {
-          .no-print { display: none !important; }
-          body { margin: 0; }
-          @page { margin: 1.5cm; size: A4; }
+          .no-print,
+          aside,
+          header,
+          nav { display: none !important; }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            overflow: visible !important;
+            background: #fff !important;
+          }
+          /* neutralise any dashboard chrome wrapper that clips content */
+          body * {
+            overflow: visible !important;
+            max-height: none !important;
+          }
+          .packing-slip {
+            max-width: none !important;
+            /* page margin lives here, not in @page, so the browser
+               does not draw its own header/footer band */
+            padding: 15mm !important;
+          }
+          table { page-break-inside: auto; }
+          tr { page-break-inside: avoid; page-break-after: auto; }
+          thead { display: table-header-group; }
+          /* margin: 0 suppresses the browser's URL / date / page-number
+             header & footer in Chrome, Edge and Safari */
+          @page { margin: 0; size: A4; }
         }
         body { font-family: Arial, sans-serif; }
+        @media screen {
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
       `}</style>
 
       {/* Screen-only top bar */}
@@ -111,7 +139,7 @@ export default function PackingSlipPage({
       </div>
 
       {/* Packing Slip Content */}
-      <div className='max-w-2xl mx-auto p-8 pt-20 print:pt-0'>
+      <div className='packing-slip max-w-2xl mx-auto p-8 pt-20 print:pt-0 print:p-0'>
         {/* Logo */}
         <div className='flex justify-center mb-6'>
           {/* eslint-disable-next-line @next/next/no-img-element */}
