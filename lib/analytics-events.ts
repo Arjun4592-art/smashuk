@@ -15,6 +15,26 @@ function fireGtagEvent(eventName: string, params: Record<string, any>) {
   window.gtag('event', eventName, params)
 }
 
+// Pushes a standard GA4 Enhanced Ecommerce event onto window.dataLayer, in the
+// {event: 'x', ecommerce: {...}} shape that Google Tag Manager's "Custom Event"
+// triggers and built-in ecommerce variables expect. This is independent of
+// fireGtagEvent() above (which drives the dashboard's own gtag.js pixel) — it
+// exists purely so tags configured inside GTM can listen for these events too.
+// Per Google's recommendation, we clear out any previous `ecommerce` object
+// before pushing a new one, so values don't leak between events.
+// https://developers.google.com/tag-platform/tag-manager/datalayer
+function fireDataLayerEvent(
+  eventName: string,
+  ecommerce: Record<string, any>,
+) {
+  if (typeof window === 'undefined' || !window.dataLayer) return
+  window.dataLayer.push({ ecommerce: null })
+  window.dataLayer.push({
+    event: eventName,
+    ecommerce,
+  })
+}
+
 // Fires the same event to Facebook Pixel, if the pixel has been loaded
 // (i.e. a Facebook Pixel ID is set in Dashboard > Settings > Marketing).
 // The eventId is passed as fbq's `eventID` option so Meta can deduplicate
@@ -181,6 +201,17 @@ export function trackViewItem(params: {
       },
     ],
   })
+  fireDataLayerEvent('view_item', {
+    currency,
+    value: params.price,
+    items: [
+      {
+        item_id: params.itemId,
+        item_name: params.itemName,
+        price: params.price,
+      },
+    ],
+  })
   fireFbqEvent(
     'ViewContent',
     {
@@ -248,6 +279,18 @@ export function trackAddToCart(params: {
       },
     ],
   })
+  fireDataLayerEvent('add_to_cart', {
+    currency,
+    value,
+    items: [
+      {
+        item_id: params.itemId,
+        item_name: params.itemName,
+        price: params.price,
+        quantity: params.quantity,
+      },
+    ],
+  })
   fireFbqEvent(
     'AddToCart',
     {
@@ -284,6 +327,16 @@ export function trackBeginCheckout(params: {
   const currency = params.currency ?? 'GBP'
   const eventId = makeEventId()
   fireGtagEvent('begin_checkout', {
+    currency,
+    value: params.value,
+    items: params.items.map((i) => ({
+      item_id: i.itemId,
+      item_name: i.itemName,
+      price: i.price,
+      quantity: i.quantity,
+    })),
+  })
+  fireDataLayerEvent('begin_checkout', {
     currency,
     value: params.value,
     items: params.items.map((i) => ({
@@ -340,6 +393,17 @@ export async function trackPurchase(params: {
   void setGoogleEnhancedConversionData(params.email, params.phone)
 
   fireGtagEvent('purchase', {
+    transaction_id: params.orderId,
+    currency,
+    value: params.value,
+    items: params.items.map((i) => ({
+      item_id: i.itemId,
+      item_name: i.itemName,
+      price: i.price,
+      quantity: i.quantity,
+    })),
+  })
+  fireDataLayerEvent('purchase', {
     transaction_id: params.orderId,
     currency,
     value: params.value,
