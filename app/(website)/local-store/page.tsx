@@ -1,103 +1,154 @@
-import Link from 'next/link';
-import { SITE_NAME } from '@/lib/constants';
-import { generateStaticMetadata } from '@/lib/seo';
-import { getPublicStoreContact } from '@/lib/store-contact';
-import { getBlogPosts } from '@/lib/blog-posts';
-import BrandsBar from '@/components/website/BrandsBar';
-import ReviewsSlider from '@/components/website/ReviewsSlider';
-import LocalStoreNewArrivals from '@/components/website/LocalStoreNewArrivals';
-import Accordion from '@/components/website/local-store/Accordion';
+import Link from 'next/link'
+import { SITE_NAME } from '@/lib/constants'
+import { generateStaticMetadata } from '@/lib/seo'
+import { getPublicStoreContact } from '@/lib/store-contact'
+import { getBlogPosts } from '@/lib/blog-posts'
+import BrandsBar from '@/components/website/BrandsBar'
+import ReviewsSlider from '@/components/website/ReviewsSlider'
+import LocalStoreNewArrivals from '@/components/website/LocalStoreNewArrivals'
+import Accordion from '@/components/website/local-store/Accordion'
+export const revalidate = 3600
 export async function generateMetadata() {
-  return generateStaticMetadata('local-store');
+  return generateStaticMetadata('local-store')
 }
-const SERVICES = [{
-  icon: '🎾',
-  title: 'Racket Restringing',
-  desc: "We've strung over 10,000 rackets, including for players at major tournaments. Standard turnaround is 24 hours, with an on-the-spot ~40 minute express service available if you're in a hurry before a match.",
-  href: 'https://smashuk-manchester.co.uk/CustomerStatus',
-  image: '/local-store/service-stringing.jpg'
-}, {
-  icon: '🏸',
-  title: 'Advice From Players, Not Just Staff',
-  desc: "Our team plays badminton, tennis, squash and padel at club and county level. We'd rather spend ten minutes understanding your game than sell you the most expensive frame on the wall.",
-  href: null as string | null,
-  image: '/local-store/service-advice.jpg'
-}, {
-  icon: '🔄',
-  title: 'Racket Demo & Trial Service',
-  desc: "Buying a racket blind is a gamble. Try select premium frames in-store before you commit — subject to what's currently available to demo.",
-  href: '/local-store/racket-demo',
-  image: '/local-store/service-demo.jpg'
-}, {
-  icon: '🤝',
-  title: 'Clubs, Universities & Sponsorship',
-  desc: 'We work with local clubs and university teams on bulk kit orders, printed kit, demo racket programmes, shuttlecock and ball supply deals, and sponsorship packages.',
-  href: '/local-store/partnerships',
-  image: '/local-store/service-partnerships.jpg'
-}];
-const BOOKING_STEPS = [{
-  n: '01',
-  title: 'Book',
-  body: 'Reserve your stringing slot online, ideally at least 48 hours ahead so we can guarantee your time.'
-}, {
-  n: '02',
-  title: 'Drop Off',
-  body: 'Bring your racket in at your booked time. Grab a coffee nearby or browse the shop while you wait.'
-}, {
-  n: '03',
-  title: 'Collect',
-  body: 'Pick up your freshly strung racket, tensioned exactly how you asked, and get back on court.'
-}];
-const FAQS = [{
-  q: 'Where are you located and what are your opening hours?',
-  a: 'Monday–Friday 11am–7pm, Saturday 11am–5pm, closed Sundays. See the address and map below.'
-}, {
-  q: 'Where can I park?',
-  a: "Free on-street parking is usually available nearby. Pay-and-display parking at the local supermarket is roughly a minute's walk away, and there's also a free covered car park at the nearby sports centre."
-}, {
-  q: 'Will you help me choose a racket?',
-  a: "Yes — every member of staff plays racket sports themselves, so you'll get advice based on how you actually play, not a sales script."
-}, {
-  q: 'Can I try a racket before buying it?',
-  a: "We run a demo/trial programme on a range of rackets, depending on what's currently in stock to demo."
-}, {
-  q: 'How long does restringing take?',
-  a: 'Standard turnaround is 24 hours with no extra charge. An on-the-spot ~40 minute express service is also available if you book it.'
-}, {
-  q: 'Can I get my racket restrung the same day, without booking?',
-  a: "Call ahead to check availability — we'll always try to help. A small same-day surcharge applies if it wasn't booked in advance."
-}, {
-  q: 'Can I bring my own string?',
-  a: "Yes — bring your own string and we'll only charge the labour cost for stringing it."
-}, {
-  q: "Can you get a specific string I'm after?",
-  a: 'We stock a wide range of strings and can usually source a specific one on request — just call or email us to check.'
-}];
-function Eyebrow({
-  children
-}: {
-  children: React.ReactNode;
-}) {
-  return <span className='inline-block font-montserrat text-[10px] font-bold tracking-[0.2em] uppercase text-[#E8553A] bg-[#E8553A]/8 px-3 py-1 rounded-full mb-4'>
+const SERVICES = [
+  {
+    icon: '🎾',
+    title: 'Racket Restringing',
+    desc: "We've strung over 10,000 rackets, including for players at major tournaments. Standard turnaround is 24 hours, with an on-the-spot ~40 minute express service available if you're in a hurry before a match.",
+    href: 'https://smashuk-manchester.co.uk/CustomerStatus',
+    image: '/local-store/service-stringing.jpg',
+  },
+  {
+    icon: '🏸',
+    title: 'Advice From Players, Not Just Staff',
+    desc: "Our team plays badminton, tennis, squash and padel at club and county level. We'd rather spend ten minutes understanding your game than sell you the most expensive frame on the wall.",
+    href: null as string | null,
+    image: '/local-store/service-advice.jpg',
+  },
+  {
+    icon: '🔄',
+    title: 'Racket Demo & Trial Service',
+    desc: "Buying a racket blind is a gamble. Try select premium frames in-store before you commit — subject to what's currently available to demo.",
+    href: '/local-store/racket-demo',
+    image: '/local-store/service-demo.jpg',
+  },
+  {
+    icon: '🤝',
+    title: 'Clubs, Universities & Sponsorship',
+    desc: 'We work with local clubs and university teams on bulk kit orders, printed kit, demo racket programmes, shuttlecock and ball supply deals, and sponsorship packages.',
+    href: '/local-store/partnerships',
+    image: '/local-store/service-partnerships.jpg',
+  },
+]
+const BOOKING_STEPS = [
+  {
+    n: '01',
+    title: 'Book',
+    body: 'Reserve your stringing slot online, ideally at least 48 hours ahead so we can guarantee your time.',
+  },
+  {
+    n: '02',
+    title: 'Drop Off',
+    body: 'Bring your racket in at your booked time. Grab a coffee nearby or browse the shop while you wait.',
+  },
+  {
+    n: '03',
+    title: 'Collect',
+    body: 'Pick up your freshly strung racket, tensioned exactly how you asked, and get back on court.',
+  },
+]
+const FAQS = [
+  {
+    q: 'Where are you located and what are your opening hours?',
+    a: 'Monday–Friday 11am–7pm, Saturday 11am–5pm, closed Sundays. See the address and map below.',
+  },
+  {
+    q: 'Where can I park?',
+    a: "Free on-street parking is usually available nearby. Pay-and-display parking at the local supermarket is roughly a minute's walk away, and there's also a free covered car park at the nearby sports centre.",
+  },
+  {
+    q: 'Will you help me choose a racket?',
+    a: "Yes — every member of staff plays racket sports themselves, so you'll get advice based on how you actually play, not a sales script.",
+  },
+  {
+    q: 'Can I try a racket before buying it?',
+    a: "We run a demo/trial programme on a range of rackets, depending on what's currently in stock to demo.",
+  },
+  {
+    q: 'How long does restringing take?',
+    a: 'Standard turnaround is 24 hours with no extra charge. An on-the-spot ~40 minute express service is also available if you book it.',
+  },
+  {
+    q: 'Can I get my racket restrung the same day, without booking?',
+    a: "Call ahead to check availability — we'll always try to help. A small same-day surcharge applies if it wasn't booked in advance.",
+  },
+  {
+    q: 'Can I bring my own string?',
+    a: "Yes — bring your own string and we'll only charge the labour cost for stringing it.",
+  },
+  {
+    q: "Can you get a specific string I'm after?",
+    a: 'We stock a wide range of strings and can usually source a specific one on request — just call or email us to check.',
+  },
+]
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span className='inline-block font-montserrat text-[10px] font-bold tracking-[0.2em] uppercase text-[#E8553A] bg-[#E8553A]/8 px-3 py-1 rounded-full mb-4'>
       {children}
-    </span>;
+    </span>
+  )
 }
 function GridTexture() {
-  return <svg className='absolute inset-0 w-full h-full opacity-[0.06]' preserveAspectRatio='none' xmlns='http://www.w3.org/2000/svg'>
+  return (
+    <svg
+      className='absolute inset-0 w-full h-full opacity-[0.06]'
+      preserveAspectRatio='none'
+      xmlns='http://www.w3.org/2000/svg'
+    >
       {Array.from({
-      length: 20
-    }).map((_, i) => <line key={'v' + i} x1={`${i * 5.5}%`} y1='0' x2={`${i * 5.5 + 3}%`} y2='100%' stroke='white' strokeWidth='1' />)}
+        length: 20,
+      }).map((_, i) => (
+        <line
+          key={'v' + i}
+          x1={`${i * 5.5}%`}
+          y1='0'
+          x2={`${i * 5.5 + 3}%`}
+          y2='100%'
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
       {Array.from({
-      length: 12
-    }).map((_, i) => <line key={'h' + i} x1='0' y1={`${i * 9}%`} x2='100%' y2={`${i * 9 + 2}%`} stroke='white' strokeWidth='1' />)}
-    </svg>;
+        length: 12,
+      }).map((_, i) => (
+        <line
+          key={'h' + i}
+          x1='0'
+          y1={`${i * 9}%`}
+          x2='100%'
+          y2={`${i * 9 + 2}%`}
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
+    </svg>
+  )
 }
 export default async function LocalStorePage() {
-  const contact = await getPublicStoreContact();
-  const blogPosts = await getBlogPosts();
-  const fullAddress = [contact.address.line1, contact.address.line2, contact.address.city, contact.address.pincode].filter(Boolean).join(', ');
-  const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${contact.name}, ${fullAddress}`)}`;
-  return <div className='bg-[#F5F3EF] min-h-screen'>
+  const contact = await getPublicStoreContact()
+  const blogPosts = await getBlogPosts()
+  const fullAddress = [
+    contact.address.line1,
+    contact.address.line2,
+    contact.address.city,
+    contact.address.pincode,
+  ]
+    .filter(Boolean)
+    .join(', ')
+  const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${contact.name}, ${fullAddress}`)}`
+  return (
+    <div className='bg-[#F5F3EF] min-h-screen'>
       {}
       <section className='reveal relative bg-[#0A1F44] overflow-hidden'>
         <GridTexture />
@@ -120,36 +171,54 @@ export default async function LocalStorePage() {
                 days a week.
               </p>
               <div className='flex flex-wrap gap-3'>
-                <a href={directionsUrl} target='_blank' rel='noopener noreferrer' className='bg-[#E8553A] hover:bg-[#D4441F] text-white px-7 py-3.5 rounded-full text-sm font-montserrat font-bold transition-colors'>
+                <a
+                  href={directionsUrl}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='bg-[#E8553A] hover:bg-[#D4441F] text-white px-7 py-3.5 rounded-full text-sm font-montserrat font-bold transition-colors'
+                >
                   Visit Us
                 </a>
-                <Link href='/contact' className='border border-white/20 hover:border-white/40 text-white/70 hover:text-white px-7 py-3.5 rounded-full text-sm font-montserrat transition-colors'>
+                <Link
+                  href='/contact'
+                  className='border border-white/20 hover:border-white/40 text-white/70 hover:text-white px-7 py-3.5 rounded-full text-sm font-montserrat transition-colors'
+                >
                   Contact Us
                 </Link>
               </div>
             </div>
 
             <div className='grid grid-cols-2 gap-4'>
-              {[{
-              n: '10k+',
-              label: 'Rackets strung'
-            }, {
-              n: '100+',
-              label: 'Verified reviews'
-            }, {
-              n: '4.5/5',
-              label: 'Average rating'
-            }, {
-              n: '6',
-              label: 'Days open a week'
-            }].map(s => <div key={s.n} className='bg-white/5 border border-white/10 rounded-2xl p-5'>
+              {[
+                {
+                  n: '10k+',
+                  label: 'Rackets strung',
+                },
+                {
+                  n: '100+',
+                  label: 'Verified reviews',
+                },
+                {
+                  n: '4.5/5',
+                  label: 'Average rating',
+                },
+                {
+                  n: '6',
+                  label: 'Days open a week',
+                },
+              ].map((s) => (
+                <div
+                  key={s.n}
+                  className='bg-white/5 border border-white/10 rounded-2xl p-5'
+                >
                   <p className='text-[#E8553A] font-montserrat font-black text-3xl'>
                     {s.n}
                   </p>
                   <p className='text-white/50 text-xs mt-1 leading-snug'>
                     {s.label}
                   </p>
-                </div>)}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -193,9 +262,17 @@ export default async function LocalStorePage() {
           Our Services
         </h2>
         <div className='grid md:grid-cols-2 gap-6'>
-          {SERVICES.map(s => <div key={s.title} className='reveal ls-card bg-white rounded-2xl border border-[#0A1F44]/8 overflow-hidden'>
+          {SERVICES.map((s) => (
+            <div
+              key={s.title}
+              className='reveal ls-card bg-white rounded-2xl border border-[#0A1F44]/8 overflow-hidden'
+            >
               <div className='ls-card-img-wrap'>
-                <img src={s.image} alt={s.title} className='w-full h-40 object-cover' />
+                <img
+                  src={s.image}
+                  alt={s.title}
+                  className='w-full h-40 object-cover'
+                />
               </div>
               <div className='p-6'>
                 <span className='ls-card-icon inline-block text-3xl mb-3'>
@@ -207,11 +284,17 @@ export default async function LocalStorePage() {
                 <p className='text-gray-500 text-sm leading-relaxed'>
                   {s.desc}
                 </p>
-                {s.href && <Link href={s.href} className='ls-link-underline inline-block mt-3 text-sm font-montserrat font-semibold text-[#E8553A]'>
+                {s.href && (
+                  <Link
+                    href={s.href}
+                    className='ls-link-underline inline-block mt-3 text-sm font-montserrat font-semibold text-[#E8553A]'
+                  >
                     Learn More →
-                  </Link>}
+                  </Link>
+                )}
               </div>
-            </div>)}
+            </div>
+          ))}
         </div>
       </section>
 
@@ -228,7 +311,11 @@ export default async function LocalStorePage() {
 
           <div className='hidden md:flex gap-0 relative mb-4'>
             <div className='reveal-line-x absolute top-9 left-9 right-9 h-[2px] bg-gradient-to-r from-[#E8553A]/20 via-[#E8553A]/60 to-[#E8553A]/20' />
-            {BOOKING_STEPS.map(b => <div key={b.n} className='reveal flex-1 flex flex-col items-center px-3'>
+            {BOOKING_STEPS.map((b) => (
+              <div
+                key={b.n}
+                className='reveal flex-1 flex flex-col items-center px-3'
+              >
                 <div className='ls-tap relative z-10 w-[72px] h-[72px] rounded-full border-2 border-[#E8553A] bg-[#0A1F44] flex items-center justify-center mb-5 transition-transform duration-300 hover:scale-110'>
                   <span className='font-montserrat font-black text-[#E8553A] text-lg'>
                     {b.n}
@@ -240,12 +327,14 @@ export default async function LocalStorePage() {
                 <p className='text-white/50 text-xs text-center leading-relaxed'>
                   {b.body}
                 </p>
-              </div>)}
+              </div>
+            ))}
           </div>
 
           <div className='md:hidden space-y-0 relative mb-8'>
             <div className='reveal-line absolute left-[23px] top-8 bottom-8 w-[2px] bg-gradient-to-b from-[#E8553A]/60 to-[#E8553A]/10' />
-            {BOOKING_STEPS.map(b => <div key={b.n} className='reveal flex gap-6 py-5'>
+            {BOOKING_STEPS.map((b) => (
+              <div key={b.n} className='reveal flex gap-6 py-5'>
                 <div className='relative z-10 flex-shrink-0 w-[46px] h-[46px] rounded-full border-2 border-[#E8553A] bg-[#0A1F44] flex items-center justify-center'>
                   <span className='font-montserrat font-black text-[#E8553A] text-sm'>
                     {b.n}
@@ -259,11 +348,15 @@ export default async function LocalStorePage() {
                     {b.body}
                   </p>
                 </div>
-              </div>)}
+              </div>
+            ))}
           </div>
 
           <div className='flex flex-col items-center justify-center gap-4 text-center'>
-            <Link href='https://smashuk-manchester.co.uk/CustomerStatus' className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'>
+            <Link
+              href='https://smashuk-manchester.co.uk/CustomerStatus'
+              className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'
+            >
               Book A Stringing Slot
             </Link>
             <p className='text-xs text-white/40 max-w-sm'>
@@ -289,23 +382,68 @@ export default async function LocalStorePage() {
                 birthday, a tournament prize, or a thank-you.
               </p>
             </div>
-            <Link href='/gift-cards' className='flex-shrink-0 inline-block bg-[#0A1F44] hover:bg-[#142d5e] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'>
+            <Link
+              href='/gift-cards'
+              className='flex-shrink-0 inline-block bg-[#0A1F44] hover:bg-[#142d5e] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'
+            >
               Buy A Gift Card
             </Link>
           </div>
 
           <div className='flex-shrink-0 md:order-2'>
-            <svg width='220' height='140' viewBox='0 0 220 140' className='drop-shadow-lg'>
-              <rect x='4' y='4' width='212' height='132' rx='16' fill='#0A1F44' />
-              <rect x='4' y='4' width='212' height='132' rx='16' fill='none' stroke='#E8553A' strokeWidth='2' />
+            <svg
+              width='220'
+              height='140'
+              viewBox='0 0 220 140'
+              className='drop-shadow-lg'
+            >
+              <rect
+                x='4'
+                y='4'
+                width='212'
+                height='132'
+                rx='16'
+                fill='#0A1F44'
+              />
+              <rect
+                x='4'
+                y='4'
+                width='212'
+                height='132'
+                rx='16'
+                fill='none'
+                stroke='#E8553A'
+                strokeWidth='2'
+              />
               <circle cx='170' cy='30' r='34' fill='#E8553A' opacity='0.15' />
-              <text x='24' y='40' fontFamily='Montserrat, sans-serif' fontWeight='900' fontSize='14' fill='white'>
+              <text
+                x='24'
+                y='40'
+                fontFamily='Montserrat, sans-serif'
+                fontWeight='900'
+                fontSize='14'
+                fill='white'
+              >
                 {SITE_NAME}
               </text>
-              <text x='24' y='90' fontFamily='Montserrat, sans-serif' fontWeight='900' fontSize='20' fill='#E8553A'>
+              <text
+                x='24'
+                y='90'
+                fontFamily='Montserrat, sans-serif'
+                fontWeight='900'
+                fontSize='20'
+                fill='#E8553A'
+              >
                 GIFT CARD
               </text>
-              <text x='24' y='114' fontFamily='monospace' fontSize='11' fill='rgba(255,255,255,0.5)' letterSpacing='2'>
+              <text
+                x='24'
+                y='114'
+                fontFamily='monospace'
+                fontSize='11'
+                fill='rgba(255,255,255,0.5)'
+                letterSpacing='2'
+              >
                 •••• •••• •••• 4821
               </text>
             </svg>
@@ -348,26 +486,42 @@ export default async function LocalStorePage() {
               <div className='flex flex-col gap-2.5 text-sm mb-6'>
                 <span className='text-gray-400'>
                   📞{' '}
-                  <a href={`tel:${contact.phone}`} className='font-semibold text-[#0A1F44]'>
+                  <a
+                    href={`tel:${contact.phone}`}
+                    className='font-semibold text-[#0A1F44]'
+                  >
                     {contact.phone}
                   </a>
                 </span>
                 <span className='text-gray-400'>
                   ✉️{' '}
-                  <a href={`mailto:${contact.email}`} className='font-semibold text-[#0A1F44]'>
+                  <a
+                    href={`mailto:${contact.email}`}
+                    className='font-semibold text-[#0A1F44]'
+                  >
                     {contact.email}
                   </a>
                 </span>
               </div>
-              <Link href='/contact' className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-5 py-2.5 rounded-full text-xs transition-colors'>
+              <Link
+                href='/contact'
+                className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-5 py-2.5 rounded-full text-xs transition-colors'
+              >
                 Contact Us
               </Link>
             </div>
-            <Accordion defaultOpenId={FAQS[0]?.q} containerClassName='divide-y divide-[#0A1F44]/8 border-t border-b border-[#0A1F44]/8' rowClassName='py-4' triggerClassName='font-montserrat font-semibold text-sm text-[#0A1F44]' contentClassName='text-sm text-gray-400 leading-relaxed pt-2' items={FAQS.map(f => ({
-            id: f.q,
-            title: f.q,
-            content: f.a
-          }))} />
+            <Accordion
+              defaultOpenId={FAQS[0]?.q}
+              containerClassName='divide-y divide-[#0A1F44]/8 border-t border-b border-[#0A1F44]/8'
+              rowClassName='py-4'
+              triggerClassName='font-montserrat font-semibold text-sm text-[#0A1F44]'
+              contentClassName='text-sm text-gray-400 leading-relaxed pt-2'
+              items={FAQS.map((f) => ({
+                id: f.q,
+                title: f.q,
+                content: f.a,
+              }))}
+            />
           </div>
         </div>
       </section>
@@ -383,8 +537,17 @@ export default async function LocalStorePage() {
             Written by players.
           </p>
           <div className='grid md:grid-cols-3 gap-4'>
-            {blogPosts.slice(0, 3).map(post => <Link key={post.slug} href={`/blog/${post.slug}`} className='block bg-white/5 border border-white/10 hover:border-[#E8553A]/50 hover:bg-white/8 rounded-2xl overflow-hidden transition-all group'>
-                <img src={post.coverImage} alt={post.title} className='w-full h-36 object-cover' />
+            {blogPosts.slice(0, 3).map((post) => (
+              <Link
+                key={post.slug}
+                href={`/blog/${post.slug}`}
+                className='block bg-white/5 border border-white/10 hover:border-[#E8553A]/50 hover:bg-white/8 rounded-2xl overflow-hidden transition-all group'
+              >
+                <img
+                  src={post.coverImage}
+                  alt={post.title}
+                  className='w-full h-36 object-cover'
+                />
                 <div className='p-6'>
                   <span className='text-[#E8553A] text-xs font-mono tracking-wide uppercase'>
                     {post.category}
@@ -399,7 +562,8 @@ export default async function LocalStorePage() {
                     READ GUIDE →
                   </span>
                 </div>
-              </Link>)}
+              </Link>
+            ))}
           </div>
         </div>
       </section>
@@ -421,19 +585,35 @@ export default async function LocalStorePage() {
               </p>
             </div>
             <div className='flex flex-col sm:flex-row gap-3 w-full md:w-auto'>
-              <a href={directionsUrl} target='_blank' rel='noopener noreferrer' className='bg-[#0A1F44]/5 hover:bg-[#0A1F44]/10 text-[#0A1F44] font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors whitespace-nowrap text-center'>
+              <a
+                href={directionsUrl}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='bg-[#0A1F44]/5 hover:bg-[#0A1F44]/10 text-[#0A1F44] font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors whitespace-nowrap text-center'
+              >
                 📍 Get Directions
               </a>
-              <Link href='/contact' className='bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors whitespace-nowrap text-center'>
+              <Link
+                href='/contact'
+                className='bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-full text-sm transition-colors whitespace-nowrap text-center'
+              >
                 Contact Us
               </Link>
             </div>
           </div>
 
           <div className='md:order-2 flex-shrink-0 w-full md:w-[340px] h-[220px] rounded-2xl overflow-hidden border border-[#0A1F44]/8'>
-            <iframe title={`${contact.name} map`} src={`https://www.google.com/maps?q=${encodeURIComponent(`${contact.name}, ${fullAddress}`)}&output=embed`} width='100%' height='100%' style={{
-            border: 0
-          }} loading='lazy' referrerPolicy='no-referrer-when-downgrade' />
+            <iframe
+              title={`${contact.name} map`}
+              src={`https://www.google.com/maps?q=${encodeURIComponent(`${contact.name}, ${fullAddress}`)}&output=embed`}
+              width='100%'
+              height='100%'
+              style={{
+                border: 0,
+              }}
+              loading='lazy'
+              referrerPolicy='no-referrer-when-downgrade'
+            />
           </div>
         </div>
       </section>
@@ -450,5 +630,6 @@ export default async function LocalStorePage() {
           ring with any questions!
         </p>
       </section>
-    </div>;
+    </div>
+  )
 }

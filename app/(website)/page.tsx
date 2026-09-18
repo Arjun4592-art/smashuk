@@ -16,6 +16,7 @@ import Link from 'next/link'
 import ReviewsSlider from '@/components/website/ReviewsSlider'
 import { getPromoBanner } from '@/lib/promo-banner'
 export const generateMetadata = () => generateStaticMetadata('home')
+export const revalidate = 3600
 const TRUST_FEATURES = [
   {
     icon: <TruckIcon size={24} />,

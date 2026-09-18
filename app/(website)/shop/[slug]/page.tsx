@@ -10,6 +10,7 @@ import type { Metadata } from 'next'
 import { SITE_NAME, SITE_URL } from '@/lib/constants'
 import { generateProductSchema, safeJsonLd } from '@/lib/seo'
 import { stripHtml } from '@/lib/utils'
+export const revalidate = 3600
 interface Props {
   params: Promise<{
     slug: string

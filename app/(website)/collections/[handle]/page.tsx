@@ -16,6 +16,8 @@ export function generateStaticParams() {
   return getAllCollectionHandles().map((handle) => ({ handle }))
 }
 
+export const revalidate = 3600
+
 export async function generateMetadata({
   params,
 }: {
