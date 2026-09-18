@@ -19,7 +19,6 @@ const BORDER = '#E5E7EB'
 
 const fmt = (n: number) => '£' + (Number(n) || 0).toFixed(2)
 
-
 function statusBadge(
   kind:
     | 'confirmed'
@@ -247,7 +246,7 @@ export function shippingConfirmationEmail(
   const trackingNumber =
     opts.trackingNumber ?? order.fulfillments?.[0]?.tracking_numbers?.[0]
   const royalMailTrackUrl = trackingNumber
-    ? `https:
+    ? `https://www.royalmail.com/track-your-item#/tracking-results/${encodeURIComponent(trackingNumber)}`
     : null
   const html = shell(
     statusBadge('shipped'),
@@ -498,7 +497,6 @@ export function adminShippingEmail(order: any) {
   return { subject, html, text }
 }
 
-
 export function adminOutForDeliveryEmail(order: any) {
   const orderNumber = orderNumberOf(order)
   const customerName =
@@ -521,7 +519,6 @@ export function adminOutForDeliveryEmail(order: any) {
   const text = `Order ${orderNumber} marked out for delivery. Customer: ${customerName} (${order.email ?? 'no email'}). Out-for-delivery email sent.`
   return { subject, html, text }
 }
-
 
 export function adminDeliveryEmail(order: any) {
   const orderNumber = orderNumberOf(order)
@@ -546,7 +543,6 @@ export function adminDeliveryEmail(order: any) {
   return { subject, html, text }
 }
 
-
 export function adminCancelledEmail(order: any) {
   const orderNumber = orderNumberOf(order)
   const customerName =
@@ -569,7 +565,6 @@ export function adminCancelledEmail(order: any) {
   const text = `Order ${orderNumber} cancelled. Customer: ${customerName} (${order.email ?? 'no email'}). Cancellation email sent.`
   return { subject, html, text }
 }
-
 
 export function adminRefundEmail(order: any, refundAmount: number) {
   const orderNumber = orderNumberOf(order)
@@ -594,7 +589,6 @@ export function adminRefundEmail(order: any, refundAmount: number) {
   const text = `Refund of ${fmt(refundAmount)} processed for order ${orderNumber}. Customer: ${customerName} (${order.email ?? 'no email'}). Refund confirmation email sent.`
   return { subject, html, text }
 }
-
 
 export function adminWelcomeEmail(customer: {
   first_name?: string
@@ -621,9 +615,6 @@ export function adminWelcomeEmail(customer: {
   const text = `New customer account created — ${name} (${customer.email}). Welcome email sent.`
   return { subject, html, text }
 }
-
-
-
 
 export function adminPaymentFailedEmail(opts: {
   paymentIntentId: string
@@ -652,9 +643,6 @@ export function adminPaymentFailedEmail(opts: {
   return { subject, html, text }
 }
 
-
-
-
 export function adminDisputeEmail(opts: {
   chargeId: string
   paymentIntentId?: string
@@ -678,7 +666,7 @@ export function adminDisputeEmail(opts: {
       <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
         Submit evidence (proof of delivery, communication, etc.) in the Stripe Dashboard under Payments → Disputes before the deadline above, or the dispute is automatically lost.
       </p>
-      ${ctaButton('Open in Stripe Dashboard', `https:
+      ${ctaButton('Open in Stripe Dashboard', 'https://dashboard.stripe.com/disputes')}
     `,
   )
   const text = `Dispute opened for ${fmt(opts.amount)} ${opts.currency.toUpperCase()}. Reason: ${opts.reason}. Charge: ${opts.chargeId}. Respond by: ${opts.evidenceDueBy ? opts.evidenceDueBy.toISOString() : 'see Stripe dashboard'}.`
@@ -716,7 +704,6 @@ export function adminNewOrderEmail(
   const text = `New order ${orderNumber} — ${customerName} — Total ${fmt(order.total)}`
   return { subject, html, text }
 }
-
 
 export function stockNotifyCustomerEmail(productName: string) {
   const subject = `We'll email you when "${productName}" is back in stock`
