@@ -347,36 +347,49 @@ export default function CheckoutPage() {
   const pickupOption = shippingOptions.find((o) => isPickupOption(o.name ?? ''))
   const isFreeDeliveryOption = (opt: any) =>
     !isPickupOption(opt.name ?? '') && /free/i.test(opt.name ?? '')
+  const isExpressDeliveryOption = (opt: any) =>
+    !isPickupOption(opt.name ?? '') &&
+    !isFreeDeliveryOption(opt) &&
+    /express|fast|tracked ?24|next.?day/i.test(opt.name ?? '')
   const isPaidDeliveryOption = (opt: any) =>
-    !isPickupOption(opt.name ?? '') && !isFreeDeliveryOption(opt)
+    !isPickupOption(opt.name ?? '') &&
+    !isFreeDeliveryOption(opt) &&
+    !isExpressDeliveryOption(opt)
   const freeDeliveryOption = shippingOptions.find(isFreeDeliveryOption)
   const paidDeliveryOption = shippingOptions.find(isPaidDeliveryOption)
+  // The default/standard delivery option shown by default — free if the
+  // order qualifies, otherwise the regular paid ("Standard"/Tracked 48)
+  // option. Express is never auto-selected; it's an opt-in upgrade the
+
   const resolvedDeliveryOption =
     (physicalSubtotal >= freeShippingThreshold
       ? freeDeliveryOption
       : paidDeliveryOption) ??
     freeDeliveryOption ??
     paidDeliveryOption
-  const resolvedDeliveryAmount =
-    resolvedDeliveryOption === freeDeliveryOption
-      ? 0
-      : (resolvedDeliveryOption?.calculated_price?.calculated_amount ??
-        resolvedDeliveryOption?.amount ??
-        0)
+
+  const expressDeliveryOption = shippingOptions.find(isExpressDeliveryOption)
+  const isExpressSelected =
+    !!expressDeliveryOption &&
+    selectedShippingOptionId === expressDeliveryOption.id
   const isPickupSelected =
     !!pickupOption && selectedShippingOptionId === pickupOption.id
+  const activeDeliveryOption = isExpressSelected
+    ? expressDeliveryOption
+    : resolvedDeliveryOption
   const displayShipping = isPickupSelected
     ? 0
-    : resolvedDeliveryOption
-      ? resolvedDeliveryAmount
-      : shipping
-  // tax is the VAT already included within subtotal/shipping (informational only) — do not add it again
+    : activeDeliveryOption === freeDeliveryOption
+      ? 0
+      : (activeDeliveryOption?.calculated_price?.calculated_amount ??
+        activeDeliveryOption?.amount ??
+        shipping)
+
   const displayTotal = Math.max(
     0,
     subtotal - discountAmount + displayShipping - giftCardTotal,
   )
-  // Recompute the VAT breakdown against the actual resolved shipping option so the
-  // "Including £X in taxes" footnote always matches what's really being charged.
+
   const displayTax =
     Math.round((displayTotal - displayTotal / (1 + taxRate)) * 100) / 100
   useEffect(() => {
@@ -387,7 +400,11 @@ export default function CheckoutPage() {
       return
     }
     if (!resolvedDeliveryOption) return
-    if (selectedShippingOptionId !== resolvedDeliveryOption.id) {
+
+    const selectionStillValid = shippingOptions.some(
+      (o) => o.id === selectedShippingOptionId,
+    )
+    if (!selectionStillValid) {
       setSelectedShippingOptionId(resolvedDeliveryOption.id)
     }
   }, [
@@ -395,11 +412,11 @@ export default function CheckoutPage() {
     resolvedDeliveryOption?.id,
     pickupOption,
     selectedShippingOptionId,
+    shippingOptions,
   ])
   useEffect(() => {
     if (!cardClientSecret || paymentElementReady || cardLoadError) return
-    // If Stripe hasn't fired onReady/onLoadError within 8s, something failed silently
-    // (blocked script, invalid key, network issue) — surface it instead of pretending it's ready.
+
     const timer = setTimeout(() => {
       setCardLoadError(
         'Card form is taking too long to load. Please disable any ad blockers/privacy extensions, check your connection, and refresh the page.',
@@ -1023,6 +1040,50 @@ export default function CheckoutPage() {
                     </span>
                   )}
                 </div>
+                {!isPickupSelected &&
+                  expressDeliveryOption &&
+                  expressDeliveryOption.id !== resolvedDeliveryOption?.id && (
+                    <button
+                      type='button'
+                      onClick={() =>
+                        setSelectedShippingOptionId(
+                          isExpressSelected
+                            ? (resolvedDeliveryOption?.id ?? '')
+                            : expressDeliveryOption.id,
+                        )
+                      }
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-xs transition-colors ${
+                        isExpressSelected
+                          ? 'border-[#0A1F44] bg-[#0A1F44]/5 text-[#0A1F44]'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      <span className='flex items-center gap-1.5'>
+                        <span
+                          className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
+                            isExpressSelected
+                              ? 'border-[#0A1F44]'
+                              : 'border-gray-300'
+                          }`}
+                        >
+                          {isExpressSelected && (
+                            <span className='w-1.5 h-1.5 rounded-full bg-[#0A1F44]' />
+                          )}
+                        </span>
+                        Need it faster? Upgrade to{' '}
+                        {expressDeliveryOption.name ?? 'Express'}
+                      </span>
+                      <span className='font-semibold'>
+                        +
+                        {formatCurrency(
+                          expressDeliveryOption.calculated_price
+                            ?.calculated_amount ??
+                            expressDeliveryOption.amount ??
+                            0,
+                        )}
+                      </span>
+                    </button>
+                  )}
                 <div className='flex justify-between border-t border-gray-100 pt-3 text-base'>
                   <span className='font-montserrat font-black text-[#0A1F44]'>
                     Total

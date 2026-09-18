@@ -371,6 +371,18 @@ export default function OrderDetailPage({
                 Process Return
               </button>
             )}
+          <button
+            onClick={() =>
+              window.open(
+                `/dashboard/orders/${id}/packing-slip`,
+                '_blank',
+                'noopener,noreferrer',
+              )
+            }
+            className='px-3.5 py-2 border border-[#E1E3E5] text-[#6D7175] hover:bg-[#F6F6F7] text-[13px] font-medium rounded-lg transition-colors whitespace-nowrap'
+          >
+            🖨️ Print Packing Slip
+          </button>
         </div>
       </div>
 
