@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     //   - No response caching added. Staff expect the list to reflect an edit
     //     immediately after saving — unlike the storefront/POS fixes, a stale
     //     cache here would actively mislead someone mid-edit.
-    'id,title,handle,status,thumbnail,metadata,*images,*categories,*variants,variants.id,variants.title,variants.sku,variants.barcode,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels',
+    'id,title,handle,status,thumbnail,metadata,*images,*categories,*variants,variants.id,variants.title,variants.sku,variants.barcode,variants.ean,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels',
   )
   try {
     const res = await fetch(`${MEDUSA_URL}/admin/products?${params}`, {

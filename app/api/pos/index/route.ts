@@ -42,7 +42,7 @@ async function requirePosSession(): Promise<boolean> {
 // inventory joins) carried by every one of ~1700 products on every load.
 // An index entry carries none of that.
 const INDEX_FIELDS =
-  'id,title,+metadata,*categories,variants.id,variants.sku,*variants.options,variants.options.value,*variants.options.option,variants.options.option.title,*sales_channels'
+  'id,title,+metadata,*categories,variants.id,variants.sku,variants.ean,variants.barcode,*variants.options,variants.options.value,*variants.options.option,variants.options.option.title,*sales_channels'
 const PAGE_SIZE = 200
 const CONCURRENCY = 12
 
@@ -123,6 +123,9 @@ export interface POSIndexEntry {
   productId: string
   variantId: string
   sku: string
+  /** EAN / barcode — scanned codes match against these before SKU. */
+  ean?: string
+  barcode?: string
   name: string
   brand: string
   category: string
@@ -163,6 +166,8 @@ export async function GET() {
           productId: p.id,
           variantId: variant.id,
           sku: variant.sku ?? `${p.id}-${variant.id}`,
+          ean: variant.ean ?? undefined,
+          barcode: variant.barcode ?? undefined,
           name: p.title ?? 'Unknown Product',
           brand: p.metadata?.brand ?? 'Unknown',
           category,

@@ -69,6 +69,7 @@ interface Variant {
   options: VariantOptionEntry[]
   colorCode: string
   sku: string
+  ean: string
   price: string
   stock: string
   imageUrls: string[]
@@ -179,6 +180,7 @@ export default function AddProductPage() {
     categoryName: '',
     sku: '',
     barcode: '',
+    ean: '',
     price: '',
     comparePrice: '',
     costPrice: '',
@@ -207,6 +209,7 @@ export default function AddProductPage() {
       ],
       colorCode: '',
       sku: '',
+      ean: '',
       price: '',
       stock: '',
       imageUrls: [],
@@ -277,6 +280,7 @@ export default function AddProductPage() {
         ],
         colorCode: '',
         sku: '',
+        ean: '',
         price: '',
         stock: '',
         imageUrls: [],
@@ -557,6 +561,7 @@ export default function AddProductPage() {
       title: 'Default',
       sku: form.sku || undefined,
       barcode: form.barcode || undefined,
+      ean: form.ean || undefined,
       manage_inventory: form.trackInventory,
       prices: form.price
         ? [
@@ -578,6 +583,7 @@ export default function AddProductPage() {
         return {
           title: filled.map((o) => o.value.trim()).join(' / '),
           sku: v.sku || undefined,
+          ean: v.ean || undefined,
           manage_inventory: form.trackInventory,
           prices: v.price
             ? [
@@ -1163,7 +1169,7 @@ export default function AddProductPage() {
                     </select>
                   </div>
 
-                  <div className='grid grid-cols-2 gap-4'>
+                  <div className='grid grid-cols-1 sm:grid-cols-3 gap-4'>
                     <div>
                       <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
                         SKU
@@ -1173,6 +1179,22 @@ export default function AddProductPage() {
                         value={form.sku}
                         onChange={(e) => updateForm('sku', e.target.value)}
                         placeholder='e.g. FB-001'
+                        className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                      />
+                    </div>
+                    <div>
+                      <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                        EAN
+                      </label>
+                      <input
+                        type='text'
+                        inputMode='numeric'
+                        maxLength={14}
+                        value={form.ean}
+                        onChange={(e) =>
+                          updateForm('ean', e.target.value.replace(/\D/g, ''))
+                        }
+                        placeholder='EAN-13 e.g. 8435214012345'
                         className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
                       />
                     </div>
@@ -1937,48 +1959,60 @@ export default function AddProductPage() {
                           </div>
                         </div>
 
-                        <div className='grid grid-cols-3 gap-3'>
-                          {(['sku', 'price', 'stock'] as const).map((field) => (
-                            <div key={field}>
-                              <label className='block text-[11.5px] text-[#6D7175] mb-1 capitalize'>
-                                {field === 'price' ? 'Price (£)' : field}
-                              </label>
-                              <input
-                                type={
-                                  ['price', 'stock'].includes(field)
-                                    ? 'number'
-                                    : 'text'
-                                }
-                                value={variant[field]}
-                                onChange={(e) =>
-                                  updateVariant(
-                                    variant.id,
-                                    field,
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder={
-                                  field === 'sku'
-                                    ? 'e.g. FB-001-BLK-8'
-                                    : field === 'price'
-                                      ? form.price
-                                        ? `${form.price} (product price)`
-                                        : '0.00'
-                                      : '0'
-                                }
-                                className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
-                              />
-                              {field === 'price' && (
-                                <p className='text-[10.5px] text-[#8C9196] mt-1'>
-                                  {variant.price
-                                    ? 'Overrides the product price for this variant.'
-                                    : form.price
-                                      ? `Blank = uses product price (£${form.price}). Enter a value to set a different price for this variant.`
-                                      : 'Blank = uses the product price above.'}
-                                </p>
-                              )}
-                            </div>
-                          ))}
+                        <div className='grid grid-cols-2 gap-3'>
+                          {(['sku', 'ean', 'price', 'stock'] as const).map(
+                            (field) => (
+                              <div key={field}>
+                                <label className='block text-[11.5px] text-[#6D7175] mb-1 capitalize'>
+                                  {field === 'price'
+                                    ? 'Price (£)'
+                                    : field === 'ean'
+                                      ? 'EAN'
+                                      : field}
+                                </label>
+                                <input
+                                  type={
+                                    ['price', 'stock'].includes(field)
+                                      ? 'number'
+                                      : 'text'
+                                  }
+                                  value={variant[field]}
+                                  onChange={(e) =>
+                                    updateVariant(
+                                      variant.id,
+                                      field,
+                                      field === 'ean'
+                                        ? e.target.value
+                                            .replace(/\D/g, '')
+                                            .slice(0, 14)
+                                        : e.target.value,
+                                    )
+                                  }
+                                  placeholder={
+                                    field === 'sku'
+                                      ? 'e.g. FB-001-BLK-8'
+                                      : field === 'ean'
+                                        ? 'EAN-13'
+                                        : field === 'price'
+                                          ? form.price
+                                            ? `${form.price} (product price)`
+                                            : '0.00'
+                                          : '0'
+                                  }
+                                  className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
+                                />
+                                {field === 'price' && (
+                                  <p className='text-[10.5px] text-[#8C9196] mt-1'>
+                                    {variant.price
+                                      ? 'Overrides the product price for this variant.'
+                                      : form.price
+                                        ? `Blank = uses product price (£${form.price}). Enter a value to set a different price for this variant.`
+                                        : 'Blank = uses the product price above.'}
+                                  </p>
+                                )}
+                              </div>
+                            ),
+                          )}
                         </div>
 
                         {}

@@ -84,6 +84,8 @@ export interface ProductOption {
 export interface ProductVariant {
   id: string
   sku?: string
+  ean?: string
+  barcode?: string
   title?: string
   prices?: {
     amount: number

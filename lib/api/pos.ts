@@ -57,6 +57,8 @@ export interface CreatePOSOrderPayload {
   stripe_payment_intent_id?: string
   stripe_payment_amount?: number
   fulfillment_type?: 'pickup' | 'ship'
+  /** Only used when fulfillment_type is 'ship'. Defaults to standard. */
+  shipping_speed?: 'standard' | 'express'
   shipping_address?: {
     first_name: string
     last_name: string
@@ -649,6 +651,9 @@ export interface POSIndexEntry {
   productId: string
   variantId: string
   sku: string
+  /** EAN / barcode — scanned codes match against these before SKU. */
+  ean?: string
+  barcode?: string
   name: string
   brand: string
   category: string

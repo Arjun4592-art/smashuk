@@ -112,6 +112,7 @@ export default function BillingPage() {
     customer,
     orderNote,
     fulfillmentType,
+    shippingSpeed,
     shippingAddress,
     // Kept in the store and still loaded in the background (see the
     // effect below) for other POS surfaces (returns, saved carts,
@@ -235,14 +236,18 @@ export default function BillingPage() {
   // the title/value chip lists so every dimension is browsable, not just
   // whichever happened to be first.
   const SIZE_TITLES = Array.from(
-    new Set(productsInCat.flatMap((p:any) => p.sizes.map((s:any) => s.title))),
+    new Set(
+      productsInCat.flatMap((p: any) => p.sizes.map((s: any) => s.title)),
+    ),
   ).sort((a, b) => a.localeCompare(b))
   const sizeValuesForTitle = (title: string) =>
     sortSizeValues(
       Array.from(
         new Set(
-          productsInCat.flatMap((p:any) =>
-            p.sizes.filter((s:any) => s.title === title).map((s:any) => s.value),
+          productsInCat.flatMap((p: any) =>
+            p.sizes
+              .filter((s: any) => s.title === title)
+              .map((s: any) => s.value),
           ),
         ),
       ),
@@ -260,15 +265,17 @@ export default function BillingPage() {
   const MAX_VISIBLE = 100
   const matchedIndexEntries = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return indexEntries.filter((p:any) => {
+    return indexEntries.filter((p: any) => {
       const matchCat = cat === 'All' || p.category === cat
       const matchSize =
         size === 'All sizes' ||
-        p.sizes.some((s:any) => s.title === sizeTitle && s.value === size)
+        p.sizes.some((s: any) => s.title === sizeTitle && s.value === size)
       const matchSearch =
         !q ||
         (p.name ?? '').toLowerCase().includes(q) ||
-        (p.sku ?? '').toLowerCase().includes(q)
+        (p.sku ?? '').toLowerCase().includes(q) ||
+        (p.ean ?? '').includes(q) ||
+        (p.barcode ?? '').toLowerCase().includes(q)
       return matchCat && matchSize && matchSearch
     })
   }, [indexEntries, cat, size, sizeTitle, search])
@@ -388,14 +395,23 @@ export default function BillingPage() {
     // the full catalogue. This is also why scanning stays reliable: it
     // never depends on Medusa's own admin search, which doesn't cover SKU
     // (see app/api/pos/index/route.ts).
+    // A scanner types the EAN/barcode, so try an exact EAN/barcode hit first,
+    // then fall back to SKU exactly as before.
+    const byEan = indexEntries.find(
+      (p) =>
+        (p.ean ?? '').toLowerCase() === q ||
+        (p.barcode ?? '').toLowerCase() === q,
+    )
     const bySku =
+      byEan ??
       indexEntries.find((p) => p.sku.toLowerCase() === q) ??
       indexEntries.find((p) => p.sku.toLowerCase().includes(q))
     const byExactName = indexEntries.find((p) => p.name.toLowerCase() === q)
     const partialMatches = indexEntries.filter(
       (p) =>
         (p.name ?? '').toLowerCase().includes(q) ||
-        (p.sku ?? '').toLowerCase().includes(q),
+        (p.sku ?? '').toLowerCase().includes(q) ||
+        (p.ean ?? '').includes(q),
     )
     const match =
       bySku ??
@@ -617,6 +633,7 @@ export default function BillingPage() {
           cashier: cashierName,
           region_id: regionId,
           fulfillment_type: fulfillmentType,
+          shipping_speed: shippingSpeed,
           shipping_address:
             fulfillmentType === 'ship' && shippingAddress
               ? shippingAddress
@@ -772,6 +789,7 @@ export default function BillingPage() {
     paymentMethod,
     splitPayments,
     fulfillmentType,
+    shippingSpeed,
     shippingAddress,
     orderNote,
   ])

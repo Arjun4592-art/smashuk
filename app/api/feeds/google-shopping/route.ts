@@ -100,7 +100,7 @@ function buildItemXml(product: any, variant: any): string {
   const image = product.images?.[0]?.url ?? product.thumbnail ?? ''
   const link = `${SITE_URL}/shop/${product.handle}`
   const brand = product.metadata?.brand || SITE_NAME
-  const gtin = variant.barcode || undefined
+  const gtin = variant.ean || variant.barcode || undefined
   const title =
     variant.title && variant.title !== 'Default'
       ? `${product.title} - ${variant.title}`
