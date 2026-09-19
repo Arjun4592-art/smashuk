@@ -106,7 +106,11 @@ export async function POST(req: NextRequest) {
           : body.title.slice(0, 57).trim() + '...'
     }
     if (!body.metadata.metaDescription) {
-      const clean = (body.description ?? '').replace(/\s+/g, ' ').trim()
+      const clean = (body.description ?? '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
       const fallback =
         clean ||
         `Buy ${body.title ?? 'this product'} online at Smash Racket Pro. Fast UK delivery, genuine products, easy returns.`

@@ -595,7 +595,17 @@ export async function POST(request: NextRequest) {
       )
       const options = shippingOptsData.shipping_options ?? []
       const isPickupOptionName = (name: string) =>
-        /pickup|store|pos/i.test(name ?? '')
+        // FIX: was missing "collect" — website checkout and
+        // fix-royal-mail-provider.ts both use /pickup|store|collect/i to
+        // detect the in-store pickup option. This one used "pos" instead
+        // of "collect", so an option named e.g. "Collect in Store" was
+        // never recognised as pickup here and POS pickup sales fell
+        // through to options[0] — a real courier (Royal Mail) option —
+        // with no shipping address ever collected. That's what breaks
+        // "Mark as Fulfilled" for in-store orders. Keep this regex in
+        // sync with the other two call sites if the naming convention
+        // ever changes.
+        /pickup|store|collect/i.test(name ?? '')
       const isFreeOptionName = (name: string) =>
         !isPickupOptionName(name) && /free/i.test(name ?? '')
       let chosen: any = null

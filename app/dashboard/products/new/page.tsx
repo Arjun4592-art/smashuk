@@ -12,6 +12,7 @@ import {
   upsertProductTags,
 } from '@/lib/api/dashboard'
 import { toast } from 'sonner'
+import RichTextEditor from '@/components/dashboard/Richtexteditor'
 import { compressImageForUpload } from '@/lib/image-compress'
 import ImageCropModal from '@/components/dashboard/ImageCropModal'
 function buildAutoMetaTitle(name: string, brand: string): string {
@@ -800,17 +801,18 @@ export default function AddProductPage() {
       setSaving(false)
     }
   }
-  const profit =
-    form.price && form.costPrice
-      ? (parseFloat(form.price) - parseFloat(form.costPrice)).toFixed(0)
-      : null
+  // Cost is entered ex-VAT, so add 20% VAT to get the real cost before
+  // calculating profit and margin (e.g. 139.99 - (5 x 1.2)).
+  const COST_VAT_RATE = 0.2
+  const priceNum = parseFloat(form.price)
+  const costNum = parseFloat(form.costPrice)
+  const costIncVat = costNum * (1 + COST_VAT_RATE)
+  const hasMargin =
+    !!form.price && !!form.costPrice && !isNaN(priceNum) && !isNaN(costNum)
+  const profit = hasMargin ? (priceNum - costIncVat).toFixed(2) : null
   const margin =
-    form.price && form.costPrice
-      ? (
-          ((parseFloat(form.price) - parseFloat(form.costPrice)) /
-            parseFloat(form.price)) *
-          100
-        ).toFixed(1)
+    hasMargin && priceNum > 0
+      ? (((priceNum - costIncVat) / priceNum) * 100).toFixed(1)
       : null
   const TABS = [
     {
@@ -1024,14 +1026,10 @@ export default function AddProductPage() {
                     <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
                       Description
                     </label>
-                    <textarea
+                    <RichTextEditor
                       value={form.description}
-                      onChange={(e) =>
-                        updateForm('description', e.target.value)
-                      }
+                      onChange={(html) => updateForm('description', html)}
                       placeholder='Describe your product in detail...'
-                      rows={5}
-                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all resize-none'
                     />
                   </div>
 
@@ -1443,7 +1441,7 @@ export default function AddProductPage() {
                       <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
                         Cost per Item{' '}
                         <span className='ml-1 text-[11px] text-[#8C9196] font-normal'>
-                          (for margin calc)
+                          (before VAT, for margin calc)
                         </span>
                       </label>
                       <div className='relative'>
@@ -1472,6 +1470,9 @@ export default function AddProductPage() {
                           </p>
                           <p className='text-[11.5px] text-[#6D7175] mt-0.5'>
                             Margin: {margin}%
+                          </p>
+                          <p className='text-[10.5px] text-[#8C9196] mt-0.5'>
+                            Cost incl. 20% VAT: £{costIncVat.toFixed(2)}
                           </p>
                         </div>
                       ) : (
