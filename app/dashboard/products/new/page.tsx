@@ -898,6 +898,13 @@ export default function AddProductPage() {
         </div>
         <div className='flex items-center gap-2'>
           <button
+            onClick={() => handleSave('draft')}
+            disabled={saving}
+            className='px-4 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors disabled:opacity-50 cursor-pointer'
+          >
+            Save as Draft
+          </button>
+          <button
             onClick={() => handleSave('active')}
             disabled={saving}
             className='px-4 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-2'
@@ -2521,12 +2528,13 @@ export default function AddProductPage() {
                 <path d='M20 6L9 17l-5-5' />
               </svg>
               <p className='text-[13px] font-medium text-[#202223]'>
-                Published on save
+                Publish or save as draft
               </p>
             </div>
             <p className='text-[11.5px] text-[#6D7175] mt-1'>
-              Every new product goes live on the storefront and POS as soon as
-              you save it — no separate publish step.
+              &quot;Save &amp; Publish&quot; makes the product live on the
+              storefront and POS. &quot;Save as Draft&quot; keeps it hidden
+              until you publish it from the product&apos;s edit page.
             </p>
           </div>
 
@@ -2656,6 +2664,13 @@ export default function AddProductPage() {
               className='w-full py-2.5 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer border-none'
             >
               {saving ? 'Saving...' : 'Save & Publish'}
+            </button>
+            <button
+              onClick={() => handleSave('draft')}
+              disabled={saving}
+              className='w-full py-2.5 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors disabled:opacity-50 cursor-pointer'
+            >
+              Save as Draft
             </button>
             <Link
               href='/dashboard/products'
