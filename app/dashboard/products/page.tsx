@@ -369,7 +369,12 @@ export default function ProductsPage() {
       const stockStr = getField(row, 'Stock')
       const categoryName = getField(row, 'Category').toLowerCase().trim()
       const statusRaw = getField(row, 'Status').toLowerCase().trim()
-      const status = statusRaw === 'draft' ? 'draft' : 'published'
+      // Only publish when the CSV says so (or has no status at all). Draft /
+      // archived / proposed / rejected etc. must never go live by accident.
+      const status =
+        statusRaw === '' || statusRaw === 'published' || statusRaw === 'active'
+          ? 'published'
+          : 'draft'
       const badge = getField(row, 'Badge').toUpperCase().trim()
       const price = parseFloat(priceStr) || 0
       const stock = parseInt(stockStr) || 0

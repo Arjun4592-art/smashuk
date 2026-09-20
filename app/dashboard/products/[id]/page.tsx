@@ -1300,7 +1300,7 @@ export default function EditProductPage({
             Save as Draft
           </button>
           <button
-            onClick={() => handleSave('published')}
+            onClick={() => handleSave(status)}
             disabled={saving}
             className='px-4 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-2'
           >
@@ -2950,7 +2950,7 @@ export default function EditProductPage({
           {}
           <div className='space-y-2'>
             <button
-              onClick={() => handleSave('published')}
+              onClick={() => handleSave(status)}
               disabled={saving}
               className='w-full py-2.5 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer border-none'
             >
