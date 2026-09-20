@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
+import { POST as createProduct } from '../../route'
 
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
@@ -107,14 +108,20 @@ export async function POST(
       _stock: 0,
     }
 
-    const createRes = await fetch(`${req.nextUrl.origin}/api/admin/products`, {
+    // Call the create handler DIRECTLY instead of an HTTP request to our own
+    // site. The old `fetch(`${req.nextUrl.origin}/api/admin/products`)` worked
+    // locally but failed in production ("fetch failed"): behind a proxy /
+    // container, nextUrl.origin is the internal address (localhost:3000,
+    // 0.0.0.0, wrong port…), which the server cannot reach.
+    const headers = new Headers(req.headers)
+    headers.set('Content-Type', 'application/json')
+    headers.delete('content-length')
+    const createReq = new NextRequest(new URL('/api/admin/products', req.url), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: authorization,
-      },
+      headers,
       body: JSON.stringify(payload),
     })
+    const createRes = await createProduct(createReq)
     const createData = await safeJson(createRes)
     return NextResponse.json(createData, { status: createRes.status })
   } catch (err: any) {
