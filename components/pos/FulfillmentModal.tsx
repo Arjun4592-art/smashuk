@@ -2,6 +2,10 @@
 
 import { useState } from 'react'
 import { usePOSStore } from '@/store/posStore'
+import {
+  STANDARD_SHIPPING_COST,
+  FREE_SHIPPING_THRESHOLD,
+} from '@/lib/constants'
 interface Props {
   onClose: () => void
   onSave?: () => void
@@ -24,10 +28,16 @@ export default function FulfillmentModal({ onClose, onSave }: Props) {
   const {
     fulfillmentType,
     shippingAddress,
+    shippingSpeed,
     customer,
     setFulfillmentType,
     setShippingAddress,
+    setShippingSpeed,
+    subtotal,
   } = usePOSStore()
+  const [speed, setSpeed] = useState<'standard' | 'express'>(
+    'standard', // Express is discontinued
+  )
   const [step, setStep] = useState<Step>('choose')
   const [type, setType] = useState(fulfillmentType)
   const [addr, setAddr] = useState(
@@ -57,6 +67,8 @@ export default function FulfillmentModal({ onClose, onSave }: Props) {
   }
   const handleSaveAddress = () => {
     if (!addressValid) return
+    // Speed first so the totals recomputed by setFulfillmentType use it.
+    setShippingSpeed(speed)
     setFulfillmentType('ship')
     setShippingAddress(addr)
     onClose()
@@ -187,7 +199,7 @@ export default function FulfillmentModal({ onClose, onSave }: Props) {
         {}
         {step === 'address' && (
           <div className='p-5 space-y-2.5 max-h-[70vh] overflow-y-auto'>
-            <div className='grid grid-cols-2 gap-2'>
+            <div className='grid grid-cols-1 gap-2'>
               <input
                 placeholder='First name *'
                 value={addr.first_name}
@@ -305,6 +317,15 @@ export default function FulfillmentModal({ onClose, onSave }: Props) {
                 borderColor: '#E1E3E5',
               }}
             />
+
+            <p className='text-xs pt-1' style={{ color: '#6D7175' }}>
+              Standard delivery (2-5 working days):{' '}
+              <span className='font-semibold' style={{ color: '#008060' }}>
+                {subtotal >= FREE_SHIPPING_THRESHOLD
+                  ? 'FREE'
+                  : `\u00A3${STANDARD_SHIPPING_COST.toFixed(2)}`}
+              </span>
+            </p>
 
             <div className='flex gap-2 pt-1'>
               <button

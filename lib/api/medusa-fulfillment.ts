@@ -65,7 +65,7 @@ export async function markOrderDelivered(orderId: string, fetcher: Fetcher) {
 }
 export async function shipOrder(orderId: string, fetcher: Fetcher) {
   const orderRes = await fetcher(
-    `/admin/orders/${orderId}?fields=id,fulfillment_status,metadata,*fulfillments,*fulfillments.labels`,
+    `/admin/orders/${orderId}?fields=id,fulfillment_status,metadata,*fulfillments,*fulfillments.labels,*fulfillments.items`,
   )
   const orderData = await readJson(orderRes)
   if (!orderRes.ok) {
@@ -106,16 +106,33 @@ export async function shipOrder(orderId: string, fetcher: Fetcher) {
     throw new Error('No active fulfillment found on this order to dispatch.')
   }
 
-  const royalMailTrackingNumber: string | undefined =
+  const parcel2goTrackingNumber: string | undefined =
     fulfillments[0]?.labels?.[0]?.tracking_number
 
   const results = []
   for (const f of fulfillments) {
+    // The Create Shipment route wants the order's LINE ITEM ids (orli_...),
+    // not the fulfillment-item ids (fulit_...) — line_item_id is the bridge.
+    // Fall back to item.id in case this Medusa version already returns the
+    // line item id directly under `id` for fulfillment items.
+    const items = (f.items ?? []).map((item: any) => ({
+      id: item.line_item_id ?? item.id,
+      quantity: item.quantity,
+    }))
+    if (items.some((it: any) => !it.id || it.quantity == null)) {
+      console.error(
+        `[shipOrder] raw fulfillment items for ${f.id}:`,
+        JSON.stringify(f.items, null, 2),
+      )
+      throw new Error(
+        `Fulfillment ${f.id} items are missing id/quantity — check server logs for the raw item shape.`,
+      )
+    }
     const shipRes = await fetcher(
-      `/admin/orders/${orderId}/fulfillments/${f.id}/shipment`,
+      `/admin/orders/${orderId}/fulfillments/${f.id}/shipments`,
       {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ items }),
       },
     )
     const shipData = await readJson(shipRes)
@@ -130,7 +147,7 @@ export async function shipOrder(orderId: string, fetcher: Fetcher) {
   return {
     alreadyShipped: false,
     results,
-    royalMailTrackingNumber,
+    parcel2goTrackingNumber,
   }
 }
 export async function fulfillOrder(

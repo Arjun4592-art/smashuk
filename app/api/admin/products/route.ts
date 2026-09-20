@@ -3,6 +3,7 @@ import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { resolveSalesChannels } from '@/lib/api/selling-channels'
 import { safeJson } from '@/lib/api/safe-json'
 import { syncVariantInventory } from '@/lib/api/inventory-sync'
+import { invalidateCatalog } from '@/lib/catalog/source'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 export async function GET(req: NextRequest) {
@@ -131,7 +132,14 @@ export async function POST(req: NextRequest) {
     if (!body.metadata.ogImage && body.thumbnail) {
       body.metadata.ogImage = body.thumbnail
     }
-    body.status = 'published'
+    // Respect the status the caller asked for. This used to be a hard
+    // `body.status = 'published'`, which silently turned "Save as Draft" and
+    // "Duplicate" (which sends 'draft') into LIVE products. Callers that send
+    // no status (e.g. the CSV importer) still default to published.
+    const VALID_STATUSES = ['draft', 'proposed', 'published', 'rejected']
+    body.status = VALID_STATUSES.includes(body.status)
+      ? body.status
+      : 'published'
     const sellingChannel = body.selling_channel
     delete body.selling_channel
     if (!body.sales_channels) {
@@ -230,6 +238,9 @@ export async function POST(req: NextRequest) {
         )
       }
     }
+    // Product + inventory are both written now — tell the shop's catalogue
+    // snapshot to rebuild so the new product shows up straight away.
+    invalidateCatalog()
     return NextResponse.json(data, {
       status: 201,
     })

@@ -33,7 +33,8 @@ function statusBadge(
     | 'staff'
     | 'invoice'
     | 'payment_failed'
-    | 'dispute',
+    | 'dispute'
+    | 'return_requested',
 ) {
   const map = {
     confirmed: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'ORDER CONFIRMED' },
@@ -53,6 +54,11 @@ function statusBadge(
     invoice: { bg: '#ECFDF5', fg: GREEN, label: 'INVOICE' },
     payment_failed: { bg: '#FDF0ED', fg: CORAL, label: 'PAYMENT FAILED' },
     dispute: { bg: '#FDF0ED', fg: CORAL, label: 'DISPUTE OPENED' },
+    return_requested: {
+      bg: '#FFF7ED',
+      fg: '#C2410C',
+      label: 'RETURN REQUESTED',
+    },
   }[kind]
   return pillBadge(map.label, map.bg, map.fg)
 }
@@ -169,6 +175,26 @@ export function shell(badge: string, title: string, bodyHtml: string) {
   `
 }
 
+// Same shell as shell(), but also returns the variables for the shared Resend
+// "smash-transactional-shell" template (see scripts/sync-resend-templates.ts).
+// sendMail() uses them only when RESEND_SHELL_TEMPLATE_ID is set; otherwise it
+// falls back to the plain `html`.
+export function renderShell(badge: string, title: string, bodyHtml: string) {
+  return {
+    html: shell(badge, title, bodyHtml),
+    templateVariables: {
+      SITE_NAME: SITE_NAME.toUpperCase(),
+      BADGE_HTML: badge,
+      TITLE: title,
+      BODY_HTML: bodyHtml,
+      CONTACT_EMAIL,
+      CONTACT_PHONE,
+      STORE_DISPLAY_NAME,
+      STORE_ADDRESS: `${STORE_ADDRESS_LINE1}, ${STORE_ADDRESS_LINE2}`,
+    } as Record<string, string>,
+  }
+}
+
 export function orderNumberOf(order: any) {
   return order.display_id ? `#${order.display_id}` : order.id
 }
@@ -200,7 +226,7 @@ export function orderConfirmationEmail(order: any) {
     ? 'Scan this code at any time to view your order status and confirm when it is ready for collection.'
     : 'Scan this code at any time to view your order status and tracking details once your order has shipped.'
 
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('confirmed'),
     `Thank you for your order, ${greetingName}`,
     `
@@ -221,6 +247,7 @@ export function orderConfirmationEmail(order: any) {
     subject,
     html,
     text,
+    templateVariables,
     attachments: [qrInlineAttachment(trackingUrl, qrCid)],
   }
 }
@@ -245,21 +272,23 @@ export function shippingConfirmationEmail(
     : ''
   const trackingNumber =
     opts.trackingNumber ?? order.fulfillments?.[0]?.tracking_numbers?.[0]
-  const royalMailTrackUrl = trackingNumber
-    ? `https://www.royalmail.com/track-your-item#/tracking-results/${encodeURIComponent(trackingNumber)}`
+  // Parcels ship with Evri. Their tracking page asks for the number, so we
+  // link to it and show the number in the email.
+  const courierTrackUrl = trackingNumber
+    ? 'https://www.evri.com/track-a-parcel'
     : null
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('shipped'),
     'Your order has shipped',
     `
       <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Order <strong style="color:${TEXT};">${orderNumber}</strong> has left our warehouse and is on its way to you via Royal Mail.
+        Order <strong style="color:${TEXT};">${orderNumber}</strong> has left our warehouse and is on its way to you.
       </p>
       ${
         trackingNumber
           ? `
         <div style="margin-top:16px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
-          <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Royal Mail tracking number</p>
+          <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Tracking number</p>
           <p style="margin:0;font-size:14px;font-weight:600;color:${TEXT};">${trackingNumber}</p>
         </div>`
           : ''
@@ -274,11 +303,11 @@ export function shippingConfirmationEmail(
         </div>`
           : ''
       }
-      ${ctaButton('Track your order', royalMailTrackUrl ?? `${SITE_URL}/orders`)}
+      ${ctaButton('Track your order', courierTrackUrl ?? `${SITE_URL}/orders`)}
     `,
   )
-  const text = `Order ${orderNumber} has shipped.${trackingNumber ? ` Royal Mail tracking number: ${trackingNumber}.` : ''}${addressLine ? ` Shipping to: ${addressLine}` : ''}`
-  return { subject, html, text }
+  const text = `Order ${orderNumber} has shipped.${trackingNumber ? ` Tracking number: ${trackingNumber}.` : ''}${addressLine ? ` Shipping to: ${addressLine}` : ''}`
+  return { subject, html, text, templateVariables }
 }
 
 // Sent to the customer once the courier has the parcel out for delivery.
@@ -297,7 +326,7 @@ export function outForDeliveryEmail(order: any) {
         .filter(Boolean)
         .join(', ')
     : ''
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('out_for_delivery'),
     'Your order is out for delivery',
     `
@@ -317,14 +346,14 @@ export function outForDeliveryEmail(order: any) {
     `,
   )
   const text = `Order ${orderNumber} is out for delivery and should arrive today.${addressLine ? ` Delivering to: ${addressLine}` : ''}`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 // Sent to the customer once the order is marked delivered.
 export function deliveryConfirmationEmail(order: any) {
   const orderNumber = orderNumberOf(order)
   const subject = `Your order ${orderNumber} has been delivered — ${SITE_NAME}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('delivered'),
     'Your order has been delivered',
     `
@@ -336,14 +365,14 @@ export function deliveryConfirmationEmail(order: any) {
     `,
   )
   const text = `Order ${orderNumber} has been delivered. If anything is missing or not as expected, please reply to this email and we will assist.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 // Sent to the customer when their order is cancelled.
 export function orderCancelledEmail(order: any) {
   const orderNumber = orderNumberOf(order)
   const subject = `Order ${orderNumber} has been cancelled — ${SITE_NAME}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('cancelled'),
     'Your order has been cancelled',
     `
@@ -357,7 +386,7 @@ export function orderCancelledEmail(order: any) {
     `,
   )
   const text = `Order ${orderNumber} has been cancelled. If payment had already been taken, the amount will be refunded to your original payment method within a few business days.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function refundConfirmationEmail(
@@ -367,7 +396,7 @@ export function refundConfirmationEmail(
 ) {
   const orderNumber = orderNumberOf(order)
   const subject = `Refund processed for order ${orderNumber} — ${SITE_NAME}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('refunded'),
     'Your refund has been processed',
     `
@@ -381,7 +410,7 @@ export function refundConfirmationEmail(
     `,
   )
   const text = `Refund of ${fmt(refundAmount)} processed for order ${orderNumber}. Please allow a few business days for it to appear on your original payment method.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 // Sent to the customer the moment their account is created (register flow).
@@ -392,7 +421,7 @@ export function welcomeEmail(customer: {
 }) {
   const firstName = (customer.first_name || '').trim() || 'there'
   const subject = `Welcome to ${SITE_NAME}, ${firstName}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('welcome'),
     `Welcome, ${firstName}`,
     `
@@ -408,7 +437,7 @@ export function welcomeEmail(customer: {
     `,
   )
   const text = `Welcome to ${SITE_NAME}, ${firstName}. Your account (${customer.email}) has been created. Visit ${SITE_URL}/shop to start shopping.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 // Sent to the customer confirming their contact-form message was received.
@@ -416,7 +445,7 @@ export function contactAutoReplyEmail(opts: { name: string; message: string }) {
   const subject = `We've received your message — ${SITE_NAME}`
   const preview =
     opts.message.length > 200 ? opts.message.slice(0, 200) + '…' : opts.message
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     `Thank you for contacting us, ${opts.name}`,
     `
@@ -430,7 +459,7 @@ export function contactAutoReplyEmail(opts: { name: string; message: string }) {
     `,
   )
   const text = `Thank you for contacting us, ${opts.name}. We have received your message and a member of the ${SITE_NAME} team will respond shortly.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 // Sent to the store owner/admin inbox when a contact-form enquiry comes in.
@@ -441,7 +470,7 @@ export function contactAdminEmail(opts: {
   message: string
 }) {
   const subject = `New enquiry — ${opts.subject || 'General'} — from ${opts.name}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     'New contact form enquiry',
     `
@@ -461,7 +490,7 @@ export function contactAdminEmail(opts: {
     `,
   )
   const text = `New enquiry from ${opts.name} (${opts.email})\nSubject: ${opts.subject || '(none)'}\n\n${opts.message}`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 function infoRow(label: string, value: string) {
@@ -481,7 +510,7 @@ export function adminShippingEmail(order: any) {
       ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
       : '') || 'Guest'
   const subject = `Order ${orderNumber} marked as shipped`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     `Order ${orderNumber} shipped`,
     `
@@ -494,7 +523,7 @@ export function adminShippingEmail(order: any) {
     `,
   )
   const text = `Order ${orderNumber} marked as shipped. Customer: ${customerName} (${order.email ?? 'no email'}). Shipping confirmation email sent.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function adminOutForDeliveryEmail(order: any) {
@@ -504,7 +533,7 @@ export function adminOutForDeliveryEmail(order: any) {
       ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
       : '') || 'Guest'
   const subject = `Order ${orderNumber} marked out for delivery`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     `Order ${orderNumber} out for delivery`,
     `
@@ -517,7 +546,7 @@ export function adminOutForDeliveryEmail(order: any) {
     `,
   )
   const text = `Order ${orderNumber} marked out for delivery. Customer: ${customerName} (${order.email ?? 'no email'}). Out-for-delivery email sent.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function adminDeliveryEmail(order: any) {
@@ -527,7 +556,7 @@ export function adminDeliveryEmail(order: any) {
       ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
       : '') || 'Guest'
   const subject = `Order ${orderNumber} marked as delivered`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     `Order ${orderNumber} delivered`,
     `
@@ -540,7 +569,7 @@ export function adminDeliveryEmail(order: any) {
     `,
   )
   const text = `Order ${orderNumber} marked as delivered. Customer: ${customerName} (${order.email ?? 'no email'}). Delivery confirmation email sent.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function adminCancelledEmail(order: any) {
@@ -550,7 +579,7 @@ export function adminCancelledEmail(order: any) {
       ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
       : '') || 'Guest'
   const subject = `Order ${orderNumber} cancelled`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     `Order ${orderNumber} cancelled`,
     `
@@ -563,7 +592,7 @@ export function adminCancelledEmail(order: any) {
     `,
   )
   const text = `Order ${orderNumber} cancelled. Customer: ${customerName} (${order.email ?? 'no email'}). Cancellation email sent.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function adminRefundEmail(order: any, refundAmount: number) {
@@ -573,7 +602,7 @@ export function adminRefundEmail(order: any, refundAmount: number) {
       ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
       : '') || 'Guest'
   const subject = `Refund processed for order ${orderNumber}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     `Refund processed — ${orderNumber}`,
     `
@@ -587,7 +616,7 @@ export function adminRefundEmail(order: any, refundAmount: number) {
     `,
   )
   const text = `Refund of ${fmt(refundAmount)} processed for order ${orderNumber}. Customer: ${customerName} (${order.email ?? 'no email'}). Refund confirmation email sent.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function adminWelcomeEmail(customer: {
@@ -599,7 +628,7 @@ export function adminWelcomeEmail(customer: {
     `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() ||
     'New customer'
   const subject = `New customer account — ${customer.email}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     'New customer account created',
     `
@@ -613,7 +642,7 @@ export function adminWelcomeEmail(customer: {
     `,
   )
   const text = `New customer account created — ${name} (${customer.email}). Welcome email sent.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function adminPaymentFailedEmail(opts: {
@@ -624,7 +653,7 @@ export function adminPaymentFailedEmail(opts: {
   reason?: string
 }) {
   const subject = `Payment failed — ${fmt(opts.amount)}${opts.customerEmail ? ` (${opts.customerEmail})` : ''}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('payment_failed'),
     'A payment attempt failed',
     `
@@ -640,7 +669,7 @@ export function adminPaymentFailedEmail(opts: {
     `,
   )
   const text = `Payment failed — ${fmt(opts.amount)} ${opts.currency.toUpperCase()}${opts.customerEmail ? ` (${opts.customerEmail})` : ''}. Reason: ${opts.reason || 'not specified'}. Payment Intent: ${opts.paymentIntentId}. No order was created.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function adminDisputeEmail(opts: {
@@ -652,7 +681,7 @@ export function adminDisputeEmail(opts: {
   evidenceDueBy?: Date
 }) {
   const subject = `⚠ Dispute opened — ${fmt(opts.amount)} — respond by ${opts.evidenceDueBy ? opts.evidenceDueBy.toLocaleDateString('en-GB') : 'the deadline in Stripe'}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('dispute'),
     'A customer has disputed a charge',
     `
@@ -670,7 +699,7 @@ export function adminDisputeEmail(opts: {
     `,
   )
   const text = `Dispute opened for ${fmt(opts.amount)} ${opts.currency.toUpperCase()}. Reason: ${opts.reason}. Charge: ${opts.chargeId}. Respond by: ${opts.evidenceDueBy ? opts.evidenceDueBy.toISOString() : 'see Stripe dashboard'}.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function adminNewOrderEmail(
@@ -685,7 +714,7 @@ export function adminNewOrderEmail(
     order.email ||
     'Guest'
   const subject = `New order ${orderNumber} — ${fmt(order.total)}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     `New order ${orderNumber}`,
     `
@@ -702,12 +731,12 @@ export function adminNewOrderEmail(
     `,
   )
   const text = `New order ${orderNumber} — ${customerName} — Total ${fmt(order.total)}`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 export function stockNotifyCustomerEmail(productName: string) {
   const subject = `We'll email you when "${productName}" is back in stock`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('welcome'),
     `You're on the list`,
     `
@@ -718,7 +747,7 @@ export function stockNotifyCustomerEmail(productName: string) {
     `,
   )
   const text = `We will email you as soon as "${productName}" is back in stock.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 // Sent to the store owner/admin inbox when a customer requests a back-in-stock alert.
@@ -728,7 +757,7 @@ export function stockNotifyAdminEmail(opts: {
   productId: string
 }) {
   const subject = `Back-in-stock request — ${opts.productName}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('admin'),
     'Back-in-stock request',
     `
@@ -739,12 +768,12 @@ export function stockNotifyAdminEmail(opts: {
     `,
   )
   const text = `${opts.email} wants to be notified when ${opts.productName} (${opts.productId}) is back in stock.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 // Sent to a customer immediately after they subscribe to the newsletter.
 export function newsletterWelcomeEmail(email: string) {
   const subject = `Welcome to ${SITE_NAME}`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('subscribed'),
     `You're subscribed`,
     `
@@ -755,7 +784,7 @@ export function newsletterWelcomeEmail(email: string) {
     `,
   )
   const text = `Welcome to ${SITE_NAME}. Thank you for subscribing with ${email}. Keep an eye on your inbox for offers and new arrivals.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 
 // Sent to a staff member when they're added to the POS system.
@@ -766,7 +795,7 @@ export function staffInviteEmail(opts: {
 }) {
   const roleLabel = opts.role === 'admin' ? 'an Admin' : 'Staff'
   const subject = `You've been added to ${SITE_NAME} POS`
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('staff'),
     `Welcome to the team, ${opts.firstName}`,
     `
@@ -786,7 +815,7 @@ export function staffInviteEmail(opts: {
     `,
   )
   const text = `Welcome to ${SITE_NAME}. You've been added as ${roleLabel}${opts.shift ? ` for the ${opts.shift} shift` : ''}. Ask your manager for your PIN to log in at the POS terminal.`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
 }
 // Sent to the customer from the POS when a staff member emails them their
 // invoice (replaces the old plain in-store receipt). The invoice PDF itself
@@ -806,7 +835,7 @@ export function invoiceEmail(opts: {
       ${ctaButton('Track your order', opts.trackingUrl)}
     `
     : ''
-  const html = shell(
+  const { html, templateVariables } = renderShell(
     statusBadge('invoice'),
     'Thank you for shopping with us',
     `
@@ -824,5 +853,69 @@ export function invoiceEmail(opts: {
     ? ` Track your order here: ${opts.trackingUrl}`
     : ''
   const text = `Please find attached invoice ${opts.invoiceNumber} for order ${opts.orderNumber}. You can also download it here: ${opts.pdfUrl}.${trackingText}`
-  return { subject, html, text }
+  return { subject, html, text, templateVariables }
+}
+
+function returnItemsText(record: any) {
+  return (record?.items ?? [])
+    .map((i: any) => `${i.quantity}× ${i.title}`)
+    .join(', ')
+}
+
+// Sent to the customer right after they submit a return request on the website.
+export function returnRequestedEmail(order: any, record: any) {
+  const orderNumber = orderNumberOf(order)
+  const subject = `Return request received for order ${orderNumber} — ${SITE_NAME}`
+  const { html, templateVariables } = renderShell(
+    statusBadge('return_requested'),
+    'We have received your return request',
+    `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Thank you. We have received your return request for order <strong style="color:${TEXT};">${orderNumber}</strong>. Our team will review it and email you with the next steps, including how to send the items back.
+      </p>
+      ${itemsTable(record?.items ?? [])}
+      <div style="margin-top:8px;padding-top:8px;border-top:2px solid ${BORDER};">
+        ${totalRow('Refund amount (if approved)', record?.refund_amount ?? 0, true)}
+      </div>
+      ${
+        record?.reason
+          ? `<div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
+          <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Reason</p>
+          <p style="margin:0;font-size:14px;color:${TEXT};">${record.reason}</p>
+        </div>`
+          : ''
+      }
+    `,
+  )
+  const text = `We have received your return request for order ${orderNumber} (${returnItemsText(record)}). Our team will review it and email you with the next steps.`
+  return { subject, html, text, templateVariables }
+}
+
+// Sent to the store owner/admin inbox when a customer requests a return.
+export function adminReturnRequestEmail(order: any, record: any) {
+  const orderNumber = orderNumberOf(order)
+  const customerName =
+    (order.customer
+      ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
+      : '') || 'Guest'
+  const subject = `Return requested — order ${orderNumber} — ${fmt(record?.refund_amount ?? 0)}`
+  const { html, templateVariables } = renderShell(
+    statusBadge('return_requested'),
+    `Return requested — ${orderNumber}`,
+    `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:4px;">
+        ${infoRow('Customer', `${customerName} (${order.email ?? 'no email'})`)}
+        ${infoRow('Items', returnItemsText(record) || '—')}
+        ${infoRow('Reason', record?.reason || '—')}
+        ${record?.note ? infoRow('Note', String(record.note)) : ''}
+        ${infoRow('Refund', fmt(record?.refund_amount ?? 0))}
+      </table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Review it in the dashboard and approve or reject the return.
+      </p>
+      ${ctaButton('Open order', `${SITE_URL}/dashboard/orders/${order.id}`)}
+    `,
+  )
+  const text = `Return requested for order ${orderNumber} by ${customerName} (${order.email ?? 'no email'}): ${returnItemsText(record)}. Reason: ${record?.reason ?? '—'}. Refund: ${fmt(record?.refund_amount ?? 0)}.`
+  return { subject, html, text, templateVariables }
 }

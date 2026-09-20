@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCatalog } from '@/lib/catalog/source'
-import {
-  applyCatalogFilters,
-  sortCatalog,
-} from '@/lib/catalog/filter'
+import { applyCatalogFilters, sortCatalog } from '@/lib/catalog/filter'
 import { buildFacets } from '@/lib/catalog/facets'
 import { catalogQueryFromParams, toCardProduct } from '@/lib/catalog/types'
 
@@ -45,9 +42,12 @@ export async function GET(req: NextRequest) {
       {
         headers: {
           // Identical for every visitor with the same filters, so the CDN can
-          // serve it. stale-while-revalidate keeps the refresh off the path of
-          // whoever happens to arrive as the window expires.
-          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=600',
+          // serve it. Kept short on purpose: it was 60s + 600s
+          // stale-while-revalidate, which meant a product edited in the
+          // dashboard could keep showing its old stock / status on the shop
+          // for up to ~11 minutes after the server-side catalogue had already
+          // been refreshed.
+          'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
     )

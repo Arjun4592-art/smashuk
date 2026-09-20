@@ -118,6 +118,17 @@ export async function syncVariantInventory(
   locationId: string,
   variantStocks: Record<string, number> = {},
   defaultQty: number = 0,
+  options: {
+    /**
+     * When true and the product has exactly ONE variant, `defaultQty` is
+     * written to that variant's EXISTING stock level too. Without this, the
+     * default only ever applied when a level was being created, so editing the
+     * Stock field of a single-variant product and pressing Save did nothing.
+     * Only pass true when the user actually changed the stock field —
+     * otherwise a stale form could overwrite a newer quantity.
+     */
+    applyDefaultToExisting?: boolean
+  } = {},
 ): Promise<void> {
   const res = await fetch(
     `${MEDUSA_URL}/admin/products/${productId}?fields=*variants,*variants.inventory_items,*variants.inventory_items.inventory.location_levels`,
@@ -208,8 +219,20 @@ export async function syncVariantInventory(
       (l: any) => l.location_id === locationId,
     )
     if (existingLevel) {
-      if (explicitQty === undefined) continue // don't clobber a real quantity with a default 0
-      await fetch(
+      const applyDefault =
+        options.applyDefaultToExisting === true && variants.length === 1
+      // Don't clobber a real quantity with a default 0 unless the caller said
+      // the user really edited it.
+      if (explicitQty === undefined && !applyDefault) continue
+      // `qty` is the AVAILABLE quantity (that is what the dashboard shows:
+      // stocked - reserved). Medusa stores STOCKED, so add the reserved units
+      // back — writing `qty` straight into stocked_quantity would silently
+      // drop every reservation.
+      const reserved = existingLevel.reserved_quantity ?? 0
+      const currentStocked = existingLevel.stocked_quantity ?? 0
+      const targetStocked = qty + reserved
+      if (targetStocked === currentStocked) continue
+      const updateRes = await fetch(
         `${MEDUSA_URL}/admin/inventory-items/${inventoryItemId}/location-levels/${locationId}`,
         {
           method: 'POST',
@@ -217,9 +240,14 @@ export async function syncVariantInventory(
             'Content-Type': 'application/json',
             Authorization: authorization,
           },
-          body: JSON.stringify({ stocked_quantity: qty }),
+          body: JSON.stringify({ stocked_quantity: targetStocked }),
         },
-      ).catch(() => {})
+      ).catch(() => null)
+      if (!updateRes || !updateRes.ok) {
+        console.warn(
+          `[inventory-sync] Stock level update failed for variant ${variant.id} (item ${inventoryItemId})`,
+        )
+      }
     } else {
       // Always create the row explicitly — a variant must never be left
       // with no stock level at all, even if that means starting at 0.

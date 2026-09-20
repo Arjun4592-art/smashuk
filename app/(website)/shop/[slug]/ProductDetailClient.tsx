@@ -209,52 +209,41 @@ function findSpecValue(
   return spec?.value
 }
 async function resolveStringOptions(sport?: string): Promise<StringOption[]> {
-  const sportKey =
-    (sport?.toLowerCase().trim() as StringSport | undefined) ?? 'badminton'
-  const categoryHandle =
-    STRING_CATEGORY_HANDLE_BY_SPORT[sportKey] ??
-    STRING_CATEGORY_HANDLE_BY_SPORT.badminton
+  const sportKey = (sport ?? '').toLowerCase().trim() || 'badminton'
   try {
+    // The server route reads every stringing category, detects each product's
+    // sport (name -> Sport field -> category -> model keyword) and returns only
+    // the SERVICES for this sport. Reels are never a racket add-on.
     const res = await fetch(
-      `/api/store/products?category_handle=${encodeURIComponent(categoryHandle)}&limit=50`,
+      `/api/store/stringing-options?sport=${encodeURIComponent(sportKey)}`,
+      { cache: 'no-store' },
     )
     if (!res.ok) return []
     const data = await res.json()
-    // Stringing products are either a standalone "reel" (a spool of string,
-    // sold on its own — e.g. "Yonex BG65 Titanium Badminton String - 200m
-    // Reel") or a "service" (e.g. "Yonex BG65 Badminton Stringing Service")
-    // — the thing a customer picks here to have bundled with this racket,
-    // free or paid. Only services belong in this dropdown; reels are sold
-    // separately and never as a racket add-on.
-    const products: any[] = (data.products ?? []).filter(
-      (p: any) => p.metadata?.stringing_type === 'service',
-    )
+    const products: any[] = data.products ?? []
+    // Dev-only: say WHY a stringing product is missing from the dropdown.
+    if (process.env.NODE_ENV !== 'production' && Array.isArray(data.debug)) {
+      // eslint-disable-next-line no-console
+      console.table(data.debug)
+    }
     return products
       .map((match: any, i: number): StringOption | null => {
         const variants: any[] = match.variants ?? []
-        const purchasable = variants.find(
-          (v: any) =>
-            v.inventory_quantity === undefined ||
-            v.inventory_quantity === null ||
-            v.inventory_quantity > 0 ||
-            v.allow_backorder === true ||
-            v.manage_inventory === false,
-        )
-        // No purchasable variant = this stringing product is out of stock on
-        // the website — don't fall back to an out-of-stock variant, exclude
-        // the product from the String Upgrade dropdown instead.
-        const variant = purchasable
+        // A stringing SERVICE is a job, not a physical item: its stock count
+        // (often 0 on a freshly added service) must NOT hide it. Prefer a
+        // variant that has a price; otherwise take the first one.
+        const variant =
+          variants.find(
+            (v: any) => typeof v.calculated_price?.calculated_amount === 'number',
+          ) ?? variants[0]
         if (!variant) return null
         const gbp = (variant.prices ?? []).find(
           (pr: any) => pr.currency_code === 'gbp',
         )
         const calcAmount = variant.calculated_price?.calculated_amount
-        const priceAmount =
-          calcAmount && calcAmount > 0 ? calcAmount : gbp?.amount
-        if (priceAmount === undefined) return null
-        // Strip the store's own "Smash Racket Pro" label wherever it shows
-        // up (title or metadata brand) — only the string maker's actual
-        // brand (Yonex, Li-Ning, Ashaway, etc.) should be shown.
+        // A price of 0 is valid (free service) - never treat it as "missing".
+        const priceAmount: number =
+          typeof calcAmount === 'number' ? calcAmount : (gbp?.amount ?? 0)
         const isSmashLabel = (s: string) => /smash racket pro/i.test(s)
         const title: string = (match.title ?? 'Stringing')
           .replace(/smash racket pro/gi, '')
@@ -268,7 +257,7 @@ async function resolveStringOptions(sport?: string): Promise<StringOption[]> {
           brand && title.startsWith(brand)
             ? title.slice(brand.length).trim()
             : title
-        const resolved: StringOption = {
+        return {
           id: match.id,
           name: name.replace(/stringing/i, '').trim() || title,
           brand,
@@ -279,7 +268,6 @@ async function resolveStringOptions(sport?: string): Promise<StringOption[]> {
           productId: match.id,
           variantId: variant.id,
         }
-        return resolved
       })
       .filter((r: StringOption | null): r is StringOption => r !== null)
   } catch {
@@ -2040,9 +2028,8 @@ export default function ProductDetailClient({
                     <div className='space-y-3'>
                       {[
                         'Free shipping on all orders exceeding £80.',
-                        'Standard shipping orders are dispatched via Royal Mail.',
-                        'Express shipping orders are dispatched via Royal Mail Special Delivery.',
-                        'Usual shipping duration for UK customers is 1–3 working days.',
+                        'Standard shipping orders are dispatched via Parcel2Go.',
+                        'Usual shipping duration for UK customers is 2–5 working days.',
                         'Opted for our racket restringing service? Add an extra day to the shipping time.',
                       ].map((line) => (
                         <div key={line} className='flex gap-3'>

@@ -71,6 +71,7 @@ function toOrderDetail(o: PosOrderRecord): OrderDetailData {
 export default function OrdersPage() {
   const authUser = useAuthStore((s) => s.user)
   const [showReturn, setShowReturn] = useState(false)
+  const [returnOrderId, setReturnOrderId] = useState<string | undefined>()
   const [showLookup, setShowLookup] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<PosOrderRecord | null>(
     null,
@@ -503,6 +504,7 @@ export default function OrdersPage() {
             loadOrders()
           }}
           onReturn={() => {
+            setReturnOrderId(selectedOrder.id)
             setSelectedOrder(null)
             setShowReturn(true)
           }}
@@ -512,8 +514,12 @@ export default function OrdersPage() {
       {showReturn && (
         <ReturnModal
           orders={completedOrders}
+          initialOrderId={returnOrderId}
           onReturned={() => loadOrders()}
-          onClose={() => setShowReturn(false)}
+          onClose={() => {
+            setShowReturn(false)
+            setReturnOrderId(undefined)
+          }}
         />
       )}
       {showLookup && <OrderLookupModal onClose={() => setShowLookup(false)} />}

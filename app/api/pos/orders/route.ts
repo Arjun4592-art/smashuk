@@ -224,6 +224,7 @@ export async function POST(request: NextRequest) {
       stripe_payment_intent_id,
       stripe_payment_amount,
       fulfillment_type,
+      shipping_speed,
       shipping_address,
       gift_card_code,
       coupon_code,
@@ -596,11 +597,11 @@ export async function POST(request: NextRequest) {
       const options = shippingOptsData.shipping_options ?? []
       const isPickupOptionName = (name: string) =>
         // FIX: was missing "collect" — website checkout and
-        // fix-royal-mail-provider.ts both use /pickup|store|collect/i to
+        // fix-parcel2go-provider.ts both use /pickup|store|collect/i to
         // detect the in-store pickup option. This one used "pos" instead
         // of "collect", so an option named e.g. "Collect in Store" was
         // never recognised as pickup here and POS pickup sales fell
-        // through to options[0] — a real courier (Royal Mail) option —
+        // through to options[0] — a real courier (Parcel2Go) option —
         // with no shipping address ever collected. That's what breaks
         // "Mark as Fulfilled" for in-store orders. Keep this regex in
         // sync with the other two call sites if the naming convention
@@ -636,19 +637,31 @@ export async function POST(request: NextRequest) {
           )
         }
         const freeShippingThreshold = await getPublicFreeShippingThreshold()
+        const isExpressOptionName = (name: string) =>
+          /express|fast|tracked ?24|next.?day/i.test(name ?? '')
         const freeOption = options.find((o: any) =>
           isFreeOptionName(o.name ?? ''),
         )
-        const paidOption = options.find(
+        const paidOptions = options.filter(
           (o: any) =>
             !isPickupOptionName(o.name ?? '') &&
-            !isFreeOptionName(o.name ?? ''),
+            !isFreeOptionName(o.name ?? '') &&
+            !isExpressOptionName(o.name ?? ''),
         )
-        chosen =
-          (itemTotal >= freeShippingThreshold ? freeOption : paidOption) ??
-          freeOption ??
-          paidOption ??
-          options[0]
+        const standardPaidOption =
+          paidOptions.find((o: any) => !isExpressOptionName(o.name ?? '')) ??
+          paidOptions[0]
+        // Express is discontinued: always pick Standard/Free, regardless of
+        // any shipping_speed sent by an older POS client.
+        {
+          chosen =
+            (itemTotal >= freeShippingThreshold
+              ? freeOption
+              : standardPaidOption) ??
+            freeOption ??
+            standardPaidOption ??
+            options[0]
+        }
       } else {
         chosen =
           options.find((o: any) => isPickupOptionName(o.name ?? '')) ??

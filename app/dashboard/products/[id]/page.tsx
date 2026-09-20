@@ -13,6 +13,10 @@ import {
 import { inferSellingChannel } from '@/lib/api/selling-channels-client'
 import { toast } from 'sonner'
 import RichTextEditor from '@/components/dashboard/Richtexteditor'
+import ImageCropModal from '@/components/dashboard/ImageCropModal'
+import { compressImageForUpload } from '@/lib/image-compress'
+import StringingCategoryHint from '@/components/dashboard/StringingCategoryHint'
+import { isStringingCategoryHandle } from '@/lib/stringing'
 interface VariantOptionEntry {
   id: string
   name: string
@@ -43,6 +47,10 @@ interface CrossSellItem {
 interface MedusaCategory {
   id: string
   name: string
+  handle: string
+  // "Badminton › Stringing" — three sports each have a category literally
+  // named "Stringing", so the bare name can't tell them apart.
+  label: string
 }
 interface UploadedImage {
   file?: File
@@ -159,6 +167,7 @@ export default function EditProductPage({
     badge: '',
     stringUpgrade: false,
     stringUpgradeType: 'free' as 'free' | 'paid',
+    stringingType: 'service' as 'service' | 'reel',
     metaTitle: '',
     metaDescription: '',
     metaKeywords: '',
@@ -213,6 +222,10 @@ export default function EditProductPage({
   const deletedDefaultVariantRef = useRef(false)
   const staleOptionIdsRef = useRef<string[]>([])
   const isSavingRef = useRef(false)
+  // Stock value as loaded from the server. Only when the Stock field differs
+  // from this do we tell the API to write it, so a stale form never overwrites
+  // a quantity that was changed elsewhere (Inventory page, POS, Medusa admin).
+  const initialStockRef = useRef<string>('')
   const variantsToDeleteRef = useRef<string[]>([])
   const [specs, setSpecs] = useState<
     {
@@ -222,6 +235,12 @@ export default function EditProductPage({
   >([])
   const [images, setImages] = useState<UploadedImage[]>([])
   const [dragOver, setDragOver] = useState(false)
+  // Files waiting to go through the resize/crop modal, one at a time.
+  const [cropQueue, setCropQueue] = useState<{ file: File; src: string }[]>([])
+  const [cropTotal, setCropTotal] = useState(0)
+  useEffect(() => {
+    if (cropQueue.length === 0 && cropTotal !== 0) setCropTotal(0)
+  }, [cropQueue.length, cropTotal])
   useEffect(() => {
     async function loadProduct() {
       try {
@@ -231,6 +250,7 @@ export default function EditProductPage({
         if (!p) throw new Error('Product not found')
         const firstVariant = p.variants?.[0]
         const firstPrice = firstVariant?.prices?.[0]?.amount
+        initialStockRef.current = String(firstVariant?.inventory_quantity ?? '')
         setStatus(p.status === 'published' ? 'published' : 'draft')
         setSellingChannel(inferSellingChannel(p.sales_channels))
         setExtraCategoryIds((p.categories ?? []).slice(1).map((c: any) => c.id))
@@ -243,6 +263,14 @@ export default function EditProductPage({
           stringUpgrade: p.metadata?.string_upgrade_available === true,
           stringUpgradeType:
             p.metadata?.string_upgrade_type === 'paid' ? 'paid' : 'free',
+          // Untagged products follow the same rule as the backfill script:
+          // "Service" in the title means service, otherwise reel.
+          stringingType:
+            p.metadata?.stringing_type === 'reel' ||
+            (p.metadata?.stringing_type !== 'service' &&
+              !/\bservice\b/i.test(p.title ?? ''))
+              ? 'reel'
+              : 'service',
           category: p.categories?.[0]?.id ?? '',
           categoryName: p.categories?.[0]?.name ?? '',
           sku: firstVariant?.sku ?? '',
@@ -445,13 +473,46 @@ export default function EditProductPage({
     }
     async function loadCategories() {
       try {
-        const res = await fetch('/api/admin/categories?limit=100')
-        const data = await res.json()
+        // Page through ALL categories — with only the first 100, a parent
+        // category could be missing and the "Badminton ›" prefix would vanish.
+        const raw: any[] = []
+        for (let offset = 0; offset < 1000; offset += 100) {
+          const res = await fetch(
+            `/api/admin/categories?limit=100&offset=${offset}`,
+          )
+          const page = await res.json()
+          const batch: any[] = page.product_categories ?? []
+          raw.push(...batch)
+          if (batch.length < 100) break
+        }
+        const nameById = new Map<string, string>(
+          raw.map((c: any) => [c.id, c.name]),
+        )
+        const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
         setCategories(
-          (data.product_categories ?? []).map((c: any) => ({
-            id: c.id,
-            name: c.name,
-          })),
+          raw
+            .map((c: any) => {
+              const parentName = c.parent_category_id
+                ? nameById.get(c.parent_category_id)
+                : undefined
+              // Fallback for the sport-specific stringing categories, whose
+              // handles are stringing-badminton / -tennis / -squash.
+              const sportFromHandle = /^stringing-(.+)$/.exec(
+                c.handle ?? '',
+              )?.[1]
+              return {
+                id: c.id,
+                name: c.name,
+                handle: c.handle ?? '',
+                label: parentName
+                  ? `${parentName} › ${c.name}`
+                  : sportFromHandle
+                    ? `${cap(sportFromHandle)} › ${c.name}`
+                    : c.name,
+              }
+            })
+            // Alphabetical, so the three "… › Stringing" entries sit together.
+            .sort((a, b) => a.label.localeCompare(b.label)),
         )
       } catch (err) {
         console.error('Failed to load categories:', err)
@@ -617,20 +678,37 @@ export default function EditProductPage({
     setCrossSellSearch('')
     setCrossSeachResults([])
   }
-  const addImages = async (files: FileList | File[]) => {
-    const newImages: UploadedImage[] = Array.from(files).map((file) => ({
+  const addImages = (files: FileList | File[]) => {
+    const list = Array.from(files).filter((f) => f.type.startsWith('image/'))
+    if (!list.length) return
+    const queued = list.map((file) => ({
       file,
-      preview: URL.createObjectURL(file),
-      uploading: true,
+      src: URL.createObjectURL(file),
     }))
-    setImages((prev) => [...prev, ...newImages])
-    for (const img of newImages) uploadImage(img)
+    setCropTotal((prev) => prev + queued.length)
+    setCropQueue((prev) => [...prev, ...queued])
+  }
+  // Called once the resize/crop modal confirms a file: adds it to the grid,
+  // starts the upload and moves on to the next queued file.
+  const handleCropConfirm = (croppedFile: File) => {
+    const newImage: UploadedImage = {
+      file: croppedFile,
+      preview: URL.createObjectURL(croppedFile),
+      uploading: true,
+    }
+    setImages((prev) => [...prev, newImage])
+    uploadImage(newImage)
+    setCropQueue((prev) => prev.slice(1))
+  }
+  const handleCropCancel = () => {
+    setCropQueue((prev) => prev.slice(1))
   }
   const uploadImage = async (img: UploadedImage) => {
     if (!img.file) return
     try {
+      const compressed = await compressImageForUpload(img.file)
       const formData = new FormData()
-      formData.append('files', img.file)
+      formData.append('files', compressed)
       const res = await fetch('/api/admin/uploads', {
         method: 'POST',
         body: formData,
@@ -781,6 +859,14 @@ export default function EditProductPage({
         brand: form.brand || undefined,
         sport: form.sport || undefined,
         badge: form.badge || undefined,
+        // Only meaningful for products in a "Stringing" category. "service"
+        // products are the ones offered in the racket page's stringing
+        // dropdown; "reel" products are sold on their own.
+        stringing_type: isStringingCategoryHandle(
+          categories.find((c) => c.id === form.category)?.handle,
+        )
+          ? form.stringingType
+          : undefined,
         string_upgrade_available: form.stringUpgrade,
         string_upgrade_type: form.stringUpgrade
           ? form.stringUpgradeType
@@ -803,6 +889,7 @@ export default function EditProductPage({
             : undefined,
       },
       _stock: form.stock ? Number(form.stock) : 0,
+      _stockDirty: form.stock !== initialStockRef.current,
       _variantStocks: hasExtraVariants
         ? Object.fromEntries(
             variants
@@ -1157,7 +1244,27 @@ export default function EditProductPage({
   }
   return (
     <div className='max-w-275 mx-auto space-y-5'>
-      {}
+      {cropQueue.length > 0 && (
+        <ImageCropModal
+          key={cropQueue[0].src}
+          imageSrc={cropQueue[0].src}
+          fileName={cropQueue[0].file.name}
+          fileType={cropQueue[0].file.type}
+          progressLabel={
+            cropTotal > 1
+              ? `${cropTotal - cropQueue.length + 1} of ${cropTotal}`
+              : undefined
+          }
+          onCancel={() => {
+            URL.revokeObjectURL(cropQueue[0].src)
+            handleCropCancel()
+          }}
+          onConfirm={(croppedFile) => {
+            URL.revokeObjectURL(cropQueue[0].src)
+            handleCropConfirm(croppedFile)
+          }}
+        />
+      )}
       <div className='flex items-center justify-between'>
         <div className='flex items-center gap-3'>
           <Link
@@ -1483,11 +1590,26 @@ export default function EditProductPage({
                       </option>
                       {categories.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name}
+                          {c.label}
                         </option>
                       ))}
                     </select>
                   </div>
+
+                  <StringingCategoryHint
+                    title={form.name}
+                    sport={form.sport}
+                    categories={categories}
+                    categoryId={form.category}
+                    stringingType={form.stringingType}
+                    onSelectCategory={(id) => {
+                      const c = categories.find((x) => x.id === id)
+                      updateForm('category', id)
+                      updateForm('categoryName', c?.name ?? '')
+                    }}
+                    onChangeSport={(s) => updateForm('sport', s)}
+                    onChangeType={(t) => updateForm('stringingType', t)}
+                  />
 
                   <div className='grid grid-cols-1 sm:grid-cols-3 gap-4'>
                     <div>

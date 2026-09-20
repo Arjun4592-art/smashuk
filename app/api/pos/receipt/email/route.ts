@@ -95,6 +95,7 @@ export async function POST(req: NextRequest) {
       subject: built.subject,
       html: built.html,
       text: built.text,
+      templateVariables: built.templateVariables,
       attachments: [
         {
           filename: `${invoiceNumber}.pdf`,

@@ -108,13 +108,17 @@ export async function POST(req: NextRequest) {
         last_name: rest.join(' ') || '',
         email,
       }
-      const { subject, html, text } = welcomeEmail(newCustomer)
-      sendMail({ to: email, subject, html, text }).catch(() => {})
+      const { subject, html, text, templateVariables } =
+        welcomeEmail(newCustomer)
+      sendMail({ to: email, subject, html, text, templateVariables }).catch(
+        () => {},
+      )
       const adminEmail = adminWelcomeEmail(newCustomer)
       notifyAdmin({
         subject: adminEmail.subject,
         html: adminEmail.html,
         text: adminEmail.text,
+        templateVariables: adminEmail.templateVariables,
         customerEmail: email,
       }).catch(() => {})
     } catch (welcomeErr) {

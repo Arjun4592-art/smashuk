@@ -243,6 +243,7 @@ export async function POST(req: NextRequest) {
       subject: inviteEmail.subject,
       html: inviteEmail.html,
       text: inviteEmail.text,
+      templateVariables: inviteEmail.templateVariables,
     })
     if (!emailResult.sent) {
       console.warn('[staff invite] welcome email not sent:', emailResult.error)

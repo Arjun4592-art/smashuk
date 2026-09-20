@@ -22,6 +22,7 @@ export async function notifyAdmin(opts: {
   html: string
   text?: string
   customerEmail?: string
+  templateVariables?: Record<string, string>
 }): Promise<{
   sent: boolean
   error?: string
@@ -38,6 +39,7 @@ export async function notifyAdmin(opts: {
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
+    templateVariables: opts.templateVariables,
   })
 }
 
@@ -50,6 +52,7 @@ export async function notifyOwner(opts: {
   html: string
   text?: string
   customerEmail?: string
+  templateVariables?: Record<string, string>
 }): Promise<{
   sent: boolean
   error?: string
@@ -66,6 +69,7 @@ export async function notifyOwner(opts: {
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
+    templateVariables: opts.templateVariables,
   })
 }
 
@@ -75,6 +79,15 @@ export async function sendMail(opts: {
   html: string
   text?: string
   replyTo?: string
+  // Variables for the shared Resend "smash-transactional-shell" Template
+  // (see lib/email-templates.ts renderShell() and
+  // scripts/sync-resend-templates.ts). When RESEND_SHELL_TEMPLATE_ID is set
+  // AND this is provided, we send via Resend's Template API (template id +
+  // variables) instead of the raw `html` — that's what lets the shared
+  // header/footer/brand styling be edited from the Resend dashboard without
+  // a code change. Until the template has been synced (or for one-off
+  // emails that don't build variables), we fall back to `html` as before.
+  templateVariables?: Record<string, string>
   attachments?: {
     filename: string
     path?: string
@@ -103,6 +116,7 @@ export async function sendMail(opts: {
     }
   }
   const from = process.env.EMAIL_FROM || 'onboarding@resend.dev'
+  const shellTemplateId = process.env.RESEND_SHELL_TEMPLATE_ID
   try {
     const attachments = opts.attachments?.length
       ? await Promise.all(
@@ -113,15 +127,23 @@ export async function sendMail(opts: {
           ),
         )
       : undefined
+    const useTemplate = Boolean(shellTemplateId && opts.templateVariables)
     const { error } = await client.emails.send({
       from,
       to: opts.to,
       subject: opts.subject,
-      html: opts.html,
       text: opts.text,
       ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
       ...(attachments?.length ? { attachments } : {}),
-    })
+      ...(useTemplate
+        ? {
+            template: {
+              id: shellTemplateId as string,
+              variables: opts.templateVariables as Record<string, string>,
+            },
+          }
+        : { html: opts.html }),
+    } as Parameters<typeof client.emails.send>[0])
     if (error) {
       console.error('[email] send failed:', error.name ?? '', error.message)
       return {

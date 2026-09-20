@@ -1,6 +1,19 @@
 'use client'
 
 import { useState } from 'react'
+import { toast } from 'sonner'
+import { resendOrderConfirmation } from '@/lib/api/dashboard'
+import {
+  ConfirmSheet,
+  IconSend,
+  providerLabel,
+  Section,
+  SectionTitle,
+  Spinner,
+  TimelineDay,
+  TimelineItem,
+  cx,
+} from '@/components/orders/OrderUI'
 
 interface TimelineEvent {
   id: string
@@ -15,12 +28,18 @@ interface TimelineEvent {
     | 'return_requested'
     | 'return_approved'
     | 'return_rejected'
-    | 'refunded'
     | 'comment'
   message: string
   timestamp: string
   extra?: string
 }
+
+const money = (n: number) =>
+  '£' +
+  (Number(n) || 0).toLocaleString('en-GB', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 
 function buildTimeline(order: any): TimelineEvent[] {
   const events: TimelineEvent[] = []
@@ -35,72 +54,84 @@ function buildTimeline(order: any): TimelineEvent[] {
     })
   }
 
-  if (order.payment_status === 'captured' && order.payments?.length) {
-    const p = order.payments.find((p: any) => p.captured_at)
-    if (p?.captured_at) {
-      events.push({
-        id: 'payment',
-        type: 'payment_captured',
-        message: 'Payment was captured',
-        timestamp: p.captured_at,
-        extra: `via ${p.provider_id?.replace('pp_', '').replace('_', ' ') ?? 'payment provider'}`,
-      })
-    }
+  const captured = (order.payments ?? []).find((p: any) => p.captured_at)
+  if (captured?.captured_at) {
+    events.push({
+      id: 'payment',
+      type: 'payment_captured',
+      message: 'Payment was captured',
+      timestamp: captured.captured_at,
+      extra: captured.provider_id
+        ? `via ${providerLabel(captured.provider_id)}`
+        : undefined,
+    })
   }
 
-  for (const fulfillment of order.fulfillments ?? []) {
-    if (fulfillment.created_at) {
+  for (const f of order.fulfillments ?? []) {
+    if (f.created_at) {
       events.push({
-        id: `fulfill-${fulfillment.id}`,
+        id: `fulfill-${f.id}`,
         type: 'fulfilled',
         message: 'Order was fulfilled',
-        timestamp: fulfillment.created_at,
+        timestamp: f.created_at,
       })
     }
-    if (fulfillment.shipped_at) {
+    if (f.shipped_at) {
       events.push({
-        id: `ship-${fulfillment.id}`,
+        id: `ship-${f.id}`,
         type: 'shipped',
-        message: 'Order was shipped',
-        timestamp: fulfillment.shipped_at,
-        extra: fulfillment.tracking_numbers?.join(', ') || undefined,
+        message: 'Order was dispatched',
+        timestamp: f.shipped_at,
+        extra: f.tracking_numbers?.join(', ') || undefined,
       })
     }
-    if (fulfillment.delivered_at) {
+    if (f.delivered_at) {
       events.push({
-        id: `deliver-${fulfillment.id}`,
+        id: `deliver-${f.id}`,
         type: 'delivered',
-        message: 'Order was delivered',
-        timestamp: fulfillment.delivered_at,
+        message:
+          order.metadata?.fulfillment_type === 'pickup'
+            ? 'Order was picked up'
+            : 'Order was delivered',
+        timestamp: f.delivered_at,
       })
     }
   }
 
-  for (const ret of order.metadata?.returns ?? []) {
-    if (ret.created_at || ret.requested_at) {
+  for (const r of order.metadata?.returns ?? []) {
+    const requestedAt = r.requested_at ?? r.created_at
+    if (requestedAt) {
       events.push({
-        id: `return-req-${ret.id}`,
+        id: `return-req-${r.id}`,
         type: 'return_requested',
-        message: 'Return was requested',
-        timestamp: ret.created_at ?? ret.requested_at,
-        extra: ret.reason ?? undefined,
+        message:
+          r.status === 'refunded' && r.source !== 'customer'
+            ? 'Return was created'
+            : 'Return was requested',
+        timestamp: requestedAt,
+        extra: [r.reason, r.note].filter(Boolean).join(' · ') || undefined,
       })
     }
-    if (ret.status === 'refunded' && ret.refunded_at) {
+    const doneAt = r.processed_at ?? r.refunded_at
+    if (r.status === 'refunded' && doneAt) {
       events.push({
-        id: `return-approved-${ret.id}`,
+        id: `return-ok-${r.id}`,
         type: 'return_approved',
-        message: `Return approved — refund of £${(ret.refund_amount / 100).toFixed(2)} issued`,
-        timestamp: ret.refunded_at,
+        // refund_amount is stored in major units (£), not pence
+        message: `Refund of ${money(r.refund_amount)} was issued`,
+        timestamp: doneAt,
       })
     }
-    if (ret.status === 'rejected' && ret.rejected_at) {
-      events.push({
-        id: `return-rejected-${ret.id}`,
-        type: 'return_rejected',
-        message: 'Return request was rejected',
-        timestamp: ret.rejected_at,
-      })
+    if (r.status === 'rejected') {
+      const at = r.processed_at ?? r.rejected_at
+      if (at) {
+        events.push({
+          id: `return-no-${r.id}`,
+          type: 'return_rejected',
+          message: 'Return request was rejected',
+          timestamp: at,
+        })
+      }
     }
   }
 
@@ -122,52 +153,38 @@ function buildTimeline(order: any): TimelineEvent[] {
     })
   }
 
-  // Sort by timestamp descending (newest first, like Shopify)
+  for (const c of order.metadata?.staff_comments ?? []) {
+    events.push({
+      id: c.id,
+      type: 'comment',
+      message: c.text,
+      timestamp: c.created_at,
+      extra: c.author ?? 'Staff',
+    })
+  }
+
   return events.sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   )
 }
 
-const EVENT_ICON: Record<string, { icon: string; color: string; dot: string }> =
-  {
-    order_placed: { icon: '🛍️', color: 'text-[#2C6ECB]', dot: 'bg-[#2C6ECB]' },
-    payment_captured: {
-      icon: '💳',
-      color: 'text-[#008060]',
-      dot: 'bg-[#008060]',
-    },
-    fulfilled: { icon: '📦', color: 'text-[#008060]', dot: 'bg-[#008060]' },
-    shipped: { icon: '🚚', color: 'text-[#2C6ECB]', dot: 'bg-[#2C6ECB]' },
-    delivered: { icon: '✅', color: 'text-[#008060]', dot: 'bg-[#008060]' },
-    cancelled: { icon: '✕', color: 'text-[#D82C0D]', dot: 'bg-[#D82C0D]' },
-    archived: { icon: '🗄️', color: 'text-[#6D7175]', dot: 'bg-[#6D7175]' },
-    return_requested: {
-      icon: '↩️',
-      color: 'text-[#916A00]',
-      dot: 'bg-[#FFC453]',
-    },
-    return_approved: {
-      icon: '💰',
-      color: 'text-[#008060]',
-      dot: 'bg-[#008060]',
-    },
-    return_rejected: {
-      icon: '✕',
-      color: 'text-[#D82C0D]',
-      dot: 'bg-[#D82C0D]',
-    },
-    refunded: { icon: '💰', color: 'text-[#008060]', dot: 'bg-[#008060]' },
-    comment: { icon: '💬', color: 'text-[#6D7175]', dot: 'bg-[#6D7175]' },
-  }
-
-function formatTime(ts: string) {
-  const d = new Date(ts)
-  return d.toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
+const timeOf = (ts: string) =>
+  new Date(ts).toLocaleTimeString('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
+  })
+
+function dayLabel(ts: string) {
+  const d = new Date(ts)
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+  if (d.toDateString() === today.toDateString()) return 'Today'
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
   })
 }
 
@@ -179,139 +196,139 @@ interface Props {
 export default function OrderTimeline({ order, onCommentAdded }: Props) {
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [confirmResend, setConfirmResend] = useState(false)
+  const [resending, setResending] = useState(false)
 
   const events = buildTimeline(order)
-  const comments: TimelineEvent[] = (order.metadata?.staff_comments ?? []).map(
-    (c: any) => ({
-      id: c.id,
-      type: 'comment' as const,
-      message: c.text,
-      timestamp: c.created_at,
-      extra: c.author ?? 'Staff',
-    }),
-  )
 
-  const allEvents = [...events, ...comments].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-  )
+  const groups: { label: string; events: TimelineEvent[] }[] = []
+  for (const ev of events) {
+    const label = dayLabel(ev.timestamp)
+    const last = groups[groups.length - 1]
+    if (last && last.label === label) last.events.push(ev)
+    else groups.push({ label, events: [ev] })
+  }
 
   const handleComment = async () => {
-    if (!comment.trim()) return
+    const text = comment.trim()
+    if (!text || submitting) return
     setSubmitting(true)
     try {
-      await fetch(`/api/admin/orders/${order.id}/comment`, {
+      const res = await fetch(`/api/admin/orders/${order.id}/comment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: comment.trim() }),
+        body: JSON.stringify({ text }),
       })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Failed to save comment')
+      }
       setComment('')
       onCommentAdded?.()
-    } catch (e) {
-      console.error(e)
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to save comment')
     } finally {
       setSubmitting(false)
     }
   }
 
-  // Group events by date
-  const grouped: { label: string; events: TimelineEvent[] }[] = []
-  const dateMap = new Map<string, TimelineEvent[]>()
-  for (const ev of allEvents) {
-    const d = new Date(ev.timestamp)
-    const today = new Date()
-    const yesterday = new Date(today)
-    yesterday.setDate(yesterday.getDate() - 1)
-    let label: string
-    if (d.toDateString() === today.toDateString()) {
-      label = 'Today'
-    } else if (d.toDateString() === yesterday.toDateString()) {
-      label = 'Yesterday'
-    } else {
-      label = d.toLocaleDateString('en-GB', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      })
+  const handleResend = async () => {
+    setConfirmResend(false)
+    setResending(true)
+    try {
+      const r = await resendOrderConfirmation(order.id)
+      toast.success(`Confirmation email sent to ${r.to}`)
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to resend email')
+    } finally {
+      setResending(false)
     }
-    if (!dateMap.has(label)) dateMap.set(label, [])
-    dateMap.get(label)!.push(ev)
   }
-  dateMap.forEach((evs, label) => grouped.push({ label, events: evs }))
 
   return (
-    <div className='bg-white border border-[#E1E3E5] rounded-xl p-5'>
-      <h2 className='text-[14px] font-semibold text-[#202223] mb-4'>
-        Timeline
-      </h2>
-
-      {/* Comment box */}
-      <div className='flex gap-2 mb-5'>
-        <textarea
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder='Leave a comment…'
-          rows={2}
-          className='flex-1 text-[13px] text-[#202223] placeholder:text-[#8C9196] border border-[#E1E3E5] rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-[#008060] transition-colors'
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleComment()
-          }}
-        />
-        <button
-          onClick={handleComment}
-          disabled={!comment.trim() || submitting}
-          className='self-end px-3 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[12px] font-medium rounded-lg transition-colors disabled:opacity-40'
-        >
-          {submitting ? '…' : '→'}
-        </button>
-      </div>
-
-      {/* Events */}
-      {allEvents.length === 0 ? (
-        <p className='text-[12.5px] text-[#8C9196] text-center py-4'>
-          No activity yet
-        </p>
-      ) : (
-        <div className='space-y-4'>
-          {grouped.map((group) => (
-            <div key={group.label}>
-              <p className='text-[11px] font-semibold text-[#8C9196] uppercase tracking-wider mb-2'>
-                {group.label}
-              </p>
-              <div className='space-y-3'>
-                {group.events.map((ev) => {
-                  const style = EVENT_ICON[ev.type] ?? EVENT_ICON['comment']
-                  return (
-                    <div key={ev.id} className='flex gap-3 items-start'>
-                      <div className='flex flex-col items-center pt-0.5'>
-                        <span
-                          className={`w-2 h-2 rounded-full shrink-0 mt-1 ${style.dot}`}
-                        />
-                      </div>
-                      <div className='flex-1 min-w-0'>
-                        <p className='text-[12.5px] text-[#202223] leading-snug'>
-                          {ev.message}
-                        </p>
-                        {ev.extra && (
-                          <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
-                            {ev.extra}
-                          </p>
-                        )}
-                        <p className='text-[11px] text-[#8C9196] mt-0.5'>
-                          {formatTime(ev.timestamp)}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <p className='text-[11px] text-[#8C9196] mt-4 text-center'>
+    <Section plainOnMobile className='px-4 pt-4 lg:px-5 lg:pb-5'>
+      <SectionTitle>Timeline</SectionTitle>
+      <p className='text-[13px] text-[#6D7175] -mt-1 mb-4'>
         Only you and other staff can see comments
       </p>
-    </div>
+
+      <div className='flex flex-col'>
+        {/* Events */}
+        <div className='order-1 lg:order-2 pb-4 lg:pb-0 lg:mt-5'>
+          {groups.length === 0 ? (
+            <p className='text-[13px] text-[#6D7175] py-4'>No activity yet</p>
+          ) : (
+            groups.map((g) => (
+              <TimelineDay key={g.label} label={g.label}>
+                {g.events.map((ev) => (
+                  <TimelineItem
+                    key={ev.id}
+                    time={timeOf(ev.timestamp)}
+                    sub={ev.extra}
+                    action={
+                      ev.type === 'order_placed' && order.email ? (
+                        <button
+                          type='button'
+                          disabled={resending}
+                          onClick={() => setConfirmResend(true)}
+                          className='text-[14px] text-[#2C6ECB] hover:underline disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5'
+                        >
+                          {resending && <Spinner size={13} />}
+                          Resend confirmation email
+                        </button>
+                      ) : undefined
+                    }
+                  >
+                    {ev.message}
+                  </TimelineItem>
+                ))}
+              </TimelineDay>
+            ))
+          )}
+        </div>
+
+        {/* Composer — pinned to the bottom on mobile, on top on desktop */}
+        <div
+          className={cx(
+            'order-2 lg:order-1 sticky bottom-0 lg:static z-10',
+            '-mx-4 px-4 py-3 bg-[#F6F6F7] lg:bg-transparent lg:mx-0 lg:px-0 lg:py-0',
+          )}
+        >
+          <div className='flex items-center gap-2'>
+            <input
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleComment()
+                }
+              }}
+              placeholder='Leave a comment…'
+              maxLength={2000}
+              className='flex-1 min-w-0 h-11 px-4 rounded-xl bg-white lg:bg-[#FAFAFA] border border-[#E1E3E5] text-[15px] text-[#202223] placeholder:text-[#8C9196] outline-none focus:border-[#008060] transition-colors'
+            />
+            <button
+              type='button'
+              aria-label='Post comment'
+              onClick={handleComment}
+              disabled={!comment.trim() || submitting}
+              className='w-11 h-11 rounded-xl bg-[#008060] text-white flex items-center justify-center shrink-0 disabled:opacity-30 cursor-pointer transition-opacity'
+            >
+              {submitting ? <Spinner /> : <IconSend size={18} />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <ConfirmSheet
+        open={confirmResend}
+        title='Resend confirmation email?'
+        message={`The order confirmation will be sent again to ${order.email}.`}
+        confirmLabel='Resend'
+        onConfirm={handleResend}
+        onClose={() => setConfirmResend(false)}
+      />
+    </Section>
   )
 }

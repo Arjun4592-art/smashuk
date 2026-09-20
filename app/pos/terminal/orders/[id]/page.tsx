@@ -338,10 +338,17 @@ export default function OrderDetailPage({
     try {
       const { label_url } = await getShippingLabel(id)
       if (!label_url) {
-        alert('Royal Mail has not returned a label URL yet.')
+        alert('Parcel2Go has not returned a label URL yet.')
         return
       }
-      window.open(label_url, '_blank', 'noopener,noreferrer')
+      // Parcel2Go returns the label as a data: URI; browsers block window.open on
+      // those, so turn it into a blob: URL first.
+      let labelTarget: string = label_url
+      if (label_url.startsWith('data:')) {
+        const labelBlob = await (await fetch(label_url)).blob()
+        labelTarget = URL.createObjectURL(labelBlob)
+      }
+      window.open(labelTarget, '_blank', 'noopener,noreferrer')
     } catch (err: unknown) {
       alert(
         'Failed to fetch shipping label: ' +

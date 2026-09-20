@@ -53,10 +53,11 @@ export async function GET(
   const { id } = await params
   try {
     const FIELDS =
-      'id,display_id,email,created_at,metadata,payment_status,' +
-      '*items,*payment_collections.payments,fulfillment_status,' +
+      'id,display_id,email,created_at,updated_at,canceled_at,status,currency_code,metadata,payment_status,' +
+      '*items,*payment_collections.payments,*shipping_methods,*fulfillments,fulfillment_status,' +
       'subtotal,total,discount_total,shipping_total,tax_total,' +
-      'customer.first_name,customer.last_name,customer.phone,' +
+      'customer.id,customer.first_name,customer.last_name,customer.phone,' +
+      'shipping_address.first_name,shipping_address.last_name,shipping_address.phone,' +
       'shipping_address.address_1,shipping_address.address_2,shipping_address.city,' +
       'shipping_address.province,shipping_address.postal_code,shipping_address.country_code'
     const FALLBACK_FIELDS =
@@ -330,7 +331,7 @@ export async function PATCH(
             if (fullOrder?.email) {
               const { subject, html, text } = shippingConfirmationEmail(
                 fullOrder,
-                { trackingNumber: data?.royalMailTrackingNumber },
+                { trackingNumber: data?.parcel2goTrackingNumber },
               )
               await sendMail({
                 to: fullOrder.email,

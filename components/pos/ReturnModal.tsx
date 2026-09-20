@@ -6,6 +6,8 @@ import type { ReturnItem } from '@/store/posStore'
 import { markPOSOrderReturned, type PosOrderRecord } from '@/lib/api/pos'
 interface Props {
   orders: PosOrderRecord[]
+  /** Open straight on this order's items (skips the search step) */
+  initialOrderId?: string
   onReturned: (medusaOrderId: string) => void
   onClose: () => void
 }
@@ -17,11 +19,25 @@ const RETURN_REASONS = [
   'Damaged packaging',
   'Other',
 ]
-export default function ReturnModal({ orders, onReturned, onClose }: Props) {
+export default function ReturnModal({
+  orders,
+  initialOrderId,
+  onReturned,
+  onClose,
+}: Props) {
   const completedOrders = orders
-  const [step, setStep] = useState<'search' | 'items' | 'success'>('search')
+  const initialOrder = initialOrderId
+    ? (completedOrders.find(
+        (o) =>
+          !o.returned &&
+          (o.id === initialOrderId || o.medusaOrderId === initialOrderId),
+      ) ?? null)
+    : null
+  const [step, setStep] = useState<'search' | 'items' | 'success'>(
+    initialOrder ? 'items' : 'search',
+  )
   const [search, setSearch] = useState('')
-  const [selectedOrder, setSelectedOrder] = useState<any>(null)
+  const [selectedOrder, setSelectedOrder] = useState<any>(initialOrder)
   const [returnItems, setReturnItems] = useState<
     Record<
       string,

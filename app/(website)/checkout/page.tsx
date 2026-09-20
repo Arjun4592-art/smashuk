@@ -27,6 +27,7 @@ import { useAuthStore } from '@/store/authStore'
 import { trackBeginCheckout } from '@/lib/analytics-events'
 import {
   FREE_SHIPPING_THRESHOLD,
+  STANDARD_SHIPPING_COST,
   GIFT_CARD_PRODUCT_HANDLE,
 } from '@/lib/constants'
 import toast from 'react-hot-toast'
@@ -41,13 +42,17 @@ const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '',
 )
 const PAYMENT_METHOD = 'card'
+// Express / next-day delivery is discontinued. Any Medusa option matching this
+// is ignored so customers can never see or pick it.
+const EXPRESS_OPTION_RE = /express|fast|tracked ?24|next.?day/i
+
 const DELIVERY_INFO_SECTIONS: {
   heading: string
   body: string
 }[] = [
   {
     heading: '',
-    body: 'We offer a 2-3 day delivery on most goods purchased to a UK address, excluding Northern Ireland, Isle of Man, Scottish Islands and the Channel Islands, which may take up to 7 days to deliver.',
+    body: 'We offer a 2-5 working day delivery on most goods purchased to a UK address, excluding Northern Ireland, Isle of Man, Scottish Islands and the Channel Islands, which may take up to 7 days to deliver.',
   },
   {
     heading: '1. General Information',
@@ -58,8 +63,8 @@ const DELIVERY_INFO_SECTIONS: {
     body: 'An estimated delivery time will be provided to you once your order is placed. Delivery times are estimates and commence from the date of shipping, rather than the date of order. Delivery times are to be used as a guide only and are subject to the acceptance and approval of your order.\n\nUnless there are exceptional circumstances, we make every effort to fulfil your order within 10 business days of the date of your order. Business days mean Monday to Friday, except holidays. Please note we do not ship on Sundays.\n\nDate of delivery may vary due to carrier shipping practices, delivery location, method of delivery, and the items ordered. Products may also be delivered in separate shipments.',
   },
   {
-    heading: '3. Next Working Day Delivery',
-    body: 'For an additional cost we can deliver next working day: £5.99 for a spend value of less than £80.00, and £3.50 for a spend value greater than £80.00. To ensure availability of next working day delivery, orders have to be placed before 2:30pm. Orders placed on Friday will be delivered on Monday. Orders received on Saturday and Sunday requesting next day delivery will not be delivered until Tuesday.',
+    heading: '3. Delivery Options',
+    body: 'We currently offer Standard delivery only: £4.99 on orders under £80.00, and free on orders of £80.00 or more. Next day / express delivery is not available.',
   },
   {
     heading: '4. Additional Delivery Instructions',
@@ -293,18 +298,28 @@ export default function CheckoutPage() {
   const [showDeliveryInfo, setShowDeliveryInfo] = useState(false)
   const { setCartId } = useCartStore()
   const cartValidatedRef = useRef(false)
+  const cartValidatingRef = useRef(false)
+  // The cart id saved in the browser can go stale (cart deleted / DB reset /
+  // different backend) and Medusa then answers "Cart id not found", which
+  // leaves shipping options empty (Pickup disabled) and breaks checkout.
+  // When that happens, build a fresh cart with the same items and switch to
+  // it. NOTE: no "cancelled" guard here on purpose — this effect re-runs
+  // (dev StrictMode / `items` changing) and a guard would throw away the new
+  // cart, leaving the stale id in place.
   useEffect(() => {
     if (!cartId || items.length === 0) return
-    if (cartValidatedRef.current) return
-    cartValidatedRef.current = true
-    let cancelled = false
+    if (cartValidatedRef.current || cartValidatingRef.current) return
+    cartValidatingRef.current = true
     ;(async () => {
       try {
-        const medusaCart = await getCart(cartId)
-        if (!medusaCart || !medusaCart.items?.length) {
+        let cartIsValid = false
+        try {
+          const medusaCart = await getCart(cartId)
+          cartIsValid = !!medusaCart?.items?.length
+        } catch {}
+        if (!cartIsValid) {
           const newCart = await createCart()
-          if (cancelled || !newCart?.id) return
-          setCartId(newCart.id)
+          if (!newCart?.id) return
           for (const item of items) {
             const variantId =
               item.variant?.id ?? (item.product as any).variants?.[0]?.id
@@ -314,12 +329,16 @@ export default function CheckoutPage() {
               )
             }
           }
+          // Switch only after the items are in, so shipping options load for
+          // a complete cart.
+          setCartId(newCart.id)
         }
-      } catch {}
+        cartValidatedRef.current = true
+      } catch {
+      } finally {
+        cartValidatingRef.current = false
+      }
     })()
-    return () => {
-      cancelled = true
-    }
   }, [cartId, items.length, items, setCartId])
   useEffect(() => {
     if (!cartId) return
@@ -328,7 +347,13 @@ export default function CheckoutPage() {
     listShippingOptions(cartId)
       .then((opts) => {
         if (cancelled) return
-        setShippingOptions(opts)
+        // Express / next-day delivery is discontinued — only Standard (and
+        // Free / Pickup) options are offered, even if one still exists in Medusa.
+        setShippingOptions(
+          (opts ?? []).filter(
+            (o: any) => !EXPRESS_OPTION_RE.test(o.name ?? ''),
+          ),
+        )
       })
       .catch(() => {
         if (!cancelled) setShippingOptions([])
@@ -347,20 +372,14 @@ export default function CheckoutPage() {
   const pickupOption = shippingOptions.find((o) => isPickupOption(o.name ?? ''))
   const isFreeDeliveryOption = (opt: any) =>
     !isPickupOption(opt.name ?? '') && /free/i.test(opt.name ?? '')
-  const isExpressDeliveryOption = (opt: any) =>
-    !isPickupOption(opt.name ?? '') &&
-    !isFreeDeliveryOption(opt) &&
-    /express|fast|tracked ?24|next.?day/i.test(opt.name ?? '')
   const isPaidDeliveryOption = (opt: any) =>
     !isPickupOption(opt.name ?? '') &&
     !isFreeDeliveryOption(opt) &&
-    !isExpressDeliveryOption(opt)
+    !EXPRESS_OPTION_RE.test(opt.name ?? '')
   const freeDeliveryOption = shippingOptions.find(isFreeDeliveryOption)
   const paidDeliveryOption = shippingOptions.find(isPaidDeliveryOption)
-  // The default/standard delivery option shown by default — free if the
-  // order qualifies, otherwise the regular paid ("Standard"/Tracked 48)
-  // option. Express is never auto-selected; it's an opt-in upgrade the
-
+  // Shipping is automatic (no customer choice): the Free option when the
+  // order reaches the free-shipping threshold, otherwise the paid Standard option.
   const resolvedDeliveryOption =
     (physicalSubtotal >= freeShippingThreshold
       ? freeDeliveryOption
@@ -368,22 +387,23 @@ export default function CheckoutPage() {
     freeDeliveryOption ??
     paidDeliveryOption
 
-  const expressDeliveryOption = shippingOptions.find(isExpressDeliveryOption)
-  const isExpressSelected =
-    !!expressDeliveryOption &&
-    selectedShippingOptionId === expressDeliveryOption.id
   const isPickupSelected =
     !!pickupOption && selectedShippingOptionId === pickupOption.id
-  const activeDeliveryOption = isExpressSelected
-    ? expressDeliveryOption
-    : resolvedDeliveryOption
+  const activeDeliveryOption = resolvedDeliveryOption
+  // Shipping rule: free at/above the threshold, otherwise flat Standard rate.
+  // If Medusa's options haven't loaded yet, show that same rule instead of
+  // guessing, so the summary is right before the options arrive.
   const displayShipping = isPickupSelected
     ? 0
-    : activeDeliveryOption === freeDeliveryOption
-      ? 0
-      : (activeDeliveryOption?.calculated_price?.calculated_amount ??
-        activeDeliveryOption?.amount ??
-        shipping)
+    : activeDeliveryOption
+      ? activeDeliveryOption === freeDeliveryOption
+        ? 0
+        : (activeDeliveryOption.calculated_price?.calculated_amount ??
+          activeDeliveryOption.amount ??
+          shipping)
+      : physicalSubtotal >= freeShippingThreshold
+        ? 0
+        : STANDARD_SHIPPING_COST
 
   const displayTotal = Math.max(
     0,
@@ -404,7 +424,12 @@ export default function CheckoutPage() {
     const selectionStillValid = shippingOptions.some(
       (o) => o.id === selectedShippingOptionId,
     )
-    if (!selectionStillValid) {
+    // Always follow the free-shipping threshold (free option at/above it,
+    // paid option below it).
+    if (
+      !selectionStillValid ||
+      selectedShippingOptionId !== resolvedDeliveryOption.id
+    ) {
       setSelectedShippingOptionId(resolvedDeliveryOption.id)
     }
   }, [
@@ -1021,8 +1046,7 @@ export default function CheckoutPage() {
                       ?
                     </button>
                   </span>
-                  {!cartId ||
-                  (shippingLoading && shippingOptions.length === 0) ? (
+                  {!cartId ? (
                     <span className='text-gray-400 text-xs'>
                       Enter shipping address to view methods
                     </span>
@@ -1040,50 +1064,6 @@ export default function CheckoutPage() {
                     </span>
                   )}
                 </div>
-                {!isPickupSelected &&
-                  expressDeliveryOption &&
-                  expressDeliveryOption.id !== resolvedDeliveryOption?.id && (
-                    <button
-                      type='button'
-                      onClick={() =>
-                        setSelectedShippingOptionId(
-                          isExpressSelected
-                            ? (resolvedDeliveryOption?.id ?? '')
-                            : expressDeliveryOption.id,
-                        )
-                      }
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-xs transition-colors ${
-                        isExpressSelected
-                          ? 'border-[#0A1F44] bg-[#0A1F44]/5 text-[#0A1F44]'
-                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                      }`}
-                    >
-                      <span className='flex items-center gap-1.5'>
-                        <span
-                          className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
-                            isExpressSelected
-                              ? 'border-[#0A1F44]'
-                              : 'border-gray-300'
-                          }`}
-                        >
-                          {isExpressSelected && (
-                            <span className='w-1.5 h-1.5 rounded-full bg-[#0A1F44]' />
-                          )}
-                        </span>
-                        Need it faster? Upgrade to{' '}
-                        {expressDeliveryOption.name ?? 'Express'}
-                      </span>
-                      <span className='font-semibold'>
-                        +
-                        {formatCurrency(
-                          expressDeliveryOption.calculated_price
-                            ?.calculated_amount ??
-                            expressDeliveryOption.amount ??
-                            0,
-                        )}
-                      </span>
-                    </button>
-                  )}
                 <div className='flex justify-between border-t border-gray-100 pt-3 text-base'>
                   <span className='font-montserrat font-black text-[#0A1F44]'>
                     Total

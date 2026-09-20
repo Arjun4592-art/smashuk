@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { resolveSalesChannels } from '@/lib/api/selling-channels'
 import { syncVariantInventory } from '@/lib/api/inventory-sync'
+import { invalidateCatalog } from '@/lib/catalog/source'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 async function safeJson(res: Response) {
@@ -104,8 +105,13 @@ export async function PATCH(
     }
     const stockQty: number = body._stock ?? 0
     const variantStocks: Record<string, number> = body._variantStocks ?? {}
+    // Only true when the edit form's stock field was actually changed by the
+    // user (see the dashboard edit page). Lets a single-variant product's
+    // stock be updated from the Save button.
+    const stockDirty: boolean = body._stockDirty === true
     delete body._stock
     delete body._variantStocks
+    delete body._stockDirty
     if (body.selling_channel) {
       const channels = await resolveSalesChannels(
         body.selling_channel,
@@ -161,6 +167,10 @@ export async function PATCH(
             locationId,
             variantStocks,
             stockQty,
+            {
+              applyDefaultToExisting:
+                stockDirty && Object.keys(variantStocks).length === 0,
+            },
           )
         }
       } catch (invErr: any) {
@@ -169,6 +179,9 @@ export async function PATCH(
           invErr.message,
         )
       }
+      // Product + inventory are written — make the shop rebuild its
+      // catalogue snapshot so status / price / stock changes show up now.
+      invalidateCatalog()
     }
     return NextResponse.json(data, {
       status: res.status,
@@ -215,6 +228,7 @@ export async function DELETE(
       },
     })
     const data = await safeJson(res)
+    if (res.ok) invalidateCatalog()
     return NextResponse.json(data, {
       status: res.status,
     })

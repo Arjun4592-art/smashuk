@@ -1,6 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import {
+  Btn,
+  IconBack,
+  IconBox,
+  cx,
+  roundBtnClass,
+} from '@/components/orders/OrderUI'
 
 const RETURN_REASONS = [
   'Defective product',
@@ -11,12 +18,23 @@ const RETURN_REASONS = [
   'Other',
 ]
 
+const SHIPPING_CARRIERS = [
+  'Parcel2Go',
+  'DPD',
+  'Evri',
+  'DHL',
+  'UPS',
+  'FedEx',
+  'Parcelforce',
+  'Other',
+]
+
 function fmt(amount: number, currency = 'GBP') {
   const symbol =
     currency.toUpperCase() === 'GBP' ? '£' : currency.toUpperCase() + ' '
   return (
     symbol +
-    amount.toLocaleString('en-GB', {
+    (Number(amount) || 0).toLocaleString('en-GB', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })
@@ -37,18 +55,22 @@ interface Props {
   onClose: () => void
 }
 
-type Step = 'items' | 'shipping' | 'summary'
+const fieldCls =
+  'w-full rounded-xl border border-[#C4C8CC] bg-white text-[15px] text-[#202223] outline-none ' +
+  'focus:border-[#008060] focus:ring-1 focus:ring-[#008060]/30 transition-colors'
 
-const SHIPPING_CARRIERS = [
-  'Royal Mail',
-  'DPD',
-  'Evri',
-  'DHL',
-  'UPS',
-  'FedEx',
-  'Parcelforce',
-  'Other',
-]
+function Radio({ on }: { on: boolean }) {
+  return (
+    <span
+      className={cx(
+        'w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0',
+        on ? 'border-[#008060]' : 'border-[#C4C8CC]',
+      )}
+    >
+      {on && <span className='w-2.5 h-2.5 rounded-full bg-[#008060]' />}
+    </span>
+  )
+}
 
 export default function ReturnExchangeModal({
   order,
@@ -56,7 +78,6 @@ export default function ReturnExchangeModal({
   onSubmit,
   onClose,
 }: Props) {
-  const [step, setStep] = useState<Step>('items')
   const [qtys, setQtys] = useState<Record<string, number>>({})
   const [reason, setReason] = useState('')
   const [shippingOption, setShippingOption] = useState<'label' | 'no_shipping'>(
@@ -80,38 +101,36 @@ export default function ReturnExchangeModal({
     () =>
       Object.entries(qtys)
         .filter(([, qty]) => qty > 0)
-        .map(([item_id, quantity]) => {
-          const item = returnableItems.find((i: any) => i.id === item_id)
-          return { item_id, quantity, item }
-        }),
+        .map(([item_id, quantity]) => ({
+          item_id,
+          quantity,
+          item: returnableItems.find((i: any) => i.id === item_id),
+        })),
     [qtys, returnableItems],
   )
 
-  const calculatedTotal = useMemo(
-    () =>
-      selectedItems.reduce(
-        (sum, { quantity, item }) => sum + (item?.unit_price ?? 0) * quantity,
-        0,
-      ),
-    [selectedItems],
+  const calculatedTotal = selectedItems.reduce(
+    (sum, { quantity, item }) => sum + (item?.unit_price ?? 0) * quantity,
+    0,
   )
-
-  const parsedCustomAmount = parseFloat(customAmount)
+  const parsedCustom = parseFloat(customAmount)
   const refundTotal =
-    useCustomAmount && !Number.isNaN(parsedCustomAmount)
-      ? parsedCustomAmount
+    useCustomAmount && !Number.isNaN(parsedCustom)
+      ? parsedCustom
       : calculatedTotal
 
-  // ── Step validation ──────────────────────────────────────────────
-  const canGoToShipping = selectedItems.length > 0 && !!reason
-  const canGoToSummary = true // shipping step is always valid
+  const canSubmit = selectedItems.length > 0 && !!reason && refundTotal > 0
 
-  // ── Submit ───────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (
-      useCustomAmount &&
-      (Number.isNaN(parsedCustomAmount) || parsedCustomAmount <= 0)
-    ) {
+    if (selectedItems.length === 0) {
+      setError('Select at least one item to return')
+      return
+    }
+    if (!reason) {
+      setError('Choose a return reason')
+      return
+    }
+    if (useCustomAmount && (Number.isNaN(parsedCustom) || parsedCustom <= 0)) {
       setError('Enter a valid custom refund amount')
       return
     }
@@ -124,7 +143,7 @@ export default function ReturnExchangeModal({
         shippingOption,
         trackingNumber || undefined,
         shippingCarrier || undefined,
-        useCustomAmount ? parsedCustomAmount : undefined,
+        useCustomAmount ? parsedCustom : undefined,
       )
     } catch (err: any) {
       setError(err.message ?? 'Failed to process return')
@@ -132,379 +151,273 @@ export default function ReturnExchangeModal({
     }
   }
 
-  const stepTitles: Record<Step, string> = {
-    items: 'Return and exchange',
-    shipping: 'Return and exchange',
-    summary: 'Return and exchange',
-  }
-
-  const stepIndex: Record<Step, number> = { items: 0, shipping: 1, summary: 2 }
+  const setQty = (id: string, next: number, max: number) =>
+    setQtys((p) => ({ ...p, [id]: Math.min(max, Math.max(0, next)) }))
 
   return (
     <div
-      className='fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-0 sm:px-4'
-      onClick={onClose}
+      className='fixed inset-0 z-[60] flex sm:items-center sm:justify-center sm:bg-black/40 sm:p-4'
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div
-        className='bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl flex flex-col max-h-[92vh]'
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className='bg-[#F6F6F7] w-full h-full sm:h-auto sm:max-h-[92vh] sm:max-w-xl sm:rounded-2xl flex flex-col overflow-hidden'>
         {/* Header */}
-        <div className='flex items-center justify-between px-5 pt-5 pb-3 border-b border-[#E1E3E5] shrink-0'>
-          <div className='flex items-center gap-3'>
-            {step !== 'items' && (
-              <button
-                onClick={() =>
-                  setStep(step === 'summary' ? 'shipping' : 'items')
-                }
-                className='w-7 h-7 flex items-center justify-center rounded-lg hover:bg-[#F6F6F7] text-[#6D7175]'
-              >
-                ←
-              </button>
-            )}
-            <h3 className='text-[15px] font-semibold text-[#202223]'>
-              {stepTitles[step]}
-            </h3>
-          </div>
+        <div className='bg-white shrink-0 grid grid-cols-[40px_1fr_40px] items-center px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 sm:pt-3 border-b border-[#E1E3E5]'>
           <button
+            type='button'
+            aria-label='Back'
             onClick={onClose}
-            className='w-7 h-7 flex items-center justify-center rounded-lg hover:bg-[#F6F6F7] text-[#6D7175] text-lg'
+            className={roundBtnClass}
           >
-            ✕
+            <IconBack />
           </button>
+          <h3 className='text-center text-[17px] font-semibold text-[#202223]'>
+            Return and exchange
+          </h3>
+          <span />
         </div>
 
-        {/* Step indicator */}
-        <div className='flex gap-1 px-5 pt-3 pb-1 shrink-0'>
-          {(['items', 'shipping', 'summary'] as Step[]).map((s, i) => (
-            <div
-              key={s}
-              className={`h-1 flex-1 rounded-full transition-colors ${
-                stepIndex[step] >= i ? 'bg-[#008060]' : 'bg-[#E1E3E5]'
-              }`}
-            />
-          ))}
-        </div>
+        {/* Scrollable body */}
+        <div className='flex-1 overflow-y-auto overscroll-contain'>
+          {/* 1 — items */}
+          <div className='bg-white px-4 py-5'>
+            <h4 className='text-[17px] font-bold text-[#202223]'>
+              Select quantity to return
+            </h4>
+            <p className='text-[15px] font-bold text-[#202223] mt-1'>
+              #{order.display_id ?? order.id?.slice(-6)}
+            </p>
+            <p className='text-[13px] text-[#6D7175]'>
+              {(order.items ?? []).length} item
+              {(order.items ?? []).length === 1 ? '' : 's'}
+            </p>
 
-        {/* Body */}
-        <div className='flex-1 overflow-y-auto px-5 py-4'>
-          {/* ── STEP 1: Select items ── */}
-          {step === 'items' && (
-            <div className='space-y-4'>
-              <div>
-                <p className='text-[13px] font-semibold text-[#202223] mb-0.5'>
-                  Select quantity to return
-                </p>
-                <p className='text-[12px] text-[#8C9196]'>
-                  #{order.display_id ?? order.id?.slice(-6)}
-                  {order.shipping_address?.address_1
-                    ? ` · Shipped from ${order.shipping_address.address_1}`
-                    : ''}
-                </p>
-              </div>
-
-              {returnableItems.length === 0 ? (
-                <p className='text-[13px] text-[#6D7175] py-4 text-center'>
-                  Every item has already been returned.
-                </p>
-              ) : (
-                <div className='space-y-3'>
-                  {returnableItems.map((item: any) => {
-                    const max = remainingQty[item.id] ?? 0
-                    const qty = qtys[item.id] ?? 0
-                    const lineTotal = item.unit_price * qty
-                    return (
-                      <div
-                        key={item.id}
-                        className='p-3.5 rounded-xl border border-[#E1E3E5]'
-                      >
-                        <div className='flex items-start gap-3 mb-3'>
-                          {/* Thumbnail */}
-                          <div className='w-12 h-12 rounded-lg bg-[#F6F6F7] border border-[#E1E3E5] flex items-center justify-center overflow-hidden shrink-0'>
-                            {item.thumbnail ? (
-                              <img
-                                src={item.thumbnail}
-                                alt={item.title}
-                                className='w-full h-full object-cover'
-                              />
-                            ) : (
-                              <span className='text-xl'>📦</span>
-                            )}
-                          </div>
-                          <div className='flex-1 min-w-0'>
-                            <p className='text-[13px] font-medium text-[#202223] leading-snug'>
-                              {item.title}
-                            </p>
-                            {item.variant_title &&
-                              item.variant_title !== 'Default' && (
-                                <span className='inline-block mt-1 px-2 py-0.5 bg-[#F6F6F7] text-[#6D7175] text-[11px] rounded-md'>
-                                  {item.variant_title}
-                                </span>
-                              )}
-                          </div>
+            {returnableItems.length === 0 ? (
+              <p className='text-[15px] text-[#6D7175] py-8 text-center'>
+                Every item has already been returned.
+              </p>
+            ) : (
+              <div className='mt-4 space-y-3'>
+                {returnableItems.map((item: any) => {
+                  const max = remainingQty[item.id] ?? 0
+                  const qty = qtys[item.id] ?? 0
+                  return (
+                    <div
+                      key={item.id}
+                      className='rounded-xl border border-[#E1E3E5] overflow-hidden'
+                    >
+                      <div className='flex gap-3 p-3'>
+                        <div className='w-14 h-14 rounded-lg border border-[#E1E3E5] bg-[#FAFAFA] flex items-center justify-center overflow-hidden shrink-0 text-[#C4C8CC]'>
+                          {item.thumbnail ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={item.thumbnail}
+                              alt=''
+                              className='w-full h-full object-cover'
+                            />
+                          ) : (
+                            <IconBox size={22} />
+                          )}
                         </div>
+                        <div className='min-w-0'>
+                          <p className='text-[15px] font-semibold text-[#202223] leading-snug'>
+                            {item.title}
+                          </p>
+                          {item.variant_title &&
+                            item.variant_title !== 'Default' && (
+                              <span className='inline-block mt-1 px-2 py-0.5 rounded-md bg-[#F1F2F3] text-[12.5px] text-[#6D7175]'>
+                                {item.variant_title}
+                              </span>
+                            )}
+                        </div>
+                      </div>
 
-                        {/* Quantity selector */}
-                        <div className='flex items-center justify-between bg-[#F9FAFB] rounded-lg px-3 py-2 border border-[#E1E3E5]'>
+                      <div className='px-3 pb-3'>
+                        <div className='flex items-center justify-between rounded-xl border border-[#C4C8CC] pl-4 pr-2 py-2'>
                           <div>
-                            <p className='text-[11px] text-[#8C9196]'>
+                            <p className='text-[12px] text-[#6D7175] leading-none'>
                               Quantity
                             </p>
-                            <p className='text-[13px] font-medium text-[#202223]'>
+                            <p className='text-[16px] text-[#202223] mt-1.5 leading-none tabular-nums'>
                               {qty}{' '}
-                              <span className='text-[#8C9196]'>/ {max}</span>
+                              <span className='text-[#6D7175]'>/ {max}</span>
                             </p>
                           </div>
-                          <div className='flex items-center gap-2'>
+                          <div className='flex gap-2'>
                             <button
-                              onClick={() =>
-                                setQtys((p) => ({
-                                  ...p,
-                                  [item.id]: Math.max(0, qty - 1),
-                                }))
-                              }
-                              className='w-8 h-8 flex items-center justify-center rounded-lg border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[#6D7175] text-lg font-light disabled:opacity-30'
+                              type='button'
+                              aria-label='Decrease quantity'
+                              onClick={() => setQty(item.id, qty - 1, max)}
                               disabled={qty === 0}
+                              className='w-11 h-11 rounded-lg bg-[#F1F2F3] text-[#202223] text-[22px] leading-none flex items-center justify-center disabled:opacity-40 cursor-pointer active:bg-[#C9CCCF]'
                             >
                               −
                             </button>
                             <button
-                              onClick={() =>
-                                setQtys((p) => ({
-                                  ...p,
-                                  [item.id]: Math.min(max, qty + 1),
-                                }))
-                              }
-                              className='w-8 h-8 flex items-center justify-center rounded-lg border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[#6D7175] text-lg font-light disabled:opacity-30'
+                              type='button'
+                              aria-label='Increase quantity'
+                              onClick={() => setQty(item.id, qty + 1, max)}
                               disabled={qty === max}
+                              className='w-11 h-11 rounded-lg bg-[#F1F2F3] text-[#202223] text-[22px] leading-none flex items-center justify-center disabled:opacity-40 cursor-pointer active:bg-[#C9CCCF]'
                             >
                               +
                             </button>
                           </div>
                         </div>
-
-                        {/* Price row */}
-                        {qty > 0 && (
-                          <div className='flex items-center justify-between mt-2 px-1'>
-                            <p className='text-[12px] text-[#8C9196]'>
-                              {fmt(item.unit_price, currency)}{' '}
-                              <span className='text-[#C4C8CC]'>×</span>{' '}
-                              <span className='text-[#202223] font-medium'>
-                                {qty}
-                              </span>
-                            </p>
-                            <p className='text-[12px] font-semibold text-[#202223]'>
-                              {fmt(lineTotal, currency)}
-                            </p>
-                          </div>
-                        )}
+                        <div className='flex items-center justify-between mt-3 text-[15px] tabular-nums'>
+                          <span className='text-[#202223]'>
+                            {fmt(item.unit_price, currency)}{' '}
+                            <span className='text-[#8C9196]'>×</span>{' '}
+                            <span className='inline-block min-w-6 text-center rounded-md bg-[#F1F2F3] px-1.5'>
+                              {qty}
+                            </span>
+                          </span>
+                          <span className='text-[#202223]'>
+                            {fmt(item.unit_price * qty, currency)}
+                          </span>
+                        </div>
                       </div>
-                    )
-                  })}
-                </div>
-              )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
 
-              {/* Reason */}
-              {returnableItems.length > 0 && (
-                <div>
-                  <p className='text-[12px] font-medium text-[#6D7175] mb-1.5'>
-                    Return reason
-                  </p>
-                  <select
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    className='w-full px-3 py-2.5 rounded-xl border border-[#E1E3E5] text-[13px] outline-none text-[#202223] bg-white focus:border-[#008060]'
-                  >
-                    <option value=''>Select reason…</option>
-                    {RETURN_REASONS.map((r) => (
-                      <option key={r}>{r}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-          )}
+            {returnableItems.length > 0 && (
+              <div className='relative mt-5'>
+                <label
+                  htmlFor='return-reason'
+                  className='absolute left-4 top-2 text-[12px] text-[#6D7175] pointer-events-none'
+                >
+                  Return reason
+                </label>
+                <select
+                  id='return-reason'
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  className={cx(fieldCls, 'h-14 pt-5 px-4 appearance-none')}
+                >
+                  <option value=''>Select reason…</option>
+                  {RETURN_REASONS.map((r) => (
+                    <option key={r}>{r}</option>
+                  ))}
+                </select>
+                <span className='absolute right-4 top-1/2 -translate-y-1/2 text-[#6D7175] pointer-events-none text-[11px]'>
+                  ▾
+                </span>
+              </div>
+            )}
+          </div>
 
-          {/* ── STEP 2: Return shipping ── */}
-          {step === 'shipping' && (
-            <div className='space-y-4'>
-              <p className='text-[13px] font-semibold text-[#202223]'>
+          {/* 2 — return shipping */}
+          {returnableItems.length > 0 && (
+            <div className='bg-white mt-3 px-4 py-5'>
+              <h4 className='text-[17px] font-bold text-[#202223]'>
                 Return shipping options
-              </p>
+              </h4>
 
-              {/* Upload label option */}
-              <div
-                className={`p-4 rounded-xl border-2 cursor-pointer transition-colors ${
-                  shippingOption === 'label'
-                    ? 'border-[#008060] bg-[#F2F7F5]'
-                    : 'border-[#E1E3E5] hover:border-[#C4C8CC]'
-                }`}
-                onClick={() => setShippingOption('label')}
-              >
-                <div className='flex items-center gap-3 mb-3'>
-                  <div
-                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                      shippingOption === 'label'
-                        ? 'border-[#008060]'
-                        : 'border-[#C4C8CC]'
-                    }`}
+              <div className='mt-4 space-y-4'>
+                <div>
+                  <button
+                    type='button'
+                    onClick={() => setShippingOption('label')}
+                    className='flex items-center gap-3 text-[16px] text-[#202223] cursor-pointer'
                   >
-                    {shippingOption === 'label' && (
-                      <div className='w-2 h-2 rounded-full bg-[#008060]' />
-                    )}
-                  </div>
-                  <p className='text-[13px] font-medium text-[#202223]'>
-                    Add tracking info
-                  </p>
+                    <Radio on={shippingOption === 'label'} />
+                    Add tracking details
+                  </button>
+
+                  {shippingOption === 'label' && (
+                    <div className='mt-4 space-y-3'>
+                      <input
+                        type='text'
+                        placeholder='Tracking number'
+                        value={trackingNumber}
+                        onChange={(e) => setTrackingNumber(e.target.value)}
+                        className={cx(fieldCls, 'h-14 px-4')}
+                      />
+                      <div className='relative'>
+                        <label
+                          htmlFor='return-carrier'
+                          className='absolute left-4 top-2 text-[12px] text-[#6D7175] pointer-events-none'
+                        >
+                          Shipping carrier
+                        </label>
+                        <select
+                          id='return-carrier'
+                          value={shippingCarrier}
+                          onChange={(e) => setShippingCarrier(e.target.value)}
+                          className={cx(
+                            fieldCls,
+                            'h-14 pt-5 px-4 appearance-none',
+                          )}
+                        >
+                          <option value=''></option>
+                          {SHIPPING_CARRIERS.map((c) => (
+                            <option key={c}>{c}</option>
+                          ))}
+                        </select>
+                        <span className='absolute right-4 top-1/2 -translate-y-1/2 text-[#6D7175] pointer-events-none text-[11px]'>
+                          ▾
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {shippingOption === 'label' && (
-                  <div className='space-y-3 mt-1'>
-                    <input
-                      type='text'
-                      placeholder='Tracking number'
-                      value={trackingNumber}
-                      onChange={(e) => setTrackingNumber(e.target.value)}
-                      className='w-full px-3 py-2.5 rounded-xl border border-[#E1E3E5] text-[13px] outline-none text-[#202223] bg-white focus:border-[#008060]'
-                    />
-                    <select
-                      value={shippingCarrier}
-                      onChange={(e) => setShippingCarrier(e.target.value)}
-                      className='w-full px-3 py-2.5 rounded-xl border border-[#E1E3E5] text-[13px] outline-none text-[#202223] bg-white focus:border-[#008060]'
-                    >
-                      <option value=''>Shipping carrier</option>
-                      {SHIPPING_CARRIERS.map((c) => (
-                        <option key={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {/* No shipping option */}
-              <div
-                className={`p-4 rounded-xl border-2 cursor-pointer transition-colors ${
-                  shippingOption === 'no_shipping'
-                    ? 'border-[#008060] bg-[#F2F7F5]'
-                    : 'border-[#E1E3E5] hover:border-[#C4C8CC]'
-                }`}
-                onClick={() => setShippingOption('no_shipping')}
-              >
-                <div className='flex items-center gap-3'>
-                  <div
-                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                      shippingOption === 'no_shipping'
-                        ? 'border-[#008060]'
-                        : 'border-[#C4C8CC]'
-                    }`}
-                  >
-                    {shippingOption === 'no_shipping' && (
-                      <div className='w-2 h-2 rounded-full bg-[#008060]' />
-                    )}
-                  </div>
-                  <p className='text-[13px] font-medium text-[#202223]'>
-                    No shipping required
-                  </p>
-                </div>
+                <button
+                  type='button'
+                  onClick={() => setShippingOption('no_shipping')}
+                  className='flex items-center gap-3 text-[16px] text-[#202223] cursor-pointer'
+                >
+                  <Radio on={shippingOption === 'no_shipping'} />
+                  No shipping required
+                </button>
               </div>
             </div>
           )}
 
-          {/* ── STEP 3: Summary ── */}
-          {step === 'summary' && (
-            <div className='space-y-4'>
-              <p className='text-[13px] font-semibold text-[#202223]'>
-                Summary
-              </p>
+          {/* 3 — summary */}
+          <div className='bg-white mt-3 px-4 py-5'>
+            <h4 className='text-[17px] font-bold text-[#202223]'>Summary</h4>
 
-              {/* Items */}
-              <div className='rounded-xl border border-[#E1E3E5] divide-y divide-[#F1F1F1]'>
+            {selectedItems.length === 0 ? (
+              <p className='text-[15px] text-[#6D7175] mt-2'>
+                No items selected
+              </p>
+            ) : (
+              <div className='mt-3 space-y-2.5'>
                 {selectedItems.map(({ item_id, quantity, item }) => (
                   <div
                     key={item_id}
-                    className='flex items-center gap-3 px-4 py-3'
+                    className='flex justify-between gap-4 text-[15px]'
                   >
-                    <div className='w-9 h-9 rounded-lg bg-[#F6F6F7] border border-[#E1E3E5] flex items-center justify-center overflow-hidden shrink-0'>
-                      {item?.thumbnail ? (
-                        <img
-                          src={item.thumbnail}
-                          alt={item.title}
-                          className='w-full h-full object-cover'
-                        />
-                      ) : (
-                        <span className='text-base'>📦</span>
-                      )}
-                    </div>
-                    <div className='flex-1 min-w-0'>
-                      <p className='text-[12.5px] font-medium text-[#202223] truncate'>
-                        {item?.title}
-                      </p>
-                      {item?.variant_title &&
-                        item.variant_title !== 'Default' && (
-                          <p className='text-[11px] text-[#8C9196]'>
-                            {item.variant_title}
-                          </p>
-                        )}
-                    </div>
-                    <div className='text-right shrink-0'>
-                      <p className='text-[12.5px] font-semibold text-[#202223]'>
-                        {fmt((item?.unit_price ?? 0) * quantity, currency)}
-                      </p>
-                      <p className='text-[11px] text-[#8C9196]'>× {quantity}</p>
-                    </div>
+                    <span className='text-[#202223] min-w-0 truncate'>
+                      {item?.title}{' '}
+                      <span className='text-[#6D7175]'>× {quantity}</span>
+                    </span>
+                    <span className='text-[#202223] tabular-nums shrink-0'>
+                      {fmt((item?.unit_price ?? 0) * quantity, currency)}
+                    </span>
                   </div>
                 ))}
-              </div>
 
-              {/* Shipping info */}
-              <div className='p-3.5 rounded-xl bg-[#F9FAFB] border border-[#E1E3E5] space-y-1'>
-                <p className='text-[11px] font-semibold text-[#8C9196] uppercase tracking-wider'>
-                  Return shipping
-                </p>
-                {shippingOption === 'no_shipping' ? (
-                  <p className='text-[13px] text-[#202223]'>
-                    No shipping required
-                  </p>
-                ) : (
-                  <>
-                    <p className='text-[13px] text-[#202223]'>
-                      {trackingNumber || '—'}{' '}
-                      {shippingCarrier && (
-                        <span className='text-[#8C9196]'>
-                          via {shippingCarrier}
-                        </span>
-                      )}
-                    </p>
-                  </>
-                )}
-              </div>
+                <div className='h-px bg-[#E1E3E5] my-3' />
 
-              {/* Return reason */}
-              <div className='p-3.5 rounded-xl bg-[#F9FAFB] border border-[#E1E3E5]'>
-                <p className='text-[11px] font-semibold text-[#8C9196] uppercase tracking-wider mb-1'>
-                  Reason
-                </p>
-                <p className='text-[13px] text-[#202223]'>{reason}</p>
-              </div>
-
-              {/* Refund total */}
-              <div className='p-3.5 rounded-xl bg-[#F2F7F5] border border-[#008060]/20 space-y-2'>
-                <div className='flex justify-between items-center'>
-                  <p className='text-[13px] font-medium text-[#202223]'>
-                    {useCustomAmount ? 'Calculated total' : 'Refund total'}
-                  </p>
-                  <p
-                    className={`text-[13px] font-semibold ${
-                      useCustomAmount
-                        ? 'text-[#8C9196] line-through'
-                        : 'text-[#008060]'
-                    }`}
-                  >
-                    {fmt(calculatedTotal, currency)}
-                  </p>
+                <div className='flex justify-between text-[15px] font-semibold text-[#202223]'>
+                  <span>
+                    {useCustomAmount ? 'Refund total' : 'Estimated refund'}
+                  </span>
+                  <span className='tabular-nums'>
+                    {fmt(refundTotal, currency)}
+                  </span>
                 </div>
+                {!useCustomAmount && (
+                  <p className='text-[12.5px] text-[#6D7175]'>
+                    Final amount is calculated after any discounts.
+                  </p>
+                )}
 
-                <label className='flex items-center gap-2 text-[12px] text-[#6D7175] cursor-pointer'>
+                <label className='flex items-center gap-2.5 pt-2 text-[14px] text-[#202223] cursor-pointer'>
                   <input
                     type='checkbox'
                     checked={useCustomAmount}
@@ -513,78 +426,52 @@ export default function ReturnExchangeModal({
                       if (e.target.checked && !customAmount)
                         setCustomAmount(calculatedTotal.toFixed(2))
                     }}
-                    className='accent-[#008060]'
+                    className='w-5 h-5 accent-[#008060]'
                   />
                   Use custom refund amount
                 </label>
 
                 {useCustomAmount && (
                   <div className='flex items-center gap-2'>
-                    <span className='text-[13px] text-[#202223] font-medium'>
+                    <span className='text-[15px] text-[#202223]'>
                       {currency.toUpperCase() === 'GBP'
                         ? '£'
                         : currency.toUpperCase()}
                     </span>
                     <input
                       type='number'
+                      inputMode='decimal'
                       step='0.01'
                       min='0'
                       value={customAmount}
                       onChange={(e) => setCustomAmount(e.target.value)}
                       placeholder='0.00'
-                      className='flex-1 px-3 py-2 rounded-xl border border-[#E1E3E5] text-[13px] outline-none text-[#202223] focus:border-[#008060]'
+                      className={cx(fieldCls, 'h-12 px-4 flex-1')}
                     />
                   </div>
                 )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
+          <div className='h-3' />
         </div>
 
-        {/* Footer */}
-        <div className='px-5 py-4 border-t border-[#E1E3E5] shrink-0 space-y-2'>
+        {/* Sticky footer */}
+        <div className='bg-white shrink-0 border-t border-[#E1E3E5] px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]'>
           {error && (
-            <p className='text-[12.5px] text-[#D82C0D] text-center'>{error}</p>
+            <p className='text-[13px] text-[#D82C0D] text-center mb-2'>
+              {error}
+            </p>
           )}
-
-          {step === 'items' && (
-            <div className='flex gap-2'>
-              <button
-                onClick={onClose}
-                className='flex-1 py-2.5 border border-[#E1E3E5] text-[#6D7175] hover:bg-[#F6F6F7] text-[13px] font-medium rounded-xl transition-colors'
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => setStep('shipping')}
-                disabled={!canGoToShipping}
-                className='flex-1 py-2.5 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-medium rounded-xl transition-colors disabled:opacity-40'
-              >
-                Continue
-              </button>
-            </div>
-          )}
-
-          {step === 'shipping' && (
-            <button
-              onClick={() => setStep('summary')}
-              className='w-full py-2.5 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-medium rounded-xl transition-colors'
-            >
-              Continue to summary
-            </button>
-          )}
-
-          {step === 'summary' && (
-            <button
-              onClick={handleSubmit}
-              disabled={submitting || refundTotal === 0}
-              className='w-full py-2.5 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-medium rounded-xl transition-colors disabled:opacity-50'
-            >
-              {submitting
-                ? 'Processing…'
-                : `Create return · ${fmt(refundTotal, currency)}`}
-            </button>
-          )}
+          <Btn
+            variant='primary'
+            full
+            loading={submitting}
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+          >
+            Create return
+          </Btn>
         </div>
       </div>
     </div>

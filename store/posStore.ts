@@ -13,6 +13,10 @@ import {
   closeCashDrawerRemote,
 } from '@/lib/api/pos-cash-drawer'
 let liveTaxRate: number | null = null
+// Speed of the POS "Ship" sale being built (Standard = slower/cheaper, Express =
+// faster). Module-level like liveTaxRate so computePOSTotals() can read it
+// without threading a new argument through every call site.
+let posShippingSpeed: 'standard' | 'express' = 'standard'
 // Default true: UK law (Price Marking Order 2004) requires prices shown to
 // consumers to already include VAT — so by default VAT is extracted from the
 // price for display, never added on top. Synced from settings below.
@@ -172,6 +176,7 @@ interface POSState {
   revenueLog: RevenueEntry[]
   auditLog: AuditLogEntry[]
   fulfillmentType: 'pickup' | 'ship'
+  shippingSpeed: 'standard' | 'express'
   shippingAddress: {
     first_name: string
     last_name: string
@@ -239,6 +244,7 @@ interface POSState {
   setOrderNote: (note: string) => void
   clearOrderNote: () => void
   setFulfillmentType: (type: 'pickup' | 'ship') => void
+  setShippingSpeed: (speed: 'standard' | 'express') => void
   setShippingAddress: (addr: POSState['shippingAddress']) => void
   saveCart: (name: string) => void
   loadCart: (id: string) => void
@@ -306,6 +312,7 @@ function computePOSTotals(
   // Shipping only applies when the sale is being shipped to the customer, and
   // only below the store's free-shipping threshold — mirrors the website cart
   // (store/cartStore.ts) so the charge shown here matches what checkout would apply.
+  // Express is discontinued — Standard only: flat rate below the free-shipping threshold.
   const shippingCost =
     fulfillmentType === 'ship' &&
     taxable > 0 &&
@@ -376,6 +383,7 @@ export const usePOSStore = create<POSState>()(
       completedOrders: [],
       orderNote: '',
       fulfillmentType: 'pickup',
+      shippingSpeed: 'standard',
       shippingAddress: null,
       revenueLog: [],
       auditLog: [],
@@ -907,6 +915,19 @@ export const usePOSStore = create<POSState>()(
         set({
           shippingAddress: addr,
         }),
+      setShippingSpeed: (speed) => {
+        posShippingSpeed = speed
+        set((state) => ({
+          shippingSpeed: speed,
+          ...computePOSTotals(
+            state.items,
+            state.customDiscount,
+            state.couponDiscount,
+            state.giftCardAmount,
+            state.fulfillmentType,
+          ),
+        }))
+      },
       applyFixedDiscount: (amount) =>
         set((state) => ({
           customDiscount: amount,

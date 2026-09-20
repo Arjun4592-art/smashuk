@@ -250,7 +250,7 @@ export default function ShippingPage() {
   >([])
   const [loadingZones, setLoadingZones] = useState(true)
   const [zonesError, setZonesError] = useState<string | null>(null)
-  const [royalMailProviderId, setRoyalMailProviderId] = useState<string | null>(
+  const [parcel2goProviderId, setParcel2goProviderId] = useState<string | null>(
     null,
   )
   const [fixingRateId, setFixingRateId] = useState<string | null>(null)
@@ -292,7 +292,7 @@ export default function ShippingPage() {
       )
       setFulfillmentSets(sets)
       setShippingProfiles(zoneData.shipping_profiles ?? [])
-      setRoyalMailProviderId(optionsData.royal_mail_provider_id ?? null)
+      setParcel2goProviderId(optionsData.parcel2go_provider_id ?? null)
       const optionZonesById = new Map<string, RealZone>(
         (optionsData.zones ?? []).map((z: any) => [z.id, z]),
       )
@@ -440,9 +440,9 @@ export default function ShippingPage() {
     }
   }
   const handleFixProvider = async (rate: RateOption) => {
-    if (!royalMailProviderId) {
+    if (!parcel2goProviderId) {
       toast.error(
-        "Backend hasn't registered a Royal Mail provider yet — check medusa-config.ts / restart the backend first.",
+        "Backend hasn't registered a Parcel2Go provider yet — check medusa-config.ts / restart the backend first.",
       )
       return
     }
@@ -454,12 +454,12 @@ export default function ShippingPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          provider_id: royalMailProviderId,
+          provider_id: parcel2goProviderId,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Failed to update provider')
-      toast.success(`"${rate.name}" is now wired to Royal Mail Click & Drop`)
+      toast.success(`"${rate.name}" is now wired to Parcel2Go`)
       await loadZones()
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to fix provider')
@@ -686,7 +686,7 @@ export default function ShippingPage() {
                               <p className='text-[11.5px] text-[#D82C0D] font-medium'>
                                 ⚠ Wired to the wrong fulfillment provider —
                                 orders marked "Fulfilled" on this rate won't
-                                reach Royal Mail's Click & Drop dashboard.
+                                reach Parcel2Go's dashboard.
                               </p>
                             )}
                           </div>
@@ -826,7 +826,7 @@ export default function ShippingPage() {
                   type='text'
                   value={rateName}
                   onChange={(e) => setRateName(e.target.value)}
-                  placeholder='e.g. Royal Mail Tracked 24'
+                  placeholder='e.g. Standard Delivery'
                   className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
                 />
               </div>

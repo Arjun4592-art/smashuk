@@ -170,7 +170,7 @@ export async function buildTrackingPayload(
   const trackingNumber = isPickup
     ? null
     : (order.fulfillments?.[0]?.tracking_numbers?.[0] ?? null)
-  const carrier = order.fulfillments?.[0]?.provider_id ?? 'Royal Mail'
+  const carrier = order.fulfillments?.[0]?.provider_id ?? 'Parcel2Go'
   const shippingAddress = isPickup
     ? null
     : opts.full

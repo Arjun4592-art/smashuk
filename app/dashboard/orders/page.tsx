@@ -1,12 +1,87 @@
 'use client'
 
-import { Suspense, useState, useEffect } from 'react'
+import { Fragment, Suspense, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Papa from 'papaparse'
 import { toast } from 'sonner'
 import { useOrders, useAbandonedCheckouts } from '@/hooks/useDashboard'
 import { updateOrderStatus } from '@/lib/api/dashboard'
+interface CartLine {
+  id: string
+  title: string
+  variantTitle: string
+  sku: string
+  thumbnail: string | null
+  quantity: number
+  unitPrice: number
+  total: number
+  metadata: Record<string, any>
+}
+// The products inside one abandoned cart. Loaded when the row is opened.
+function AbandonedCartItems({ cartId }: { cartId: string }) {
+  const [items, setItems] = useState<CartLine[] | null>(null)
+  const [currency, setCurrency] = useState('GBP')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/admin/abandoned-checkouts/${encodeURIComponent(cartId)}`)
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}))
+        if (cancelled) return
+        if (!r.ok) setError(d.error ?? 'Could not load this cart')
+        else {
+          setItems(d.items ?? [])
+          setCurrency(d.currencyCode || 'GBP')
+        }
+      })
+      .catch(() => !cancelled && setError('Could not load this cart'))
+    return () => {
+      cancelled = true
+    }
+  }, [cartId])
+  const money = (n: number) =>
+    new Intl.NumberFormat('en-GB', { style: 'currency', currency }).format(n)
+  if (error) return <p className='text-[12.5px] text-[#D82C0D]'>{error}</p>
+  if (!items)
+    return <p className='text-[12.5px] text-[#6D7175]'>Loading products…</p>
+  if (items.length === 0)
+    return <p className='text-[12.5px] text-[#6D7175]'>This cart is empty.</p>
+  return (
+    <ul className='divide-y divide-[#E1E3E5]'>
+      {items.map((it) => (
+        <li key={it.id} className='flex items-center gap-3 py-2.5'>
+          {it.thumbnail ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={it.thumbnail}
+              alt=''
+              className='w-11 h-11 rounded-md object-cover border border-[#E1E3E5] bg-white'
+            />
+          ) : (
+            <div className='w-11 h-11 rounded-md border border-[#E1E3E5] bg-[#F6F6F7]' />
+          )}
+          <div className='flex-1 min-w-0'>
+            <p className='text-[13px] font-medium text-[#202223] truncate'>
+              {it.title}
+            </p>
+            <p className='text-[12px] text-[#6D7175]'>
+              {[it.variantTitle, it.sku && `SKU ${it.sku}`]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          </div>
+          <p className='text-[12.5px] text-[#6D7175] whitespace-nowrap'>
+            {it.quantity} × {money(it.unitPrice)}
+          </p>
+          <p className='text-[13px] font-medium text-[#202223] w-20 text-right'>
+            {money(it.total)}
+          </p>
+        </li>
+      ))}
+    </ul>
+  )
+}
 const ORDER_STATUS_STYLES: Record<string, string> = {
   pending: 'bg-[#FFC453]/20 text-[#916A00]',
   confirmed: 'bg-[#2C6ECB]/10 text-[#2C6ECB]',
@@ -157,6 +232,7 @@ function OrdersPageContent() {
   const abandonedCheckouts = abandonedData?.checkouts ?? []
   const abandonedAvailable = abandonedData?.available ?? true
   const abandonedCount = abandonedData?.count ?? 0
+  const [openCartId, setOpenCartId] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     fetch('/api/admin/draft-orders?limit=1', {
@@ -807,48 +883,69 @@ function OrdersPageContent() {
                               <td className='px-5 py-4' />
                             </tr>
                           ))
-                        : abandonedCheckouts.map((c:any) => (
-                            <tr
-                              key={c.id}
-                              className='border-b border-[#F1F2F3] hover:bg-[#FAFBFB]'
-                            >
-                              <td className='px-5 py-4'>
-                                <p className='font-medium text-[#202223]'>
-                                  {c.customer}
-                                </p>
-                                {c.email && (
-                                  <p className='text-[12px] text-[#6D7175]'>
-                                    {c.email}
+                        : abandonedCheckouts.map((c: any) => (
+                            <Fragment key={c.id}>
+                              <tr
+                                onClick={() =>
+                                  setOpenCartId((cur) =>
+                                    cur === c.id ? null : c.id,
+                                  )
+                                }
+                                className='border-b border-[#F1F2F3] hover:bg-[#FAFBFB] cursor-pointer'
+                              >
+                                <td className='px-5 py-4'>
+                                  <p className='font-medium text-[#202223]'>
+                                    {c.customer}
                                   </p>
-                                )}
-                              </td>
-                              <td className='px-5 py-4 text-[#202223]'>
-                                {c.itemCount}
-                              </td>
-                              <td className='px-5 py-4 text-[#202223]'>
-                                {new Intl.NumberFormat('en-GB', {
-                                  style: 'currency',
-                                  currency: c.currencyCode || 'GBP',
-                                }).format(c.value)}
-                              </td>
-                              <td className='px-5 py-4 text-[#6D7175]'>
-                                {c.lastActivity}
-                              </td>
-                              <td className='px-5 py-4 text-right'>
-                                {c.email ? (
-                                  <a
-                                    href={`mailto:${c.email}?subject=${encodeURIComponent('Still want those items?')}&body=${encodeURIComponent(`Hi, we noticed you left some items in your cart — here's a link back to it: ${typeof window !== 'undefined' ? window.location.origin : ''}${c.recoveryUrl}`)}`}
-                                    className='text-[#008060] hover:underline font-medium'
-                                  >
-                                    Email customer
-                                  </a>
-                                ) : (
-                                  <span className='text-[#8C9196]'>
-                                    No email on file
+                                  {c.email && (
+                                    <p className='text-[12px] text-[#6D7175]'>
+                                      {c.email}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className='px-5 py-4 text-[#202223]'>
+                                  <span className='inline-flex items-center gap-1.5'>
+                                    {c.itemCount}
+                                    <span className='text-[11.5px] text-[#008060]'>
+                                      {openCartId === c.id
+                                        ? 'Hide products ▴'
+                                        : 'View products ▾'}
+                                    </span>
                                   </span>
-                                )}
-                              </td>
-                            </tr>
+                                </td>
+                                <td className='px-5 py-4 text-[#202223]'>
+                                  {new Intl.NumberFormat('en-GB', {
+                                    style: 'currency',
+                                    currency: c.currencyCode || 'GBP',
+                                  }).format(c.value)}
+                                </td>
+                                <td className='px-5 py-4 text-[#6D7175]'>
+                                  {c.lastActivity}
+                                </td>
+                                <td className='px-5 py-4 text-right'>
+                                  {c.email ? (
+                                    <a
+                                      onClick={(e) => e.stopPropagation()}
+                                      href={`mailto:${c.email}?subject=${encodeURIComponent('Still want those items?')}&body=${encodeURIComponent(`Hi, we noticed you left some items in your cart — here's a link back to it: ${typeof window !== 'undefined' ? window.location.origin : ''}${c.recoveryUrl}`)}`}
+                                      className='text-[#008060] hover:underline font-medium'
+                                    >
+                                      Email customer
+                                    </a>
+                                  ) : (
+                                    <span className='text-[#8C9196]'>
+                                      No email on file
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                              {openCartId === c.id && (
+                                <tr className='border-b border-[#F1F2F3] bg-[#FAFBFB]'>
+                                  <td colSpan={5} className='px-5 py-3'>
+                                    <AbandonedCartItems cartId={c.id} />
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
                           ))}
                     </tbody>
                   </table>

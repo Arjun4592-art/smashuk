@@ -95,7 +95,6 @@ export const DEFAULT_PAGE_SIZE = 20
 export const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 export const FREE_SHIPPING_THRESHOLD = 80
 export const STANDARD_SHIPPING_COST = 4.99
-export const EXPRESS_SHIPPING_COST = 9.99
 export const VAT_RATE = 0.2
 export const CURRENCY = 'GBP'
 export const CURRENCY_SYMBOL = '£'
