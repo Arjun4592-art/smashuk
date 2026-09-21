@@ -1108,6 +1108,7 @@ export default function EditProductPage({
     const removeOptionIds = existingOptions
       .filter((o) => !neededTitles.has(o.title))
       .map((o) => o.id)
+    let removeNowIds: string[] | null = null
     const defaultVariantSurvives = variants.some(
       (v) => v.medusaId === defaultVariantId && filledOptions(v).length > 0,
     )
@@ -1117,10 +1118,55 @@ export default function EditProductPage({
         deletedDefaultVariantRef.current = true
         setDefaultVariantId('')
       } else {
-        staleOptionIdsRef.current = removeOptionIds
+        // The default variant survives, so the product update still has to
+        // run with it. Medusa rejects that update ("Product has N option
+        // values but there were M provided") while the product still has an
+        // option this variant doesn't give a value for — so every stale
+        // option that NO variant actually uses must be unlinked BEFORE the
+        // update, in the same call that links the new ones. Only options a
+        // surviving variant still holds a value for (Medusa refuses to
+        // unassign those) are left for the post-save cleanup.
+        //
+        // Variants the user removed are deleted first, since they may be
+        // what holds on to a stale option.
+        const queuedFailed: string[] = []
+        for (const variantId of variantsToDeleteRef.current) {
+          try {
+            await deleteProductVariant(id, variantId)
+          } catch (deleteErr) {
+            console.error('[delete removed variant]', deleteErr)
+            queuedFailed.push(variantId)
+          }
+        }
+        variantsToDeleteRef.current = queuedFailed
+        let inUse: Set<string> | null = null
+        try {
+          const r = await fetch(`/api/admin/products/${id}`)
+          const d = await r.json()
+          const used = new Set<string>()
+          ;(d?.product?.variants ?? []).forEach((v: any) => {
+            ;(v.options ?? []).forEach((o: any) => {
+              const oid = o?.option_id ?? o?.option?.id
+              if (oid) used.add(oid)
+            })
+          })
+          inUse = used
+        } catch (fetchErr) {
+          console.error('[check option usage]', fetchErr)
+        }
+        // If usage can't be determined, fall back to the old behaviour and
+        // leave every stale option for the post-save cleanup.
+        const usedIds = inUse
+        staleOptionIdsRef.current = removeOptionIds.filter(
+          (oid) => !usedIds || usedIds.has(oid),
+        )
+        removeNowIds = removeOptionIds.filter(
+          (oid) => !!usedIds && !usedIds.has(oid),
+        )
       }
     }
-    const removeNow = staleOptionIdsRef.current.length ? [] : removeOptionIds
+    const removeNow =
+      removeNowIds ?? (staleOptionIdsRef.current.length ? [] : removeOptionIds)
     try {
       await linkOptionsToProduct(id, linkTargets, alreadyLinked, removeNow)
     } catch (err) {
