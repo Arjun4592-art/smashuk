@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       subject: welcomeEmail.subject,
       html: welcomeEmail.html,
       text: welcomeEmail.text,
-      templateVariables: welcomeEmail.templateVariables,
+      resendTemplate: welcomeEmail.resendTemplate,
     }).catch(() => {})
     return NextResponse.json({
       success: true,

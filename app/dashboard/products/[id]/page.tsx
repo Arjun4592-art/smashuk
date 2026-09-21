@@ -220,6 +220,25 @@ export default function EditProductPage({
   >([])
   const optionValueCasingRef = useRef<Map<string, string>>(new Map())
   const deletedDefaultVariantRef = useRef(false)
+  // Variant the user clicked "Delete variant" on, waiting for confirmation
+  // in the modal.
+  const [variantToDelete, setVariantToDelete] = useState<{
+    id: string
+    label: string
+  } | null>(null)
+  useEffect(() => {
+    if (!variantToDelete) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setVariantToDelete(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [variantToDelete])
+  // Set when the single existing variant had to be deleted so its old
+  // option(s) could be unlinked (Medusa refuses to unassign an option that a
+  // variant still uses). buildPayload then creates a fresh Default variant
+  // instead of updating the deleted one.
+  const deletedBaseVariantIdRef = useRef<string | null>(null)
   const staleOptionIdsRef = useRef<string[]>([])
   const isSavingRef = useRef(false)
   // Stock value as loaded from the server. Only when the Stock field differs
@@ -379,24 +398,40 @@ export default function EditProductPage({
         } else if (p.variants && p.variants.length === 1) {
           const v = p.variants[0]
           setDefaultVariantId(v.id)
-          const opt = v.options?.[0]
-          if (opt?.option?.title && opt?.value) {
+          const allOpts = (v.options ?? []).filter(
+            (o: any) => o?.option?.title && o?.value,
+          )
+          // Only collapse to the legacy "single default option" shortcut when
+          // there's truly just one option on this variant. If there are two
+          // or more, load every one of them as its own row — previously only
+          // options[0] was read here, so a variant with e.g. Type + Colour
+          // silently lost Colour on load, and re-saving then sent Medusa only
+          // 1 option value for a product that expects 2 (the "Product has N
+          // option values but there were M provided" error).
+          if (allOpts.length === 1) {
             setDefaultOption({
-              title: opt.option.title,
-              value: opt.value,
+              title: allOpts[0].option.title,
+              value: allOpts[0].value,
             })
           }
           setVariants([
             {
               id: '1',
               medusaId: v.id,
-              options: [
-                {
-                  id: 'o1',
-                  name: opt?.option?.title ?? '',
-                  value: opt?.value ?? '',
-                },
-              ],
+              options:
+                allOpts.length > 0
+                  ? allOpts.map((o: any, i: number) => ({
+                      id: `o${i + 1}`,
+                      name: o.option?.title ?? '',
+                      value: o.value ?? '',
+                    }))
+                  : [
+                      {
+                        id: 'o1',
+                        name: '',
+                        value: '',
+                      },
+                    ],
               colorCode: v.metadata?.color_code ?? '',
               sku: v.sku ?? '',
               ean: v.ean ?? '',
@@ -757,7 +792,9 @@ export default function EditProductPage({
   const buildPayload = (saveStatus: 'published' | 'draft') => {
     const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
     const baseVariant = {
-      id: defaultVariantId || undefined,
+      id: deletedBaseVariantIdRef.current
+        ? undefined
+        : defaultVariantId || undefined,
       title: 'Default',
       sku: form.sku || undefined,
       barcode: form.barcode || undefined,
@@ -772,13 +809,13 @@ export default function EditProductPage({
           ]
         : [],
       weight: form.weight ? Number(form.weight) : undefined,
-      options: defaultOption
-        ? {
-            [defaultOption.title]: defaultOption.value,
-          }
-        : {
-            Default: 'Default',
-          },
+      // baseVariant is only ever used below when hasExtraVariants is false,
+      // i.e. every variant row is genuinely blank. In that state the product
+      // should just be a plain single-option product — always "Default", not
+      // a stale defaultOption the user may have already cleared in the UI.
+      options: {
+        Default: 'Default',
+      },
     }
     const canonicalValue = (title: string, typed: string) =>
       optionValueCasingRef.current.get(
@@ -908,39 +945,103 @@ export default function EditProductPage({
   const syncOptionsForVariants = async () => {
     const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
     if (!hasExtraVariants) {
-      if (defaultOption) return
+      // Every variant row is blank (or the user removed them all), so this
+      // product is about to become a plain single "Default" variant. If the
+      // product's options are already just "Default", the existing variant
+      // is reused as-is (buildPayload sends its id), so it must NOT also be
+      // in the delete queue — otherwise the post-save cleanup deletes it
+      // right after it was saved and the product ends up with no variants.
+      // (When old options have to be removed first, see step 1 below.)
+      if (defaultVariantId) {
+        variantsToDeleteRef.current = variantsToDeleteRef.current.filter(
+          (vid) => vid !== defaultVariantId,
+        )
+      }
+      const isAlreadyPlainDefault =
+        existingOptions.length === 1 &&
+        existingOptions[0].title.toLowerCase() === 'default' &&
+        existingOptions[0].values.length === 1 &&
+        existingOptions[0].values[0].toLowerCase() === 'default'
+      if (isAlreadyPlainDefault) return
       const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
         'Default',
         ['Default'],
       )
       const alreadyLinked = new Set(existingOptions.map((o) => o.id))
-      const linkTargets: {
-        id: string
-        title: string
-        value_ids: string[]
-      }[] = [
-        {
-          id: optionId,
-          title: 'Default',
-          value_ids: valueIds,
-        },
-      ]
-      await linkOptionsToProduct(id, linkTargets, alreadyLinked, [])
+      // Medusa requires every variant to provide a value for EVERY option on
+      // the product. The plain Default variant only ever provides
+      // { Default: 'Default' }, so any other option still linked to the
+      // product (e.g. Size/Colour from when it had real variants) makes the
+      // save fail with "Product has 2 option values but there were 1
+      // provided". These options therefore have to be gone BEFORE the
+      // product update runs — not after it, which can never succeed.
+      const staleIds = existingOptions
+        .filter((o) => o.id !== optionId)
+        .map((o) => o.id)
+      if (staleIds.length > 0) {
+        // 1) Medusa refuses to unassign an option from a product while any
+        //    variant still has a value for it ("Cannot unassign product
+        //    option from product which has variants for that option"). So
+        //    every variant that carries the old options has to go first:
+        //    the ones the user removed, any old row that isn't reused, and
+        //    the single existing variant too. A fresh Default variant is
+        //    created by the product update below from the form's
+        //    SKU/price/stock, so nothing the form shows is lost.
+        const alreadyGone = deletedBaseVariantIdRef.current
+        const orphanIds = variants
+          .map((v) => v.medusaId)
+          .filter((m): m is string => !!m && m !== defaultVariantId)
+        const deleteNow = Array.from(
+          new Set([
+            ...variantsToDeleteRef.current,
+            ...orphanIds,
+            ...(defaultVariantId ? [defaultVariantId] : []),
+          ]),
+        ).filter((vid) => vid !== alreadyGone)
+        const failedDeletes: string[] = []
+        for (const variantId of deleteNow) {
+          try {
+            await deleteProductVariant(id, variantId)
+            if (variantId === defaultVariantId) {
+              deletedBaseVariantIdRef.current = variantId
+              setDefaultVariantId('')
+            }
+          } catch (deleteErr) {
+            console.error('[delete variant]', deleteErr)
+            failedDeletes.push(variantId)
+          }
+        }
+        variantsToDeleteRef.current = failedDeletes
+        if (failedDeletes.length > 0) {
+          throw new Error(
+            'Could not delete the old variant(s) of this product, so its old options can’t be removed. Please try again.',
+          )
+        }
+      }
+      // 2) Link the Default option and unlink the old ones in one call.
+      await linkOptionsToProduct(
+        id,
+        [
+          {
+            id: optionId,
+            value_ids: valueIds,
+          },
+        ],
+        alreadyLinked,
+        staleIds,
+      )
+      staleOptionIdsRef.current = []
       setDefaultOption({
         title: 'Default',
         value: canonicalValues[0] ?? 'Default',
       })
-      setExistingOptions((prev) => {
-        const others = prev.filter((o) => o.id !== optionId)
-        return [
-          ...others,
-          {
-            id: optionId,
-            title: 'Default',
-            values: canonicalValues,
-          },
-        ]
-      })
+      setExistingOptions([
+        {
+          id: optionId,
+          title: 'Default',
+          values: canonicalValues,
+        },
+      ])
       return
     }
     const neededByTitle = new Map<string, Set<string>>()
@@ -1109,6 +1210,42 @@ export default function EditProductPage({
       setSaveError('Images are still uploading, please wait...')
       return
     }
+    // Every variant that has at least one option filled in must provide a
+    // value for EVERY option title used across all variants. Medusa treats
+    // the union of option titles as the product's option set, and rejects a
+    // variant update whose option-value count doesn't match that set (this
+    // is the "Product has N option values but there were M provided..."
+    // error). Catch it here with an actionable message instead of letting
+    // the raw backend error surface.
+    const variantsWithOptions = variants.filter(
+      (v) => filledOptions(v).length > 0,
+    )
+    if (variantsWithOptions.length > 0) {
+      const allOptionTitles = new Set<string>()
+      variantsWithOptions.forEach((v) =>
+        filledOptions(v).forEach((o) => allOptionTitles.add(o.name.trim())),
+      )
+      for (const v of variantsWithOptions) {
+        const filled = filledOptions(v)
+        const titlesOnVariant = new Set(filled.map((o) => o.name.trim()))
+        const missing = Array.from(allOptionTitles).filter(
+          (t) => !titlesOnVariant.has(t),
+        )
+        if (missing.length > 0) {
+          setActiveTab('variants')
+          const label =
+            filled.map((o) => o.value.trim()).join(' / ') || 'variant'
+          setSaveError(
+            `Variant "${label}" is missing a value for: ${missing.join(
+              ', ',
+            )}. Every variant needs a value for every option used on this product — add the missing option${
+              missing.length > 1 ? 's' : ''
+            } (or remove ${missing.length > 1 ? 'them' : 'it'} from the other variants).`,
+          )
+          return
+        }
+      }
+    }
     setSaving(true)
     setSaveError(null)
     setSaveSuccess(false)
@@ -1124,6 +1261,38 @@ export default function EditProductPage({
       const updateResult = await updateProduct(id, payload)
       if (hadExtraVariants) {
         setDefaultOption(null)
+      }
+      if (deletedBaseVariantIdRef.current) {
+        // The old single variant was replaced by a new Default variant —
+        // remember its id so the next Save updates it instead of creating
+        // yet another one.
+        const oldId = deletedBaseVariantIdRef.current
+        let newVariants: any[] = updateResult?.product?.variants ?? []
+        if (newVariants.length !== 1) {
+          try {
+            const r = await fetch(`/api/admin/products/${id}`)
+            const d = await r.json()
+            newVariants = d?.product?.variants ?? []
+          } catch {
+            newVariants = []
+          }
+        }
+        const newId: string | undefined =
+          newVariants.length === 1 ? newVariants[0]?.id : undefined
+        if (newId) {
+          setDefaultVariantId(newId)
+          setVariants((prev) =>
+            prev.map((v) =>
+              v.medusaId === oldId
+                ? {
+                    ...v,
+                    medusaId: newId,
+                  }
+                : v,
+            ),
+          )
+          deletedBaseVariantIdRef.current = null
+        }
       }
       if (variantsToDeleteRef.current.length > 0) {
         const toDelete = variantsToDeleteRef.current
@@ -1244,6 +1413,71 @@ export default function EditProductPage({
   }
   return (
     <div className='max-w-275 mx-auto space-y-5'>
+      {variantToDelete && (
+        <div
+          className='fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4'
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setVariantToDelete(null)
+          }}
+          role='dialog'
+          aria-modal='true'
+          aria-labelledby='delete-variant-title'
+        >
+          <div className='bg-white w-full max-w-sm rounded-2xl shadow-xl p-6'>
+            <div className='w-11 h-11 rounded-full bg-[#FFF4F4] flex items-center justify-center mb-4'>
+              <svg
+                width='20'
+                height='20'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='#D82C0D'
+                strokeWidth='2'
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              >
+                <polyline points='3 6 5 6 21 6' />
+                <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6' />
+                <path d='M10 11v6M14 11v6' />
+                <path d='M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2' />
+              </svg>
+            </div>
+            <h3
+              id='delete-variant-title'
+              className='text-[16px] font-semibold text-[#202223] m-0'
+            >
+              Delete this variant?
+            </h3>
+            <p className='text-[13px] text-[#6D7175] mt-2 mb-0 leading-relaxed'>
+              <span className='font-medium text-[#202223]'>
+                {variantToDelete.label}
+              </span>{' '}
+              will be removed from this product when you click{' '}
+              <span className='font-medium text-[#202223]'>Save Changes</span>.
+              Until then you can still leave the page to keep it.
+            </p>
+            <div className='flex justify-end gap-2 mt-6'>
+              <button
+                type='button'
+                autoFocus
+                onClick={() => setVariantToDelete(null)}
+                className='px-4 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors cursor-pointer'
+              >
+                Cancel
+              </button>
+              <button
+                type='button'
+                onClick={() => {
+                  removeVariant(variantToDelete.id)
+                  setVariantToDelete(null)
+                }}
+                className='px-4 py-2 bg-[#D82C0D] hover:bg-[#B82409] text-white text-[13px] font-semibold rounded-lg transition-colors cursor-pointer border-none'
+              >
+                Delete variant
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {cropQueue.length > 0 && (
         <ImageCropModal
           key={cropQueue[0].src}
@@ -2233,14 +2467,22 @@ export default function EditProductPage({
                           <span className='text-[12.5px] font-semibold text-[#202223]'>
                             Variant {index + 1}
                           </span>
-                          {variants.length > 1 && (
-                            <button
-                              onClick={() => removeVariant(variant.id)}
-                              className='text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer'
-                            >
-                              Remove
-                            </button>
-                          )}
+                          <button
+                            type='button'
+                            onClick={() =>
+                              setVariantToDelete({
+                                id: variant.id,
+                                label:
+                                  variant.options
+                                    .filter((o) => o.value.trim())
+                                    .map((o) => o.value.trim())
+                                    .join(' / ') || `Variant ${index + 1}`,
+                              })
+                            }
+                            className='px-2.5 py-1 border border-[#D82C0D] text-[#D82C0D] text-[12px] font-medium rounded-lg hover:bg-[#FFF4F4] transition-colors bg-transparent cursor-pointer'
+                          >
+                            Delete variant
+                          </button>
                         </div>
                         {}
                         <div className='space-y-2'>

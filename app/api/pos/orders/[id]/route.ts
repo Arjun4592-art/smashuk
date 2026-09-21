@@ -128,21 +128,21 @@ export async function PATCH(
     )
     if (order.email) {
       try {
-        const { subject, html, text, templateVariables } =
+        const { subject, html, text, resendTemplate } =
           refundConfirmationEmail(order, refund_amount, builtItems)
         await sendMail({
           to: order.email,
           subject,
           html,
           text,
-          templateVariables,
+          resendTemplate,
         })
         const adminEmail = adminRefundEmail(order, refund_amount)
         notifyOwner({
           subject: adminEmail.subject,
           html: adminEmail.html,
           text: adminEmail.text,
-          templateVariables: adminEmail.templateVariables,
+          resendTemplate: adminEmail.resendTemplate,
           customerEmail: order.email,
         }).catch(() => {})
       } catch (refundEmailErr) {
@@ -204,21 +204,21 @@ export async function PUT(
         const orderData = await orderRes.json().catch(() => ({}))
         const fullOrder = orderData?.order
         if (fullOrder?.email && !isSyntheticEmail(fullOrder.email)) {
-          const { subject, html, text, templateVariables } =
+          const { subject, html, text, resendTemplate } =
             shippingConfirmationEmail(fullOrder)
           await sendMail({
             to: fullOrder.email,
             subject,
             html,
             text,
-            templateVariables,
+            resendTemplate,
           })
           const adminEmail = adminShippingEmail(fullOrder)
           notifyOwner({
             subject: adminEmail.subject,
             html: adminEmail.html,
             text: adminEmail.text,
-            templateVariables: adminEmail.templateVariables,
+            resendTemplate: adminEmail.resendTemplate,
             customerEmail: fullOrder.email,
           }).catch(() => {})
         }

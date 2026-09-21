@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
       subject: customerEmail.subject,
       html: customerEmail.html,
       text: customerEmail.text,
-      templateVariables: customerEmail.templateVariables,
+      resendTemplate: customerEmail.resendTemplate,
     }).catch(() => {})
     const adminEmail = stockNotifyAdminEmail({
       email: normalized,
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
       subject: adminEmail.subject,
       html: adminEmail.html,
       text: adminEmail.text,
-      templateVariables: adminEmail.templateVariables,
+      resendTemplate: adminEmail.resendTemplate,
     }).catch(() => {})
     return NextResponse.json({
       success: true,

@@ -1,4 +1,5 @@
 import { Resend } from 'resend'
+import { RESEND_TEMPLATE_IDS } from './resend-template-ids.generated'
 
 let resend: Resend | null = null
 
@@ -22,7 +23,7 @@ export async function notifyAdmin(opts: {
   html: string
   text?: string
   customerEmail?: string
-  templateVariables?: Record<string, string>
+  resendTemplate?: { name: string; variables: Record<string, string> }
 }): Promise<{
   sent: boolean
   error?: string
@@ -39,7 +40,7 @@ export async function notifyAdmin(opts: {
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
-    templateVariables: opts.templateVariables,
+    resendTemplate: opts.resendTemplate,
   })
 }
 
@@ -52,7 +53,7 @@ export async function notifyOwner(opts: {
   html: string
   text?: string
   customerEmail?: string
-  templateVariables?: Record<string, string>
+  resendTemplate?: { name: string; variables: Record<string, string> }
 }): Promise<{
   sent: boolean
   error?: string
@@ -69,7 +70,7 @@ export async function notifyOwner(opts: {
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
-    templateVariables: opts.templateVariables,
+    resendTemplate: opts.resendTemplate,
   })
 }
 
@@ -79,15 +80,16 @@ export async function sendMail(opts: {
   html: string
   text?: string
   replyTo?: string
-  // Variables for the shared Resend "smash-transactional-shell" Template
-  // (see lib/email-templates.ts renderShell() and
-  // scripts/sync-resend-templates.ts). When RESEND_SHELL_TEMPLATE_ID is set
-  // AND this is provided, we send via Resend's Template API (template id +
-  // variables) instead of the raw `html` — that's what lets the shared
-  // header/footer/brand styling be edited from the Resend dashboard without
-  // a code change. Until the template has been synced (or for one-off
-  // emails that don't build variables), we fall back to `html` as before.
-  templateVariables?: Record<string, string>
+  // Every email type this site sends has its own Resend Template (see
+  // scripts/resend-templates.generated.json — one entry per email, built
+  // directly from this file's own output — and
+  // scripts/sync-resend-templates.ts, which pushes each one to Resend and
+  // records the resulting id in lib/resend-template-ids.generated.ts).
+  // `name` looks up that id; `variables` are that specific template's
+  // {{{VAR}}} placeholders. If `name` isn't in the map yet (sync hasn't
+  // been run, or this is a brand-new email type), we fall back to the raw
+  // `html` below — nothing breaks, it just isn't dashboard-editable yet.
+  resendTemplate?: { name: string; variables: Record<string, string> }
   attachments?: {
     filename: string
     path?: string
@@ -116,7 +118,9 @@ export async function sendMail(opts: {
     }
   }
   const from = process.env.EMAIL_FROM || 'onboarding@resend.dev'
-  const shellTemplateId = process.env.RESEND_SHELL_TEMPLATE_ID
+  const templateId = opts.resendTemplate
+    ? RESEND_TEMPLATE_IDS[opts.resendTemplate.name]
+    : undefined
   try {
     const attachments = opts.attachments?.length
       ? await Promise.all(
@@ -127,7 +131,7 @@ export async function sendMail(opts: {
           ),
         )
       : undefined
-    const useTemplate = Boolean(shellTemplateId && opts.templateVariables)
+    const useTemplate = Boolean(templateId && opts.resendTemplate)
     const { error } = await client.emails.send({
       from,
       to: opts.to,
@@ -138,8 +142,8 @@ export async function sendMail(opts: {
       ...(useTemplate
         ? {
             template: {
-              id: shellTemplateId as string,
-              variables: opts.templateVariables as Record<string, string>,
+              id: templateId as string,
+              variables: opts.resendTemplate!.variables,
             },
           }
         : { html: opts.html }),

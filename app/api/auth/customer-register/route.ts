@@ -108,9 +108,9 @@ export async function POST(req: NextRequest) {
         last_name: rest.join(' ') || '',
         email,
       }
-      const { subject, html, text, templateVariables } =
+      const { subject, html, text, resendTemplate } =
         welcomeEmail(newCustomer)
-      sendMail({ to: email, subject, html, text, templateVariables }).catch(
+      sendMail({ to: email, subject, html, text, resendTemplate }).catch(
         () => {},
       )
       const adminEmail = adminWelcomeEmail(newCustomer)
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
         subject: adminEmail.subject,
         html: adminEmail.html,
         text: adminEmail.text,
-        templateVariables: adminEmail.templateVariables,
+        resendTemplate: adminEmail.resendTemplate,
         customerEmail: email,
       }).catch(() => {})
     } catch (welcomeErr) {

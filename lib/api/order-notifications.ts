@@ -34,11 +34,8 @@ export async function notifyNewOrder(
       process.env.STORE_OWNER_EMAIL ||
       process.env.MEDUSA_ADMIN_EMAIL
     if (!to) return
-    const { subject, html, text, templateVariables } = adminNewOrderEmail(
-      order,
-      channel,
-    )
-    await sendMail({ to, subject, html, text, templateVariables })
+    const { subject, html, text, resendTemplate } = adminNewOrderEmail(order, channel)
+    await sendMail({ to, subject, html, text, resendTemplate })
   } catch (err) {
     console.error('[order-notifications] new-order admin email failed:', err)
   }
@@ -48,16 +45,8 @@ export async function notifyNewOrder(
 export async function sendOrderConfirmationEmail(order: any) {
   try {
     if (!order?.email) return
-    const { subject, html, text, templateVariables, attachments } =
-      orderConfirmationEmail(order)
-    await sendMail({
-      to: order.email,
-      subject,
-      html,
-      text,
-      templateVariables,
-      attachments,
-    })
+    const { subject, html, text, resendTemplate, attachments } = orderConfirmationEmail(order)
+    await sendMail({ to: order.email, subject, html, text, resendTemplate, attachments })
   } catch (err) {
     console.error('[order-notifications] order confirmation email failed:', err)
   }

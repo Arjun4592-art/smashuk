@@ -101,7 +101,7 @@ export async function POST(
     )
     if (order.email) {
       try {
-        const { subject, html, text, templateVariables } = returnRequestedEmail(
+        const { subject, html, text, resendTemplate } = returnRequestedEmail(
           order,
           returnRecord,
         )
@@ -110,7 +110,7 @@ export async function POST(
           subject,
           html,
           text,
-          templateVariables,
+          resendTemplate,
         })
       } catch (emailErr) {
         console.error(

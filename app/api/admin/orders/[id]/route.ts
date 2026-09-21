@@ -27,6 +27,8 @@ import {
   adminDeliveryEmail,
   adminCancelledEmail,
   adminRefundEmail,
+  readyForPickupEmail,
+  returnDeclinedEmail,
 } from '@/lib/email-templates'
 export async function GET(
   req: NextRequest,
@@ -215,18 +217,20 @@ export async function PATCH(
           const orderData = await orderRes.json().catch(() => ({}))
           const fullOrder = orderData?.order
           if (fullOrder?.email) {
-            const { subject, html, text } = orderCancelledEmail(fullOrder)
+            const { subject, html, text, resendTemplate } = orderCancelledEmail(fullOrder)
             await sendMail({
               to: fullOrder.email,
               subject,
               html,
               text,
+              resendTemplate,
             })
             const adminEmail = adminCancelledEmail(fullOrder)
             notifyOwner({
               subject: adminEmail.subject,
               html: adminEmail.html,
               text: adminEmail.text,
+              resendTemplate: adminEmail.resendTemplate,
               customerEmail: fullOrder.email,
             }).catch(() => {})
           }
@@ -306,6 +310,34 @@ export async function PATCH(
             captureErr,
           )
         }
+        // Pickup orders don't get a separate "ship" step — marking them
+        // fulfilled here IS the "ready for collection" moment, so that's
+        // the customer email we send (courier orders get
+        // shippingConfirmationEmail instead, from the 'ship' action).
+        try {
+          const orderRes = await fetcher(
+            `/admin/orders/${id}?fields=id,display_id,email,metadata,*items,customer.first_name`,
+          )
+          const orderData = await orderRes.json().catch(() => ({}))
+          const fullOrder = orderData?.order
+          const isPickup = fullOrder?.metadata?.fulfillment_type === 'pickup'
+          if (fullOrder?.email && isPickup) {
+            const { subject, html, text, resendTemplate } =
+              readyForPickupEmail(fullOrder)
+            await sendMail({
+              to: fullOrder.email,
+              subject,
+              html,
+              text,
+              resendTemplate,
+            })
+          }
+        } catch (pickupEmailErr) {
+          console.error(
+            `[order fulfill] ready-for-pickup email failed for ${id}:`,
+            pickupEmailErr,
+          )
+        }
         break
       }
       case 'ship': {
@@ -329,7 +361,7 @@ export async function PATCH(
             const orderData = await orderRes.json().catch(() => ({}))
             const fullOrder = orderData?.order
             if (fullOrder?.email) {
-              const { subject, html, text } = shippingConfirmationEmail(
+              const { subject, html, text, resendTemplate } = shippingConfirmationEmail(
                 fullOrder,
                 { trackingNumber: data?.parcel2goTrackingNumber },
               )
@@ -338,12 +370,14 @@ export async function PATCH(
                 subject,
                 html,
                 text,
+                resendTemplate,
               })
               const adminEmail = adminShippingEmail(fullOrder)
               notifyOwner({
                 subject: adminEmail.subject,
                 html: adminEmail.html,
                 text: adminEmail.text,
+                resendTemplate: adminEmail.resendTemplate,
                 customerEmail: fullOrder.email,
               }).catch(() => {})
             }
@@ -378,18 +412,20 @@ export async function PATCH(
         }
         if (fullOrder.email) {
           try {
-            const { subject, html, text } = outForDeliveryEmail(fullOrder)
+            const { subject, html, text, resendTemplate } = outForDeliveryEmail(fullOrder)
             await sendMail({
               to: fullOrder.email,
               subject,
               html,
               text,
+              resendTemplate,
             })
             const adminEmail = adminOutForDeliveryEmail(fullOrder)
             notifyOwner({
               subject: adminEmail.subject,
               html: adminEmail.html,
               text: adminEmail.text,
+              resendTemplate: adminEmail.resendTemplate,
               customerEmail: fullOrder.email,
             }).catch(() => {})
           } catch (outForDeliveryEmailErr) {
@@ -439,19 +475,21 @@ export async function PATCH(
             const orderData = await orderRes.json().catch(() => ({}))
             const fullOrder = orderData?.order
             if (fullOrder?.email) {
-              const { subject, html, text } =
+              const { subject, html, text, resendTemplate } =
                 deliveryConfirmationEmail(fullOrder)
               await sendMail({
                 to: fullOrder.email,
                 subject,
                 html,
                 text,
+                resendTemplate,
               })
               const adminEmail = adminDeliveryEmail(fullOrder)
               notifyOwner({
                 subject: adminEmail.subject,
                 html: adminEmail.html,
                 text: adminEmail.text,
+                resendTemplate: adminEmail.resendTemplate,
                 customerEmail: fullOrder.email,
               }).catch(() => {})
             }
@@ -573,7 +611,7 @@ export async function PATCH(
           )
           if (order.email) {
             try {
-              const { subject, html, text } = refundConfirmationEmail(
+              const { subject, html, text, resendTemplate } = refundConfirmationEmail(
                 order,
                 refund_amount,
                 builtItems,
@@ -583,12 +621,14 @@ export async function PATCH(
                 subject,
                 html,
                 text,
+                resendTemplate,
               })
               const adminEmail = adminRefundEmail(order, refund_amount)
               notifyOwner({
                 subject: adminEmail.subject,
                 html: adminEmail.html,
                 text: adminEmail.text,
+                resendTemplate: adminEmail.resendTemplate,
                 customerEmail: order.email,
               }).catch(() => {})
             } catch (refundEmailErr) {
@@ -664,7 +704,7 @@ export async function PATCH(
           data = result.data
           if (order.email) {
             try {
-              const { subject, html, text } = refundConfirmationEmail(
+              const { subject, html, text, resendTemplate } = refundConfirmationEmail(
                 order,
                 record.refund_amount,
                 record.items,
@@ -674,12 +714,14 @@ export async function PATCH(
                 subject,
                 html,
                 text,
+                resendTemplate,
               })
               const adminEmail = adminRefundEmail(order, record.refund_amount)
               notifyOwner({
                 subject: adminEmail.subject,
                 html: adminEmail.html,
                 text: adminEmail.text,
+                resendTemplate: adminEmail.resendTemplate,
                 customerEmail: order.email,
               }).catch(() => {})
             } catch (refundEmailErr) {
@@ -731,6 +773,24 @@ export async function PATCH(
             actor,
           )
           data = result.data
+          if (order.email) {
+            try {
+              const { subject, html, text, resendTemplate } =
+                returnDeclinedEmail(order, { note })
+              await sendMail({
+                to: order.email,
+                subject,
+                html,
+                text,
+                resendTemplate,
+              })
+            } catch (declineEmailErr) {
+              console.error(
+                `[order reject-return] decline email failed for ${id}:`,
+                declineEmailErr,
+              )
+            }
+          }
         } catch (returnErr: any) {
           return NextResponse.json(
             {

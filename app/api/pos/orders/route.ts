@@ -977,11 +977,15 @@ export async function POST(request: NextRequest) {
         // screen, but that step was easy to forget/skip, so it's now sent
         // automatically here too. "Email Receipt" still exists for a
         // manual resend if the customer needs another copy.
-        const { html, text } = adminNewOrderEmail(fullOrder ?? order, 'pos')
+        const { html, text, resendTemplate } = adminNewOrderEmail(
+          fullOrder ?? order,
+          'pos',
+        )
         notifyOwner({
           subject: `New POS order ${orderNumber}`,
           html,
           text,
+          resendTemplate,
           customerEmail: !isSyntheticEmail(fullOrder?.email)
             ? fullOrder?.email
             : undefined,

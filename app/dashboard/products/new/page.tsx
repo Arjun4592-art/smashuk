@@ -1799,14 +1799,12 @@ export default function AddProductPage() {
                           <span className='text-[12.5px] font-semibold text-[#202223]'>
                             Variant {index + 1}
                           </span>
-                          {variants.length > 1 && (
-                            <button
-                              onClick={() => removeVariant(variant.id)}
-                              className='text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer'
-                            >
-                              Remove
-                            </button>
-                          )}
+                          <button
+                            onClick={() => removeVariant(variant.id)}
+                            className='text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer'
+                          >
+                            Remove
+                          </button>
                         </div>
                         {}
                         <div className='space-y-2'>

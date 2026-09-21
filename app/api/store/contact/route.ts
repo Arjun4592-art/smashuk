@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       subject: adminEmail.subject,
       html: adminEmail.html,
       text: adminEmail.text,
-      templateVariables: adminEmail.templateVariables,
+      resendTemplate: adminEmail.resendTemplate,
       customerEmail: email,
     }).catch((err) => {
       console.error('[contact] notifyOwner failed:', err)
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
       subject: autoReply.subject,
       html: autoReply.html,
       text: autoReply.text,
-      templateVariables: autoReply.templateVariables,
+      resendTemplate: autoReply.resendTemplate,
     }).catch((err) => {
       console.error('[contact] auto-reply failed:', err)
     })

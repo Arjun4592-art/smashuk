@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
       const reason = pi.last_payment_error?.message
       const customerEmail =
         typeof pi.receipt_email === 'string' ? pi.receipt_email : undefined
-      const { subject, html, text, templateVariables } =
+      const { subject, html, text, resendTemplate } =
         adminPaymentFailedEmail({
           paymentIntentId: pi.id,
           amount: pi.amount / 100,
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
         subject,
         html,
         text,
-        templateVariables,
+        resendTemplate,
         customerEmail,
       }).catch((err) =>
         console.error(
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
         typeof dispute.payment_intent === 'string'
           ? dispute.payment_intent
           : dispute.payment_intent?.id
-      const { subject, html, text, templateVariables } = adminDisputeEmail({
+      const { subject, html, text, resendTemplate } = adminDisputeEmail({
         chargeId,
         paymentIntentId,
         amount: dispute.amount / 100,
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
           ? new Date(dispute.evidence_details.due_by * 1000)
           : undefined,
       })
-      notifyOwner({ subject, html, text, templateVariables }).catch((err) =>
+      notifyOwner({ subject, html, text, resendTemplate }).catch((err) =>
         console.error('[Stripe Webhook] dispute admin email failed:', err),
       )
       break
