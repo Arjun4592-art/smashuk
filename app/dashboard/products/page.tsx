@@ -1,13 +1,17 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import Papa from 'papaparse'
 import { toast } from 'sonner'
 import { useProducts } from '@/hooks/useDashboard'
 import { useDebouncedValue } from '@/hooks/useDebounce'
 import { useRouter } from 'next/navigation'
-import { deleteProduct, duplicateProduct } from '@/lib/api/dashboard'
+import {
+  deleteProduct,
+  duplicateProduct,
+  getProducts,
+} from '@/lib/api/dashboard'
 const STATUS_STYLES: Record<string, string> = {
   active: 'bg-[#008060]/10 text-[#008060]',
   draft: 'bg-[#6D7175]/10 text-[#6D7175]',
@@ -23,6 +27,14 @@ function formatCurrency(amount: number) {
   }).format(amount)
 }
 const STATUSES = ['All', 'Active', 'Draft', 'Archived']
+// Status tab -> Medusa `status` filter, applied on the server. Medusa has no
+// "archived" status, so that tab maps to its closest one ("rejected").
+const STATUS_FILTERS: Record<string, string[] | undefined> = {
+  All: undefined,
+  Active: ['published'],
+  Draft: ['draft'],
+  Archived: ['rejected'],
+}
 function DeleteModal({
   product,
   onConfirm,
@@ -192,7 +204,7 @@ export default function ProductsPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [view, setView] = useState<'table' | 'grid'>('table')
   const [page, setPage] = useState(1)
-  const pageSize = 10
+  const pageSize = 20
   const [deleteTarget, setDeleteTarget] = useState<{
     id: string
     name: string
@@ -216,20 +228,61 @@ export default function ProductsPage() {
     }[]
   } | null>(null)
   const debouncedSearch = useDebouncedValue(search, 400)
-  const { data, loading, error, refetch } = useProducts({
-    limit: 200,
+  // Server-side paging: only the current page (search + status filter
+  // applied by Medusa) is fetched, so every product is reachable and each
+  // request stays small no matter how big the catalogue grows.
+  const {
+    data,
+    loading,
+    error,
+    refetch: refetchPage,
+  } = useProducts({
+    limit: pageSize,
+    offset: (page - 1) * pageSize,
     q: debouncedSearch || undefined,
+    status: STATUS_FILTERS[selectedStatus],
   })
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
+  const [countsVersion, setCountsVersion] = useState(0)
+  const [exporting, setExporting] = useState(false)
+  const refetch = async () => {
+    setCountsVersion((v) => v + 1)
+    await refetchPage()
+  }
+  // Tab badges: a count-only request (limit 1) per status, for the current
+  // search text.
+  useEffect(() => {
+    let cancelled = false
+    Promise.all(
+      STATUSES.map((s) =>
+        getProducts({
+          limit: 1,
+          q: debouncedSearch || undefined,
+          status: STATUS_FILTERS[s],
+        })
+          .then((r) => [s, r.count as number] as const)
+          .catch(() => [s, undefined] as const),
+      ),
+    ).then((entries) => {
+      if (cancelled) return
+      const next: Record<string, number> = {}
+      entries.forEach(([s, c]) => {
+        if (typeof c === 'number') next[s] = c
+      })
+      setStatusCounts(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedSearch, countsVersion])
   const products = data?.products ?? []
-  const filtered = products.filter((p: (typeof products)[0]) => {
-    const matchStatus =
-      selectedStatus === 'All' ||
-      p.status === selectedStatus.toLowerCase() ||
-      (selectedStatus === 'Active' && p.status === 'published')
-    return matchStatus
-  })
-  const totalPages = Math.ceil(filtered.length / pageSize)
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const totalCount: number = data?.count ?? 0
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+  const paginated = products
+  const changePage = (p: number) => {
+    setPage(p)
+    setSelectedIds([])
+  }
   const toggleSelect = (id: string) =>
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
@@ -240,12 +293,52 @@ export default function ProductsPage() {
         ? []
         : paginated.map((p: (typeof products)[0]) => p.id),
     )
-  const handleExportCsv = () => {
-    if (filtered.length === 0) {
-      toast.error('Nothing to export')
-      return
+  const handleExportCsv = async () => {
+    if (exporting) return
+    setExporting(true)
+    const toastId = toast.loading('Preparing export…')
+    try {
+      // The list only holds one page, so pull every product that matches the
+      // current search / status filter, in chunks.
+      const all: (typeof products)[0][] = []
+      const chunk = 100
+      let offset = 0
+      let total = Infinity
+      while (offset < total) {
+        const res = await getProducts({
+          limit: chunk,
+          offset,
+          q: debouncedSearch || undefined,
+          status: STATUS_FILTERS[selectedStatus],
+        })
+        total = res.count ?? 0
+        all.push(...res.products)
+        if (res.products.length === 0) break
+        offset += chunk
+        toast.loading(
+          `Preparing export… ${Math.min(all.length, total)} / ${total}`,
+          {
+            id: toastId,
+          },
+        )
+      }
+      if (all.length === 0) {
+        toast.error('Nothing to export', { id: toastId })
+        return
+      }
+      exportRowsToCsv(all)
+      toast.success(`Exported ${all.length} products`, { id: toastId })
+    } catch (err: any) {
+      console.error('Export failed:', err)
+      toast.error('Export failed: ' + (err?.message ?? 'unknown error'), {
+        id: toastId,
+      })
+    } finally {
+      setExporting(false)
     }
-    const rows = filtered.map((p: (typeof products)[0]) => ({
+  }
+  const exportRowsToCsv = (list: (typeof products)[0][]) => {
+    const rows = list.map((p: (typeof products)[0]) => ({
       Name: p.name,
       SKU: p.sku,
       Category: p.category,
@@ -271,7 +364,6 @@ export default function ProductsPage() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    toast.success(`Exported ${rows.length} products`)
   }
   const parseSpecifications = (
     raw: string,
@@ -479,7 +571,14 @@ export default function ProductsPage() {
       await deleteProduct(deleteTarget.id)
       setDeleteTarget(null)
       setSelectedIds([])
-      await refetch()
+      if (page > 1 && products.length <= 1) {
+        // Deleted the last row of the last page — go back one page (that
+        // triggers its own fetch).
+        setCountsVersion((v) => v + 1)
+        setPage(page - 1)
+      } else {
+        await refetch()
+      }
     } catch (err: any) {
       console.error('Delete failed:', err)
       setSaveError?.('Delete failed: ' + err.message)
@@ -621,7 +720,7 @@ export default function ProductsPage() {
             Products
           </h1>
           <p className='text-[13px] text-[#6D7175] mt-0.5'>
-            {data?.count ?? 0} products total
+            {statusCounts.All ?? totalCount} products total
           </p>
         </div>
         <div className='flex items-center gap-2'>
@@ -641,9 +740,10 @@ export default function ProductsPage() {
           </button>
           <button
             onClick={handleExportCsv}
-            className='px-3 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] text-[#202223] font-medium rounded-lg transition-colors cursor-pointer'
+            disabled={exporting}
+            className='px-3 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] text-[#202223] font-medium rounded-lg transition-colors cursor-pointer disabled:opacity-50'
           >
-            Export
+            {exporting ? 'Exporting…' : 'Export'}
           </button>
           <Link
             href='/dashboard/products/new'
@@ -732,7 +832,10 @@ export default function ProductsPage() {
           </div>
           <select
             value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
+            onChange={(e) => {
+              setSelectedStatus(e.target.value)
+              changePage(1)
+            }}
             className='px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none cursor-pointer hover:border-[#8C9196] transition-colors'
           >
             {STATUSES.map((s) => (
@@ -764,19 +867,13 @@ export default function ProductsPage() {
               key={s}
               onClick={() => {
                 setSelectedStatus(s)
-                setPage(1)
+                changePage(1)
               }}
               className={`px-4 py-2.5 text-[13px] font-medium whitespace-nowrap border-b-2 transition-all bg-transparent border-l-0 border-r-0 border-t-0 cursor-pointer ${selectedStatus === s ? 'border-b-[#008060] text-[#008060]' : 'border-b-transparent text-[#6D7175] hover:text-[#202223]'}`}
             >
               {s}{' '}
               <span className='ml-1.5 text-[11px] text-[#8C9196]'>
-                {s === 'All'
-                  ? products.length
-                  : products.filter(
-                      (p: (typeof products)[0]) =>
-                        p.status === s.toLowerCase() ||
-                        (s === 'Active' && p.status === 'published'),
-                    ).length}
+                {statusCounts[s] ?? (s === selectedStatus ? totalCount : '')}
               </span>
             </button>
           ))}
@@ -1172,18 +1269,17 @@ export default function ProductsPage() {
           <p className='text-[12.5px] text-[#6D7175]'>
             Showing{' '}
             <span className='font-medium text-[#202223]'>
-              {Math.min(page * pageSize, filtered.length)}
+              {totalCount === 0
+                ? 0
+                : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, totalCount)}`}
             </span>{' '}
-            of{' '}
-            <span className='font-medium text-[#202223]'>
-              {filtered.length}
-            </span>{' '}
+            of <span className='font-medium text-[#202223]'>{totalCount}</span>{' '}
             products
           </p>
           <Pagination
             page={page}
             totalPages={totalPages}
-            onPageChange={setPage}
+            onPageChange={changePage}
           />
         </div>
       </div>

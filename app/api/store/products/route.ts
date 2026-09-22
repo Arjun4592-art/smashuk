@@ -56,6 +56,10 @@ export async function GET(req: NextRequest) {
     const category_handle = searchParams.get('category_handle') ?? ''
     const ids = searchParams.get('id') ?? ''
     const light = searchParams.get('light') === '1'
+    // Only newest-first / oldest-first are allowed — this is a public route.
+    const rawOrder = searchParams.get('order') ?? ''
+    const order =
+      rawOrder === '-created_at' || rawOrder === 'created_at' ? rawOrder : ''
     const fields = light ? STORE_PRODUCT_LISTING_FIELDS : STORE_PRODUCT_FIELDS
     const regionStart = Date.now()
     // Two changes here:
@@ -82,6 +86,7 @@ export async function GET(req: NextRequest) {
       fields,
     })
     if (q) params.set('q', q)
+    if (order) params.set('order', order)
     if (handle) params.set('handle', handle)
     if (resolvedCategoryId) params.set('category_id[]', resolvedCategoryId)
     if (regionId) params.set('region_id', regionId)
@@ -152,8 +157,7 @@ export async function GET(req: NextRequest) {
       headers: handle
         ? { 'Cache-Control': 'no-store' }
         : {
-            'Cache-Control':
-              'public, s-maxage=60, stale-while-revalidate=600',
+            'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=600',
           },
     })
   } catch (err: any) {

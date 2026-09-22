@@ -7,6 +7,10 @@ import {
 } from '@/lib/email-templates'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { safeJson } from '@/lib/api/safe-json'
+import { isRateLimited, getClientIp } from '@/lib/api/rate-limit'
+
+const MAX_ATTEMPTS_PER_IP = 8
+const WINDOW_MS = 15 * 60 * 1000
 interface StockRequest {
   email: string
   productId: string
@@ -31,6 +35,16 @@ async function getStoreIdAndRequests(): Promise<{
 }
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req)
+    // Was previously unlimited — same abuse pattern as the newsletter
+    // route: unlimited arbitrary "email" values each trigger a customer
+    // email plus an admin notification email, both unthrottled.
+    if (isRateLimited(`notify-stock:${ip}`, MAX_ATTEMPTS_PER_IP, WINDOW_MS)) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429 },
+      )
+    }
     const { email, productId, productName } = await req.json()
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json(

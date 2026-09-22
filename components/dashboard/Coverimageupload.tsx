@@ -7,8 +7,14 @@ import { compressImageForUpload } from '@/lib/image-compress'
 interface Props {
   value: string
   onChange: (url: string) => void
+  /** Text on the empty upload box. Defaults to the blog wording. */
+  label?: string
 }
-export default function CoverImageUpload({ value, onChange }: Props) {
+export default function CoverImageUpload({
+  value,
+  onChange,
+  label = 'Click to upload cover image',
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [pendingCrop, setPendingCrop] = useState<{
@@ -114,7 +120,7 @@ export default function CoverImageUpload({ value, onChange }: Props) {
         >
           <span className='text-2xl'>🖼</span>
           <span className='text-[13px] font-medium'>
-            {uploading ? 'Uploading...' : 'Click to upload cover image'}
+            {uploading ? 'Uploading...' : label}
           </span>
         </button>
       )}

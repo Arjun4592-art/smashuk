@@ -155,20 +155,37 @@ export default function OrderDetailPage({
   const handleAction = async (action: Action) => {
     setActionLoading(action)
     try {
-      await updateOrderStatus(id, action)
-      toast.success(
-        action === 'fulfill'
-          ? 'Order marked as fulfilled'
-          : action === 'capture'
-            ? 'Payment captured'
-            : action === 'ship'
-              ? 'Order dispatched'
-              : action === 'deliver'
-                ? order?.metadata?.fulfillment_type === 'pickup'
-                  ? 'Order marked as picked up'
-                  : 'Order marked as delivered'
-                : `Order ${ACTION_VERB[action]}d`,
-      )
+      const result: any = await updateOrderStatus(id, action)
+      if (action === 'cancel') {
+        if (result?.warning) {
+          // Order cancelled but the auto-refund call failed — this needs a
+          // human to go refund the payment manually, so it's a warning
+          // toast rather than the usual success one.
+          toast.warning(result.warning)
+        } else if (result?.refunded) {
+          toast.success(
+            `Order cancelled — £${Number(result.refundAmount).toFixed(2)} refunded to the customer`,
+          )
+        } else {
+          // Either a cash order (nothing to refund electronically) or the
+          // order had no captured payment to begin with.
+          toast.success('Order cancelled')
+        }
+      } else {
+        toast.success(
+          action === 'fulfill'
+            ? 'Order marked as fulfilled'
+            : action === 'capture'
+              ? 'Payment captured'
+              : action === 'ship'
+                ? 'Order dispatched'
+                : action === 'deliver'
+                  ? order?.metadata?.fulfillment_type === 'pickup'
+                    ? 'Order marked as picked up'
+                    : 'Order marked as delivered'
+                  : `Order ${ACTION_VERB[action]}d`,
+        )
+      }
       await fetchOrder(true)
     } catch (err: any) {
       toast.error(err.message ?? `Failed to ${ACTION_VERB[action]} order`)

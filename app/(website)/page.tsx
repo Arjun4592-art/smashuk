@@ -15,6 +15,7 @@ import { FREE_SHIPPING_THRESHOLD } from '@/lib/constants'
 import Link from 'next/link'
 import ReviewsSlider from '@/components/website/ReviewsSlider'
 import { getPromoBanner } from '@/lib/promo-banner'
+import { getHeroSlides } from '@/lib/hero-slides'
 export const generateMetadata = () => generateStaticMetadata('home')
 export const revalidate = 3600
 const TRUST_FEATURES = [
@@ -40,10 +41,13 @@ const TRUST_FEATURES = [
   },
 ]
 export default async function HomePage() {
-  const promoBanner = await getPromoBanner()
+  const [promoBanner, heroSlides] = await Promise.all([
+    getPromoBanner(),
+    getHeroSlides(),
+  ])
   return (
     <>
-      <Hero />
+      <Hero slides={heroSlides} />
       <section className='bg-[#0A1F44] py-6'>
         <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
           <div className='grid grid-cols-2 lg:grid-cols-4 gap-6'>

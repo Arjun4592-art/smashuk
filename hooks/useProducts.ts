@@ -13,6 +13,7 @@ export function useMedusaProducts(params?: {
   offset?: number
   q?: string
   category_id?: string[]
+  order?: '-created_at' | 'created_at'
 }) {
   const query = useQuery({
     queryKey: ['products', params],

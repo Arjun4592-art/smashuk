@@ -17,13 +17,18 @@ export async function GET() {
       )
     }
     const data = await res.json()
+    // This endpoint is unauthenticated by design (the POS PIN screen needs
+    // to show a picker before anyone is logged in) — but it was returning
+    // full staff emails to any anonymous caller, which is an easy email
+    // list to scrape for phishing/credential-stuffing against admin-login
+    // and pos-pin. Keep it name/initials/role only; email stays server-side.
     const staff = (data.users ?? [])
       .map((u: any) => {
         const name =
-          `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || u.email
+          `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || 'Staff'
         const initials =
           `${u.first_name?.[0] ?? ''}${u.last_name?.[0] ?? ''}`.toUpperCase() ||
-          (u.email ?? '??').slice(0, 2).toUpperCase()
+          'ST'
         const role: 'admin' | 'staff' = ['admin', 'staff'].includes(
           u.metadata?.posRole,
         )

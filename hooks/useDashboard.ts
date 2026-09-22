@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   getOrders,
   getProducts,
@@ -13,17 +13,22 @@ function useAsync<T>(fetcher: () => Promise<T>, deps: any[] = []) {
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Only the latest request may update state — with paging, a slow earlier
+  // page must not overwrite a newer one.
+  const requestId = useRef(0)
   const fetch = useCallback(async () => {
+    const myId = ++requestId.current
     setLoading(true)
     setError(null)
     try {
       const result = await fetcher()
-      setData(result)
+      if (myId === requestId.current) setData(result)
     } catch (err: any) {
+      if (myId !== requestId.current) return
       console.error('Dashboard fetch error:', err)
       setError(err?.message ?? 'Failed to load data')
     } finally {
-      setLoading(false)
+      if (myId === requestId.current) setLoading(false)
     }
     // deps is a caller-supplied array (see useOrders/useProducts/etc. below),
     // so it can't be a static array literal here; each call site below

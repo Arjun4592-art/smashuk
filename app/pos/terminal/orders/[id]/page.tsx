@@ -3,6 +3,7 @@
 import { useEffect, useState, use } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import {
   getOrder,
   updateOrderStatus,
@@ -384,7 +385,21 @@ export default function OrderDetailPage({
   const handleAction = async (action: string) => {
     setActionLoading(true)
     try {
-      await updateOrderStatus(id, action)
+      const result: any = await updateOrderStatus(id, action)
+      if (action === 'cancel') {
+        if (result?.warning) {
+          // Refund call to Stripe failed — order is still cancelled, but a
+          // human needs to go issue the refund manually.
+          toast.warning(result.warning)
+        } else if (result?.refunded) {
+          toast.success(
+            `Order cancelled — £${Number(result.refundAmount).toFixed(2)} refunded to the customer`,
+          )
+        } else {
+          // Cash sale (or no captured payment) — nothing to auto-refund.
+          toast.success('Order cancelled')
+        }
+      }
       await reloadOrder()
     } catch (err: unknown) {
       alert(

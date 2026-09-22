@@ -395,6 +395,8 @@ export async function getProducts(params?: {
   category_id?: string[]
   category_handle?: string
   light?: boolean
+  /** '-created_at' = newest first. Omit to keep Medusa's default order. */
+  order?: '-created_at' | 'created_at'
 }): Promise<{
   products: any[]
   count: number
@@ -404,6 +406,7 @@ export async function getProducts(params?: {
       limit: String(params?.limit ?? 20),
       offset: String(params?.offset ?? 0),
       q: params?.q,
+      order: params?.order,
       category_id: params?.category_id?.join(','),
       category_handle: params?.category_handle,
     },

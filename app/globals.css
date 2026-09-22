@@ -52,7 +52,12 @@
     color: #0a1f44;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    overflow-x: hidden;
+    /* `clip` (not `hidden`): html already has overflow-x: hidden, and a
+       second overflow-x: hidden on body turns body into a scroll container,
+       which silently breaks every `position: sticky` on the site (sticky
+       navbar, sticky product gallery, sticky cart summary...). `clip` still
+       stops sideways scrolling but doesn't create a scroll container. */
+    overflow-x: clip;
     width: 100%;
   }
 

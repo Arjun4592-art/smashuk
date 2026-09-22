@@ -53,6 +53,8 @@ export default function ContactPage() {
     email: '',
     subject: '',
     message: '',
+    website: '', // honeypot — real users never see or fill this; bots that
+    // fill every field do. Must match the field name the API route checks.
   })
   const [status, setStatus] = useState<
     'idle' | 'loading' | 'success' | 'error'
@@ -78,6 +80,7 @@ export default function ContactPage() {
         email: '',
         subject: '',
         message: '',
+        website: '',
       })
     } catch (err: any) {
       setStatus('error')
@@ -163,6 +166,22 @@ export default function ContactPage() {
               </div>
             ) : (
               <form onSubmit={handleSubmit} className='space-y-5'>
+                {}
+                <input
+                  type='text'
+                  name='website'
+                  value={form.website}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      website: e.target.value,
+                    })
+                  }
+                  tabIndex={-1}
+                  autoComplete='off'
+                  aria-hidden='true'
+                  className='absolute -left-[9999px] w-px h-px opacity-0 pointer-events-none'
+                />
                 <div className='grid grid-cols-1 sm:grid-cols-2 gap-5'>
                   <div>
                     <label className='block text-xs font-semibold text-gray-500 mb-1.5 font-lato'>

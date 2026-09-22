@@ -418,6 +418,10 @@ const NAV_ITEMS: NavItem[] = [
         href: '/dashboard/settings/promo-banner',
       },
       {
+        label: 'Home Slider',
+        href: '/dashboard/settings/hero-slider',
+      },
+      {
         label: 'Settings',
         href: '/dashboard/settings/marketing',
       },

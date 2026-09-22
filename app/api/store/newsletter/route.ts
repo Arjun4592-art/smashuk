@@ -3,6 +3,10 @@ import { sendMail } from '@/lib/email'
 import { newsletterWelcomeEmail } from '@/lib/email-templates'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { safeJson } from '@/lib/api/safe-json'
+import { isRateLimited, getClientIp } from '@/lib/api/rate-limit'
+
+const MAX_ATTEMPTS_PER_IP = 8
+const WINDOW_MS = 15 * 60 * 1000
 async function getStoreIdAndSubscribers(): Promise<{
   storeId: string
   subscribers: string[]
@@ -21,6 +25,16 @@ async function getStoreIdAndSubscribers(): Promise<{
 }
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req)
+    // Was previously unlimited — a script could sign up thousands of
+    // arbitrary addresses per minute, sending each one a "welcome" email
+    // with no way to opt out first (classic newsletter-abuse spam vector).
+    if (isRateLimited(`newsletter:${ip}`, MAX_ATTEMPTS_PER_IP, WINDOW_MS)) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429 },
+      )
+    }
     const { email } = await req.json()
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json(

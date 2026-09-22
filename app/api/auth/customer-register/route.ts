@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { setSurfaceCookies } from '@/lib/api/auth-cookie'
 import { sendMail, notifyAdmin } from '@/lib/email'
 import { welcomeEmail, adminWelcomeEmail } from '@/lib/email-templates'
+import { isRateLimited, getClientIp } from '@/lib/api/rate-limit'
+import { isGenuineEmail } from '@/lib/api/email-verify'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
@@ -9,8 +11,21 @@ const STORE_HEADERS = {
   'Content-Type': 'application/json',
   'x-publishable-api-key': PUBLISHABLE_KEY,
 }
+// Unlike customer-login/admin-login, this route previously had no rate
+// limiting and no check that the email was even real — so it was the
+// easiest way for a bot to mass-create accounts (and trigger a welcome +
+// admin-notification email per signup, straight from a throwaway address).
+const MAX_ATTEMPTS_PER_IP = 6
+const WINDOW_MS = 15 * 60 * 1000
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req)
+    if (isRateLimited(`register:${ip}`, MAX_ATTEMPTS_PER_IP, WINDOW_MS)) {
+      return NextResponse.json(
+        { error: 'Too many attempts. Please try again later.' },
+        { status: 429 },
+      )
+    }
     const { name, email, password } = await req.json()
     if (!name || !email || !password) {
       return NextResponse.json(
@@ -21,6 +36,10 @@ export async function POST(req: NextRequest) {
           status: 400,
         },
       )
+    }
+    const emailCheck = await isGenuineEmail(email)
+    if (!emailCheck.valid) {
+      return NextResponse.json({ error: emailCheck.reason }, { status: 400 })
     }
     if (password.length < 8) {
       return NextResponse.json(
@@ -108,8 +127,7 @@ export async function POST(req: NextRequest) {
         last_name: rest.join(' ') || '',
         email,
       }
-      const { subject, html, text, resendTemplate } =
-        welcomeEmail(newCustomer)
+      const { subject, html, text, resendTemplate } = welcomeEmail(newCustomer)
       sendMail({ to: email, subject, html, text, resendTemplate }).catch(
         () => {},
       )

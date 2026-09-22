@@ -210,14 +210,58 @@ export async function PATCH(
             },
           )
         }
+        let cancelRefundAmount = 0
+        let cancelRefundFailed = false
         try {
           const orderRes = await fetcher(
-            `/admin/orders/${id}?fields=id,display_id,email,*items`,
+            `/admin/orders/${id}?fields=id,display_id,email,metadata,*items,*payment_collections.payments`,
           )
           const orderData = await orderRes.json().catch(() => ({}))
           const fullOrder = orderData?.order
+          if (fullOrder) {
+            fullOrder.payments = (fullOrder.payment_collections ?? []).flatMap(
+              (pc: any) => pc.payments ?? [],
+            )
+            // Cash orders (POS "cash" sales, or any payment sitting on
+            // Medusa's no-op `pp_system_default` provider) never went
+            // through Stripe, so there is nothing to refund electronically —
+            // the till/cashier handles giving the cash back physically.
+            // Only payments actually captured through a real provider
+            // (Stripe, PayPal, etc.) get auto-refunded here.
+            const isCashOrder =
+              fullOrder.metadata?.payment_method === 'cash' ||
+              (fullOrder.payments.length > 0 &&
+                fullOrder.payments.every(
+                  (p: any) =>
+                    !p.provider_id || p.provider_id === 'pp_system_default',
+                ))
+            if (!isCashOrder) {
+              const refundablePayments = fullOrder.payments.filter(
+                (p: any) => p.captured_at && p.status !== 'canceled',
+              )
+              const totalRefundable = refundablePayments.reduce(
+                (sum: number, p: any) =>
+                  sum +
+                  (p.amount - (p.refunded_amount ?? p.amount_refunded ?? 0)),
+                0,
+              )
+              if (totalRefundable > 0) {
+                try {
+                  await refundOrderAmount(fullOrder, totalRefundable, fetcher)
+                  cancelRefundAmount = totalRefundable
+                } catch (refundErr: any) {
+                  cancelRefundFailed = true
+                  console.error(
+                    `[order cancel] auto-refund failed for ${id}:`,
+                    refundErr,
+                  )
+                }
+              }
+            }
+          }
           if (fullOrder?.email) {
-            const { subject, html, text, resendTemplate } = orderCancelledEmail(fullOrder)
+            const { subject, html, text, resendTemplate } =
+              orderCancelledEmail(fullOrder)
             await sendMail({
               to: fullOrder.email,
               subject,
@@ -225,6 +269,20 @@ export async function PATCH(
               text,
               resendTemplate,
             })
+            if (cancelRefundAmount > 0) {
+              const refundEmail = refundConfirmationEmail(
+                fullOrder,
+                cancelRefundAmount,
+                fullOrder.items ?? [],
+              )
+              await sendMail({
+                to: fullOrder.email,
+                subject: refundEmail.subject,
+                html: refundEmail.html,
+                text: refundEmail.text,
+                resendTemplate: refundEmail.resendTemplate,
+              })
+            }
             const adminEmail = adminCancelledEmail(fullOrder)
             notifyOwner({
               subject: adminEmail.subject,
@@ -239,6 +297,15 @@ export async function PATCH(
             `[order cancel] cancellation email failed for ${id}:`,
             cancelEmailErr,
           )
+        }
+        data = {
+          ...data,
+          refunded: cancelRefundAmount > 0,
+          refundAmount: cancelRefundAmount,
+          ...(cancelRefundFailed && {
+            warning:
+              'Order was cancelled, but the automatic refund failed — please refund manually from the order page.',
+          }),
         }
         break
       }
@@ -361,10 +428,10 @@ export async function PATCH(
             const orderData = await orderRes.json().catch(() => ({}))
             const fullOrder = orderData?.order
             if (fullOrder?.email) {
-              const { subject, html, text, resendTemplate } = shippingConfirmationEmail(
-                fullOrder,
-                { trackingNumber: data?.parcel2goTrackingNumber },
-              )
+              const { subject, html, text, resendTemplate } =
+                shippingConfirmationEmail(fullOrder, {
+                  trackingNumber: data?.parcel2goTrackingNumber,
+                })
               await sendMail({
                 to: fullOrder.email,
                 subject,
@@ -412,7 +479,8 @@ export async function PATCH(
         }
         if (fullOrder.email) {
           try {
-            const { subject, html, text, resendTemplate } = outForDeliveryEmail(fullOrder)
+            const { subject, html, text, resendTemplate } =
+              outForDeliveryEmail(fullOrder)
             await sendMail({
               to: fullOrder.email,
               subject,
@@ -611,11 +679,8 @@ export async function PATCH(
           )
           if (order.email) {
             try {
-              const { subject, html, text, resendTemplate } = refundConfirmationEmail(
-                order,
-                refund_amount,
-                builtItems,
-              )
+              const { subject, html, text, resendTemplate } =
+                refundConfirmationEmail(order, refund_amount, builtItems)
               await sendMail({
                 to: order.email,
                 subject,
@@ -704,11 +769,12 @@ export async function PATCH(
           data = result.data
           if (order.email) {
             try {
-              const { subject, html, text, resendTemplate } = refundConfirmationEmail(
-                order,
-                record.refund_amount,
-                record.items,
-              )
+              const { subject, html, text, resendTemplate } =
+                refundConfirmationEmail(
+                  order,
+                  record.refund_amount,
+                  record.items,
+                )
               await sendMail({
                 to: order.email,
                 subject,
