@@ -21,7 +21,7 @@ export default async function WebsiteLayout({
       <main className='ls-luxury min-h-screen'>{children}</main>
       <Footer />
       <CookieConsent />
-      <ChatWidget />
+      
       <RevealInit />
     </AuthProvider>
   )
