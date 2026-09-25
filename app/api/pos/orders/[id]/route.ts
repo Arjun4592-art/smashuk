@@ -16,6 +16,7 @@ import {
   adminRefundEmail,
   adminShippingEmail,
 } from '@/lib/email-templates'
+import { signOrderTrackToken } from '@/lib/api/order-track-token'
 const isSyntheticEmail = (email?: string) =>
   !email || /^(walkin@|pos-)/i.test(email)
 async function requirePosSession(): Promise<boolean> {
@@ -25,6 +26,70 @@ async function requirePosSession(): Promise<boolean> {
     SURFACE_COOKIES.dashboard.tokenCookie,
   )?.value
   return Boolean(posToken || dashboardToken)
+}
+// Read-only order detail for the POS terminal (view screen + receipt/label
+// printing for old orders). Mirrors /api/admin/orders/[id] GET, but gated
+// with the same requirePosSession() as the rest of this file (POS OR
+// dashboard token) instead of the dashboard-only admin auth — same pattern
+// as the POS shipping-label route (see [id]/label/route.ts). Read-only, so
+// this doesn't reopen the write-action gap that admin-auth.ts documents:
+// order status changes / fulfillment / returns in this file still require
+// their own PATCH/PUT below, unaffected by this.
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  if (!(await requirePosSession())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const { id } = await params
+  const FIELDS =
+    'id,display_id,email,created_at,updated_at,canceled_at,status,currency_code,metadata,payment_status,' +
+    '*items,*payment_collections.payments,*shipping_methods,*fulfillments,fulfillment_status,' +
+    'subtotal,total,discount_total,shipping_total,gift_card_total,tax_total,' +
+    'customer.id,customer.first_name,customer.last_name,customer.phone,' +
+    'shipping_address.first_name,shipping_address.last_name,shipping_address.phone,' +
+    'shipping_address.address_1,shipping_address.address_2,shipping_address.city,' +
+    'shipping_address.province,shipping_address.postal_code,shipping_address.country_code'
+  try {
+    const r = await medusaServiceFetch(
+      `/admin/orders/${id}?fields=${encodeURIComponent(FIELDS)}`,
+    )
+    const text = await r.text()
+    if (!r.ok) {
+      let detail = text
+      try {
+        detail = JSON.parse(text)?.message ?? text
+      } catch {}
+      return NextResponse.json(
+        { error: detail || `Medusa returned ${r.status}` },
+        { status: r.status },
+      )
+    }
+    const parsed = JSON.parse(text)
+    if (parsed?.order) {
+      parsed.order.payments = (parsed.order.payment_collections ?? []).flatMap(
+        (pc: any) => pc.payments ?? [],
+      )
+      parsed.order.trackingToken = signOrderTrackToken(parsed.order.id)
+      const rawSplit = parsed.order.metadata?.split_payments
+      if (typeof rawSplit === 'string') {
+        try {
+          const p = JSON.parse(rawSplit)
+          parsed.order.splitPayments =
+            Array.isArray(p) && p.length > 0 ? p : null
+        } catch {
+          parsed.order.splitPayments = null
+        }
+      }
+    }
+    return NextResponse.json(parsed)
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err.message ?? 'Failed to load order' },
+      { status: 500 },
+    )
+  }
 }
 export async function PATCH(
   req: NextRequest,
@@ -128,8 +193,11 @@ export async function PATCH(
     )
     if (order.email) {
       try {
-        const { subject, html, text, resendTemplate } =
-          refundConfirmationEmail(order, refund_amount, builtItems)
+        const { subject, html, text, resendTemplate } = refundConfirmationEmail(
+          order,
+          refund_amount,
+          builtItems,
+        )
         await sendMail({
           to: order.email,
           subject,

@@ -16,6 +16,10 @@ export type PrinterConnectionType =
   | 'serial'
   | 'lan-agent'
   | 'star-passprnt'
+  // Label printer (Zebra / TSC / Xprinter / Brother etc.) reached through the
+  // OS print dialog / driver — receipts are printed as HTML sized to the
+  // label via @page. See lib/printer/label-print.ts.
+  | 'label'
 
 interface PrinterState {
   connectionType: PrinterConnectionType
@@ -26,6 +30,10 @@ interface PrinterState {
   serialHandle: SerialPrinterHandle | null
   lanAgentHandle: LanAgentHandle | null
   openDrawerOnPrint: boolean
+  // Label size in millimetres. labelHeightMm = 0 means "continuous roll" —
+  // the page height is measured from the content at print time.
+  labelWidthMm: number
+  labelHeightMm: number
   setConnectionType: (t: PrinterConnectionType) => void
   setPaperWidth: (w: PaperWidth) => void
   setUSBHandle: (h: USBPrinterHandle | null) => void
@@ -34,6 +42,7 @@ interface PrinterState {
   setSerialHandle: (h: SerialPrinterHandle | null) => void
   setLanAgentHandle: (h: LanAgentHandle | null) => void
   setOpenDrawerOnPrint: (v: boolean) => void
+  setLabelSize: (widthMm: number, heightMm: number) => void
   disconnect: () => void
 }
 
@@ -48,6 +57,8 @@ export const usePrinterStore = create<PrinterState>()(
       serialHandle: null,
       lanAgentHandle: null,
       openDrawerOnPrint: false,
+      labelWidthMm: 101.6, // 4in
+      labelHeightMm: 50.8, // 2in
       setConnectionType: (t) => set({ connectionType: t }),
       setPaperWidth: (w) => set({ paperWidth: w }),
       setUSBHandle: (h) => set({ usbHandle: h }),
@@ -56,6 +67,8 @@ export const usePrinterStore = create<PrinterState>()(
       setSerialHandle: (h) => set({ serialHandle: h }),
       setLanAgentHandle: (h) => set({ lanAgentHandle: h }),
       setOpenDrawerOnPrint: (v) => set({ openDrawerOnPrint: v }),
+      setLabelSize: (widthMm, heightMm) =>
+        set({ labelWidthMm: widthMm, labelHeightMm: heightMm }),
       disconnect: () =>
         set({
           connectionType: 'none',

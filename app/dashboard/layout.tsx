@@ -22,11 +22,11 @@ export default function DashboardLayout({
   return (
     <AuthProvider surface='dashboard'>
       <SidebarProvider>
-        <div className='flex h-screen bg-[#F6F6F7] overflow-hidden'>
+        <div className='dashboard-shell flex h-screen bg-[#F6F6F7] overflow-hidden'>
           <Sidebar />
-          <div className='flex flex-col flex-1 min-w-0 overflow-hidden'>
+          <div className='dashboard-content flex flex-col flex-1 min-w-0 overflow-hidden'>
             <Topbar />
-            <main className='flex-1 overflow-y-auto p-4 lg:p-6'>
+            <main className='dashboard-main flex-1 overflow-y-auto p-4 lg:p-6'>
               {children}
             </main>
           </div>

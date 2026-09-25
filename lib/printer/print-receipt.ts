@@ -14,6 +14,9 @@ import {
   printViaPassPRNT,
   printTestPageViaPassPRNT,
 } from './passprnt-transport'
+import { printReceiptOnLabel, printTestLabel } from './label-print'
+
+export { printReceiptOnLabel } from './label-print'
 
 export class NoPrinterConnectedError extends Error {
   constructor() {
@@ -82,6 +85,12 @@ async function sendToConfiguredPrinter(bytes: Uint8Array): Promise<void> {
 export async function printReceipt(data: ReceiptData): Promise<void> {
   const { connectionType, paperWidth, openDrawerOnPrint } =
     usePrinterStore.getState()
+  // Label printer: HTML sized to the label, printed through the OS dialog
+  // (see label-print.ts). Not ESC/POS, so it's handled before the byte path.
+  if (connectionType === 'label') {
+    await printReceiptOnLabel(data)
+    return
+  }
   // Star PassPRNT (Android) doesn't take raw ESC/POS bytes either — it
   // takes an HTML layout via its own URL scheme, and the printer/paper
   // profile is configured inside the PassPRNT app itself rather than sent
@@ -96,6 +105,10 @@ export async function printReceipt(data: ReceiptData): Promise<void> {
 
 export async function printTestPage(): Promise<void> {
   const { connectionType, paperWidth } = usePrinterStore.getState()
+  if (connectionType === 'label') {
+    await printTestLabel()
+    return
+  }
   // Browser/OS printing doesn't take raw ESC/POS bytes — it prints an HTML
   // page through window.print(), so it's handled separately here rather
   // than in sendToConfiguredPrinter (which only ever sees Uint8Array).

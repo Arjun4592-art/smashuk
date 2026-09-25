@@ -30,6 +30,7 @@ import {
   readyForPickupEmail,
   returnDeclinedEmail,
 } from '@/lib/email-templates'
+import { signOrderTrackToken } from '@/lib/api/order-track-token'
 export async function GET(
   req: NextRequest,
   {
@@ -57,7 +58,7 @@ export async function GET(
     const FIELDS =
       'id,display_id,email,created_at,updated_at,canceled_at,status,currency_code,metadata,payment_status,' +
       '*items,*payment_collections.payments,*shipping_methods,*fulfillments,fulfillment_status,' +
-      'subtotal,total,discount_total,shipping_total,tax_total,' +
+      'subtotal,total,discount_total,shipping_total,gift_card_total,tax_total,' +
       'customer.id,customer.first_name,customer.last_name,customer.phone,' +
       'shipping_address.first_name,shipping_address.last_name,shipping_address.phone,' +
       'shipping_address.address_1,shipping_address.address_2,shipping_address.city,' +
@@ -120,6 +121,19 @@ export async function GET(
       parsed.order.payments = (parsed.order.payment_collections ?? []).flatMap(
         (pc: any) => pc.payments ?? [],
       )
+      // Signed so a reprinted receipt's QR / tracking link works the same
+      // as the one printed at sale time (see lib/api/order-track-token.ts).
+      parsed.order.trackingToken = signOrderTrackToken(parsed.order.id)
+      const rawSplit = parsed.order.metadata?.split_payments
+      if (typeof rawSplit === 'string') {
+        try {
+          const p = JSON.parse(rawSplit)
+          parsed.order.splitPayments =
+            Array.isArray(p) && p.length > 0 ? p : null
+        } catch {
+          parsed.order.splitPayments = null
+        }
+      }
     }
     return NextResponse.json(parsed)
   } catch (err: any) {

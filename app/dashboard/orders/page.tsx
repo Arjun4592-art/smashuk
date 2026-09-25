@@ -6,7 +6,9 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Papa from 'papaparse'
 import { toast } from 'sonner'
 import { useOrders, useAbandonedCheckouts } from '@/hooks/useDashboard'
-import { updateOrderStatus } from '@/lib/api/dashboard'
+import { updateOrderStatus, getOrder } from '@/lib/api/dashboard'
+import { printReceiptOnLabel } from '@/lib/printer/label-print'
+import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
 interface CartLine {
   id: string
   title: string
@@ -223,6 +225,23 @@ function OrdersPageContent() {
   const orders = data?.orders ?? []
   const totalOrderCount = data?.count ?? orders.length
   const [bulkActionLoading, setBulkActionLoading] = useState(false)
+  // Row-level "print on label printer" — order id currently being fetched,
+  // so only that row's icon spins (full order isn't preloaded per row).
+  const [printingRowId, setPrintingRowId] = useState<string | null>(null)
+  const handleRowPrintLabel = async (orderId: string) => {
+    if (printingRowId) return
+    setPrintingRowId(orderId)
+    try {
+      const full = await getOrder(orderId)
+      await printReceiptOnLabel(medusaOrderToReceiptData(full))
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error ? err.message : 'Could not print receipt',
+      )
+    } finally {
+      setPrintingRowId(null)
+    }
+  }
   const [draftCount, setDraftCount] = useState(0)
   const [draftsAvailable, setDraftsAvailable] = useState(true)
   const { data: abandonedData, loading: abandonedLoading } =
@@ -726,6 +745,19 @@ function OrdersPageContent() {
                         </td>
                         <td className='px-4 py-3'>
                           <div className='flex items-center justify-end gap-1'>
+                            <button
+                              type='button'
+                              title='Print receipt (label printer)'
+                              disabled={printingRowId === order.id}
+                              onClick={() => handleRowPrintLabel(order.id)}
+                              className='w-7 h-7 flex items-center justify-center text-[#6D7175] hover:text-[#202223] hover:bg-[#F6F6F7] rounded-lg transition-all disabled:opacity-40 cursor-pointer'
+                            >
+                              {printingRowId === order.id ? (
+                                <span className='block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin' />
+                              ) : (
+                                '🏷️'
+                              )}
+                            </button>
                             <Link
                               href={`/dashboard/orders/${order.id}`}
                               className='w-7 h-7 flex items-center justify-center text-[#6D7175] hover:text-[#202223] hover:bg-[#F6F6F7] rounded-lg no-underline transition-all'

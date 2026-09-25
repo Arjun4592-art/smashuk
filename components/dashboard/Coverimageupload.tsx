@@ -9,11 +9,14 @@ interface Props {
   onChange: (url: string) => void
   /** Text on the empty upload box. Defaults to the blog wording. */
   label?: string
+  /** Crop shape (width / height). Defaults to 16:9 wide covers. */
+  aspect?: number
 }
 export default function CoverImageUpload({
   value,
   onChange,
   label = 'Click to upload cover image',
+  aspect = 16 / 9,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -74,7 +77,7 @@ export default function CoverImageUpload({
           imageSrc={pendingCrop.src}
           fileName={pendingCrop.name}
           fileType={pendingCrop.type}
-          aspect={16 / 9}
+          aspect={aspect}
           onCancel={() => {
             URL.revokeObjectURL(pendingCrop.src)
             setPendingCrop(null)

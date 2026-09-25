@@ -12,6 +12,9 @@ import {
   getShippingLabel,
 } from '@/lib/api/dashboard'
 import ReturnExchangeModal from '@/components/dashboard/ReturnExchangeModal'
+import LabelSizeDialog from '@/components/printing/LabelSizeDialog'
+import { printReceiptOnLabel } from '@/lib/printer/label-print'
+import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
 import OrderTimeline from '@/components/dashboard/OrderTimeline'
 import {
   Badge,
@@ -107,6 +110,7 @@ export default function OrderDetailPage({
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [returnActionLoading, setReturnActionLoading] = useState('')
   const [showDetails, setShowDetails] = useState(false)
+  const [showLabelSize, setShowLabelSize] = useState(false)
 
   const fetchOrder = useCallback(
     async (silent = false) => {
@@ -149,6 +153,17 @@ export default function OrderDetailPage({
       toast.error(err.message ?? 'Failed to fetch shipping label')
     } finally {
       setLabelLoading(false)
+    }
+  }
+
+  // Receipt for this order (new or old) on the label printer. Label size is
+  // the one set in POS → Settings → Printer / "Label size…" below.
+  const handlePrintReceiptLabel = async () => {
+    if (!order) return
+    try {
+      await printReceiptOnLabel(medusaOrderToReceiptData(order))
+    } catch (err: any) {
+      toast.error(err.message ?? 'Could not print receipt')
     }
   }
 
@@ -534,6 +549,14 @@ export default function OrderDetailPage({
             icon={<IconPrinter />}
             items={[
               {
+                label: 'Print receipt (label printer)',
+                onClick: handlePrintReceiptLabel,
+              },
+              {
+                label: 'Label size…',
+                onClick: () => setShowLabelSize(true),
+              },
+              {
                 label: 'Print packing slip',
                 onClick: () =>
                   window.open(
@@ -904,6 +927,10 @@ export default function OrderDetailPage({
           onSubmit={handleProcessReturn}
           onClose={() => setShowReturnModal(false)}
         />
+      )}
+
+      {showLabelSize && (
+        <LabelSizeDialog onClose={() => setShowLabelSize(false)} />
       )}
     </div>
   )

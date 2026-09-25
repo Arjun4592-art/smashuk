@@ -33,6 +33,10 @@ function toPosOrderRecord(o: any) {
       name: i.product_title ?? i.title ?? 'Item',
       brand: i.metadata?.brand ?? '',
       price: i.unit_price ?? 0,
+      variantTitle:
+        i.variant_title && i.variant_title !== 'Default'
+          ? i.variant_title
+          : null,
     },
     quantity: i.quantity ?? 1,
   }))
@@ -58,8 +62,34 @@ function toPosOrderRecord(o: any) {
       : null,
     subtotal: o.subtotal ?? 0,
     discountTotal: o.discount_total ?? 0,
+    shippingTotal: o.shipping_total ?? 0,
+    giftCardTotal: o.gift_card_total ?? 0,
+    giftCardCode: (o.metadata?.gift_card_code as string) || null,
     tax: o.tax_total ?? 0,
     total: o.total ?? 0,
+    // Same signed token createPOSOrder returns for a brand-new sale, so a
+    // reprint's QR / tracking link works exactly like the original receipt.
+    trackingToken: signOrderTrackToken(o.id),
+    splitPayments: (() => {
+      const raw = o.metadata?.split_payments
+      if (typeof raw !== 'string') return null
+      try {
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) && parsed.length > 0 ? parsed : null
+      } catch {
+        return null
+      }
+    })(),
+    shippingAddress:
+      o.metadata?.fulfillment_type !== 'pickup' && o.shipping_address?.address_1
+        ? {
+            name: `${o.shipping_address.first_name ?? ''} ${o.shipping_address.last_name ?? ''}`.trim(),
+            address1: o.shipping_address.address_1,
+            address2: o.shipping_address.address_2 ?? '',
+            city: o.shipping_address.city ?? '',
+            postalCode: o.shipping_address.postal_code ?? '',
+          }
+        : null,
     paymentMethod: o.metadata?.payment_method || 'cash',
     note: o.metadata?.note || '',
     cashier: o.metadata?.cashier || '',
@@ -87,7 +117,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const limit = Math.min(Number(searchParams.get('limit') ?? 150), 300)
   const fields =
-    'id,display_id,email,subtotal,discount_total,tax_total,total,status,' +
+    'id,display_id,email,subtotal,discount_total,shipping_total,gift_card_total,tax_total,total,status,' +
     'fulfillment_status,payment_status,created_at,*items,*customer,' +
     '*shipping_address,+metadata'
   try {
@@ -229,6 +259,7 @@ export async function POST(request: NextRequest) {
       gift_card_code,
       coupon_code,
       manual_discount_amount,
+      split_payments,
     } = body
     const fulfillmentType: 'pickup' | 'ship' =
       fulfillment_type === 'ship' ? 'ship' : 'pickup'
@@ -563,10 +594,19 @@ export async function POST(request: NextRequest) {
       giftCardApplied = true
     }
     if (fulfillmentType === 'ship' && shipping_address) {
+      // Parcel2Go's delivery-address validation requires an email on the
+      // address itself (separate from the cart/order email). The POS UI
+      // never collects one, so fall back to the cart email we already
+      // resolved above (real customer email, or the synthetic
+      // walkin@/pos- address) rather than leaving it blank and failing
+      // fulfillment creation later with "Please enter the email address".
       const addrRes = await storeFetch(`/store/carts/${cartId}`, {
         method: 'POST',
         body: JSON.stringify({
-          shipping_address,
+          shipping_address: {
+            ...shipping_address,
+            email: shipping_address.email || cartEmail,
+          },
         }),
       })
       if (!addrRes.ok) {
@@ -859,6 +899,25 @@ export async function POST(request: NextRequest) {
       ...(giftCardApplied
         ? {
             gift_card_code: String(gift_card_code).toUpperCase(),
+          }
+        : {}),
+      // Cash+card breakdown for a 'split' sale, so a reprint can show the
+      // same lines as the original receipt. JSON-stringified because Medusa
+      // order metadata values are flat strings/numbers/booleans, not arrays.
+      ...(Array.isArray(split_payments) && split_payments.length > 0
+        ? {
+            split_payments: JSON.stringify(
+              split_payments
+                .filter(
+                  (s: any) =>
+                    (s?.method === 'cash' || s?.method === 'card') &&
+                    Number(s?.amount) > 0,
+                )
+                .map((s: any) => ({
+                  method: s.method,
+                  amount: Number(s.amount),
+                })),
+            ),
           }
         : {}),
       ...(fulfillmentType === 'ship' && shipping_address

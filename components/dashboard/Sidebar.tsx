@@ -9,10 +9,19 @@ import { useAuthStore } from '@/store/authStore'
 import { SITE_NAME, SITE_LOGO, SITE_ICON } from '@/lib/constants'
 import { getDisplayOrderStatus } from '@/lib/order-status'
 
-interface NavChild {
+interface NavLeaf {
   label: string
   href: string
 }
+// A child is either a plain link (href) or a small group of links (children),
+// e.g. Marketing → Customize Home Page → Banners / Sliders / Products.
+interface NavChild {
+  label: string
+  href?: string
+  children?: NavLeaf[]
+}
+const childLinks = (c: NavChild): NavLeaf[] =>
+  c.children ?? (c.href ? [{ label: c.label, href: c.href }] : [])
 interface NavItem {
   label: string
   href?: string
@@ -410,16 +419,33 @@ const NAV_ITEMS: NavItem[] = [
     icon: Icons.marketing,
     children: [
       {
+        label: 'Customize Home Page',
+        children: [
+          {
+            label: 'Banners',
+            href: '/dashboard/settings/home-banners',
+          },
+          {
+            label: 'Sliders',
+            href: '/dashboard/settings/hero-slider',
+          },
+          {
+            label: 'Products',
+            href: '/dashboard/settings/home-products',
+          },
+          {
+            label: 'All Sections & Order',
+            href: '/dashboard/settings/home-page',
+          },
+        ],
+      },
+      {
         label: 'Events',
         href: '/dashboard/marketing-events',
       },
       {
         label: 'Promo Banner',
         href: '/dashboard/settings/promo-banner',
-      },
-      {
-        label: 'Home Slider',
-        href: '/dashboard/settings/hero-slider',
       },
       {
         label: 'Settings',
@@ -518,17 +544,65 @@ const SEARCH_INDEX: {
       })
     }
     for (const child of item.children ?? []) {
-      if (seen.has(child.href)) continue
-      seen.add(child.href)
-      items.push({
-        label: child.label,
-        href: child.href,
-        group: item.label,
-      })
+      for (const link of childLinks(child)) {
+        if (seen.has(link.href)) continue
+        seen.add(link.href)
+        items.push({
+          label: link.label,
+          href: link.href,
+          group: child.children ? `${item.label} › ${child.label}` : item.label,
+        })
+      }
     }
   }
   return items
 })()
+function NavSubGroup({
+  child,
+  isActive,
+  onLinkClick,
+}: {
+  child: NavChild
+  isActive: (href: string) => boolean
+  onLinkClick?: () => void
+}) {
+  const links = childLinks(child)
+  const active = links.some((l) => isActive(l.href))
+  // Open while one of its pages is showing; the person can still fold it by hand.
+  const [manual, setManual] = useState<boolean | null>(null)
+  const open = manual ?? active
+  return (
+    <div>
+      <button
+        type='button'
+        onClick={() => setManual(!open)}
+        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[12.5px] text-left border-none cursor-pointer transition-all ${active ? 'text-[#008060] font-semibold bg-[#F2F7F5]' : 'text-[#6D7175] hover:text-[#202223] hover:bg-[#F6F6F7] bg-transparent'}`}
+      >
+        <span className='truncate'>{child.label}</span>
+        <span
+          className='text-[#8C9196] transition-transform duration-200'
+          style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+        >
+          {Icons.chevron}
+        </span>
+      </button>
+      {open && (
+        <div className='ml-2 mt-0.5 mb-1 pl-3 border-l-2 border-[#E1E3E5] space-y-0.5'>
+          {links.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              onClick={onLinkClick}
+              className={`flex items-center px-2.5 py-1.5 rounded-lg text-[12.5px] no-underline transition-all ${isActive(link.href) ? 'text-[#008060] font-semibold bg-[#F2F7F5]' : 'text-[#6D7175] hover:text-[#202223] hover:bg-[#F6F6F7]'}`}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 function NavContent({
   collapsed,
   openMenus,
@@ -603,22 +677,31 @@ function NavContent({
                     className='overflow-hidden transition-all duration-200'
                     style={{
                       maxHeight: isOpen
-                        ? `${item.children!.length * 40}px`
+                        ? `${item.children!.reduce((n, c) => n + 1 + (c.children?.length ?? 0), 0) * 40}px`
                         : '0px',
                       opacity: isOpen ? 1 : 0,
                     }}
                   >
                     <div className='ml-3 mt-0.5 mb-1 pl-3 border-l-2 border-[#E1E3E5] space-y-0.5 pt-0.5'>
-                      {item.children!.map((child) => (
-                        <Link
-                          key={child.href}
-                          href={child.href}
-                          onClick={onLinkClick}
-                          className={`flex items-center px-2.5 py-1.5 rounded-lg text-[12.5px] no-underline transition-all ${isActive(child.href) ? 'text-[#008060] font-semibold bg-[#F2F7F5]' : 'text-[#6D7175] hover:text-[#202223] hover:bg-[#F6F6F7]'}`}
-                        >
-                          {child.label}
-                        </Link>
-                      ))}
+                      {item.children!.map((child) =>
+                        child.children ? (
+                          <NavSubGroup
+                            key={child.label}
+                            child={child}
+                            isActive={isActive}
+                            onLinkClick={onLinkClick}
+                          />
+                        ) : (
+                          <Link
+                            key={child.href}
+                            href={child.href!}
+                            onClick={onLinkClick}
+                            className={`flex items-center px-2.5 py-1.5 rounded-lg text-[12.5px] no-underline transition-all ${isActive(child.href!) ? 'text-[#008060] font-semibold bg-[#F2F7F5]' : 'text-[#6D7175] hover:text-[#202223] hover:bg-[#F6F6F7]'}`}
+                          >
+                            {child.label}
+                          </Link>
+                        ),
+                      )}
                     </div>
                   </div>
                 )}
@@ -855,7 +938,7 @@ export default function Sidebar() {
     const activeParent = NAV_ITEMS.find((item) => {
       if (!item.children) return false
       return item.children.some((c) =>
-        pathname.startsWith(c.href.split('?')[0]),
+        childLinks(c).some((l) => pathname.startsWith(l.href.split('?')[0])),
       )
     })
     setOpenMenus(activeParent ? [activeParent.label] : [])
@@ -871,7 +954,10 @@ export default function Sidebar() {
       : pathname.startsWith(href.split('?')[0])
   const isGroupActive = (item: NavItem): boolean => {
     if (item.href && isActive(item.href)) return true
-    if (item.children) return item.children.some((c) => isActive(c.href))
+    if (item.children)
+      return item.children.some((c) =>
+        childLinks(c).some((l) => isActive(l.href)),
+      )
     return false
   }
   const logoSection = (

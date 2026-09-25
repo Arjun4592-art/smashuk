@@ -5,16 +5,19 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
-  getOrder,
   updateOrderStatus,
   getShippingLabel,
   processOrderReturn,
   approveOrderReturn,
   rejectOrderReturn,
 } from '@/lib/api/dashboard'
+import { fetchPOSOrder } from '@/lib/api/pos'
 import { getDisplayOrderStatus } from '@/lib/order-status'
 import OrderTimeline from '@/components/dashboard/OrderTimeline'
 import ReturnExchangeModal from '@/components/dashboard/ReturnExchangeModal'
+import LabelSizeDialog from '@/components/printing/LabelSizeDialog'
+import { printReceiptOnLabel } from '@/lib/printer/label-print'
+import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
 const ORDER_STATUS_STYLES: Record<string, string> = {
   pending: 'bg-[#FFC453]/20 text-[#916A00]',
   confirmed: 'bg-[#2C6ECB]/10 text-[#2C6ECB]',
@@ -334,6 +337,7 @@ export default function OrderDetailPage({
   const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [labelLoading, setLabelLoading] = useState(false)
+  const [showLabelSize, setShowLabelSize] = useState(false)
   const handlePrintLabel = async () => {
     setLabelLoading(true)
     try {
@@ -359,6 +363,17 @@ export default function OrderDetailPage({
       setLabelLoading(false)
     }
   }
+  // Receipt for this order (new or old) on the label printer.
+  const handlePrintReceiptLabel = async () => {
+    if (!order) return
+    try {
+      await printReceiptOnLabel(medusaOrderToReceiptData(order))
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error ? err.message : 'Could not print receipt',
+      )
+    }
+  }
   const [copied, setCopied] = useState(false)
   const [note, setNote] = useState('')
   const [savingNote, setSavingNote] = useState(false)
@@ -368,7 +383,7 @@ export default function OrderDetailPage({
     async function load() {
       setLoading(true)
       try {
-        const data = await getOrder(id)
+        const data = await fetchPOSOrder(id)
         setOrder(data)
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -379,7 +394,7 @@ export default function OrderDetailPage({
     load()
   }, [id])
   const reloadOrder = async () => {
-    const data = await getOrder(id)
+    const data = await fetchPOSOrder(id)
     setOrder(data)
   }
   const handleAction = async (action: string) => {
@@ -599,6 +614,18 @@ export default function OrderDetailPage({
             className='inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all cursor-pointer border border-[#E1E3E5] text-[#6D7175] bg-white hover:bg-[#F6F6F7]'
           >
             🖨️ Packing Slip
+          </button>
+          <button
+            onClick={handlePrintReceiptLabel}
+            className='inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all cursor-pointer border border-[#E1E3E5] text-[#6D7175] bg-white hover:bg-[#F6F6F7]'
+          >
+            🏷️ Print Receipt (Label)
+          </button>
+          <button
+            onClick={() => setShowLabelSize(true)}
+            className='inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium transition-all cursor-pointer border border-[#E1E3E5] text-[#8C9196] bg-white hover:bg-[#F6F6F7]'
+          >
+            Label size
           </button>
           {!isPickup &&
             order.fulfillment_status &&
@@ -1120,6 +1147,10 @@ export default function OrderDetailPage({
           onSubmit={handleProcessReturn}
           onClose={() => setShowReturnModal(false)}
         />
+      )}
+
+      {showLabelSize && (
+        <LabelSizeDialog onClose={() => setShowLabelSize(false)} />
       )}
     </div>
   )

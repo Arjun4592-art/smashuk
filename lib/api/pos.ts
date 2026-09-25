@@ -79,6 +79,12 @@ export interface CreatePOSOrderPayload {
    * Applied to the real Medusa cart as a one-off order-level discount so the
    * synced order total matches what the customer was actually charged. */
   manual_discount_amount?: number
+  /** Cash+card split breakdown, so a reprinted receipt (dashboard or POS)
+   * can show the same "Cash £x / Card £y" lines as the original. */
+  split_payments?: {
+    method: 'cash' | 'card'
+    amount: number
+  }[]
 }
 function extractPrice(variant: any, productMetadata: any): number {
   const gbpPrice = variant?.prices?.find(
@@ -422,6 +428,7 @@ export interface PosOrderLineItem {
     name: string
     brand: string
     price: number
+    variantTitle?: string | null
   }
   quantity: number
 }
@@ -436,6 +443,9 @@ export interface PosOrderRecord {
   } | null
   subtotal: number
   discountTotal: number
+  shippingTotal: number
+  giftCardTotal: number
+  giftCardCode: string | null
   tax: number
   total: number
   paymentMethod: string
@@ -445,6 +455,35 @@ export interface PosOrderRecord {
   returned: boolean
   isPickup: boolean
   fulfillmentStatus: string
+  // Same signed token a brand-new sale gets back from createPOSOrder — lets
+  // a reprinted receipt's QR / tracking link work like the original.
+  trackingToken: string
+  splitPayments:
+    | {
+        method: 'cash' | 'card'
+        amount: number
+      }[]
+    | null
+  shippingAddress: {
+    name: string
+    address1: string
+    address2: string
+    city: string
+    postalCode: string
+  } | null
+}
+// Full order detail for the POS terminal's order view/receipt page — same
+// data shape as the dashboard's getOrder(), but reachable from a plain POS
+// PIN session (see app/api/pos/orders/[id]/route.ts GET).
+export async function fetchPOSOrder(id: string): Promise<any> {
+  const res = await fetch(`/api/pos/orders/${encodeURIComponent(id)}`, {
+    credentials: 'include',
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(data.error ?? 'Failed to load order')
+  }
+  return data.order
 }
 export async function fetchPOSOrderHistory(
   limit = 150,

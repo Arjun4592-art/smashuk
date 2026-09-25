@@ -39,8 +39,10 @@ import type { CartDisplayItem } from '@/types'
 import { toast } from 'sonner'
 import {
   printReceipt,
+  printReceiptOnLabel,
   NoPrinterConnectedError,
 } from '@/lib/printer/print-receipt'
+import type { ReceiptData } from '@/lib/printer/escpos'
 import { usePrinterStore } from '@/store/printerStore'
 import {
   CURRENCY_SYMBOL,
@@ -131,6 +133,7 @@ export default function BillingPage() {
     addRevenueEntry,
     loadMedusaProducts,
   } = usePOSStore()
+  const printerType = usePrinterStore((s) => s.connectionType)
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 50)
     return () => clearTimeout(t)
@@ -650,6 +653,10 @@ export default function BillingPage() {
           coupon_code: couponCode ?? undefined,
           manual_discount_amount:
             customDiscount > 0 ? customDiscount : undefined,
+          split_payments: result.splits?.map((s) => ({
+            method: s.method,
+            amount: s.amount,
+          })),
         })
         medusaOrderId = orderResult?.order?.id
         trackingToken = orderResult?.trackingToken
@@ -695,88 +702,74 @@ export default function BillingPage() {
     setTrackingToken(undefined)
     setSplitPayments(null)
   }
-  const handlePrintReceipt = useCallback(async () => {
-    const { connectionType } = usePrinterStore.getState()
-    if (connectionType === 'none') {
-      // No hardware printer configured — use the browser's print dialog.
-      await waitForPrintImages()
-      window.print()
-      return
-    }
+  // Everything a printer needs for the receipt currently on screen. Shared by
+  // the normal print button (whatever printer is set up) and the explicit
+  // "Print on label printer" button.
+  const buildReceiptData = useCallback((): ReceiptData => {
     const now = new Date()
     const rounding = paymentMethod === 'cash' ? cashRounding(total) : 0
-    try {
-      await printReceipt({
-        storeName: STORE_DISPLAY_NAME,
-        addressLine1: STORE_ADDRESS_LINE1,
-        addressLine2: STORE_ADDRESS_LINE2,
-        phone: CONTACT_PHONE,
-        orderId,
-        dateStr: now.toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        }),
-        timeStr: now.toLocaleTimeString('en-GB', {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        cashier: user?.name || 'Staff',
-        items: cartDisplayItems.map((i) => ({
-          name: i.name,
-          variantTitle: i.variantTitle,
-          quantity: i.quantity,
-          lineTotal: i.price * i.quantity - (i.discount ?? 0),
-        })),
-        subtotal,
-        discountAmount: discountTotal,
-        discountLabel: couponCode || 'Discount',
-        shippingAmount: shippingCost,
-        giftCardAmount: giftCardAmount ?? 0,
-        giftCardMasked: giftCardCode
-          ? `**** **** ${giftCardCode.slice(-4)}`
-          : undefined,
-        tax,
-        vatPct: Math.round(VAT_RATE * 100),
-        total,
-        rounding,
-        payMethodLabel: PAY_LABELS[paymentMethod] || paymentMethod,
-        change: paymentMethod === 'cash' ? rounding : 0,
-        splitPayments: splitPayments?.map((s) => ({
-          label: PAY_LABELS[s.method] || s.method,
-          amount: s.amount,
-        })),
-        shipTo:
-          fulfillmentType === 'ship' && shippingAddress?.address_1
-            ? {
-                name: `${shippingAddress.first_name} ${shippingAddress.last_name}`.trim(),
-                address1: shippingAddress.address_1,
-                cityPostcode:
-                  `${shippingAddress.city} ${shippingAddress.postal_code}`.trim(),
-              }
-            : null,
-        orderNote,
-        currencySymbol: CURRENCY_SYMBOL,
-        logoUrl: SITE_LOGO,
-        trackingUrl: `${SITE_URL}/orders/${encodeURIComponent(orderId)}`,
-      })
-    } catch (err: unknown) {
-      if (err instanceof NoPrinterConnectedError) {
-        await waitForPrintImages()
-        window.print()
-        return
-      }
-      toast.error('Could not print to receipt printer', {
-        description:
-          err instanceof Error
-            ? err.message
-            : 'Unknown error — falling back to browser print.',
-      })
-      await waitForPrintImages()
-      window.print()
+    return {
+      storeName: STORE_DISPLAY_NAME,
+      addressLine1: STORE_ADDRESS_LINE1,
+      addressLine2: STORE_ADDRESS_LINE2,
+      phone: CONTACT_PHONE,
+      orderId,
+      dateStr: now.toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }),
+      timeStr: now.toLocaleTimeString('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      cashier: user?.name || 'Staff',
+      items: cartDisplayItems.map((i) => ({
+        name: i.name,
+        variantTitle: i.variantTitle,
+        quantity: i.quantity,
+        lineTotal: i.price * i.quantity - (i.discount ?? 0),
+      })),
+      subtotal,
+      discountAmount: discountTotal,
+      discountLabel: couponCode || 'Discount',
+      shippingAmount: shippingCost,
+      giftCardAmount: giftCardAmount ?? 0,
+      giftCardMasked: giftCardCode
+        ? `**** **** ${giftCardCode.slice(-4)}`
+        : undefined,
+      tax,
+      vatPct: Math.round(VAT_RATE * 100),
+      total,
+      rounding,
+      payMethodLabel: PAY_LABELS[paymentMethod] || paymentMethod,
+      change: paymentMethod === 'cash' ? rounding : 0,
+      splitPayments: splitPayments?.map((s) => ({
+        label: PAY_LABELS[s.method] || s.method,
+        amount: s.amount,
+      })),
+      shipTo:
+        fulfillmentType === 'ship' && shippingAddress?.address_1
+          ? {
+              name: `${shippingAddress.first_name} ${shippingAddress.last_name}`.trim(),
+              address1: shippingAddress.address_1,
+              cityPostcode:
+                `${shippingAddress.city} ${shippingAddress.postal_code}`.trim(),
+            }
+          : null,
+      orderNote,
+      currencySymbol: CURRENCY_SYMBOL,
+      logoUrl: SITE_LOGO,
+      // Same signed public tracking link the on-screen receipt's QR uses.
+      trackingUrl:
+        medusaOrderId && trackingToken
+          ? `${SITE_URL}/track/${encodeURIComponent(medusaOrderId)}?t=${encodeURIComponent(trackingToken)}`
+          : `${SITE_URL}/orders/${encodeURIComponent(orderId)}`,
     }
   }, [
     orderId,
+    medusaOrderId,
+    trackingToken,
     user,
     cartDisplayItems,
     subtotal,
@@ -789,10 +782,57 @@ export default function BillingPage() {
     paymentMethod,
     splitPayments,
     fulfillmentType,
-    shippingSpeed,
     shippingAddress,
     orderNote,
+    shippingCost,
   ])
+  const handlePrintReceipt = useCallback(async () => {
+    const { connectionType } = usePrinterStore.getState()
+    if (connectionType === 'none') {
+      // No hardware printer configured — use the browser's print dialog.
+      await waitForPrintImages()
+      window.print()
+      return
+    }
+    try {
+      await printReceipt(buildReceiptData())
+    } catch (err: unknown) {
+      if (err instanceof NoPrinterConnectedError) {
+        await waitForPrintImages()
+        window.print()
+        return
+      }
+      toast.error(
+        connectionType === 'label'
+          ? 'Could not print on label printer'
+          : 'Could not print to receipt printer',
+        {
+          description:
+            err instanceof Error
+              ? err.message
+              : connectionType === 'label'
+                ? 'Unknown error'
+                : 'Unknown error — falling back to browser print.',
+        },
+      )
+      // A label printer failing must not spit a second copy out of the
+      // regular 80mm print dialog.
+      if (connectionType === 'label') return
+      await waitForPrintImages()
+      window.print()
+    }
+  }, [buildReceiptData])
+  // Explicit label-printer button on the receipt screen, independent of
+  // which printer is configured for normal receipts.
+  const handlePrintLabelReceipt = useCallback(async () => {
+    try {
+      await printReceiptOnLabel(buildReceiptData())
+    } catch (err: unknown) {
+      toast.error('Could not print on label printer', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    }
+  }, [buildReceiptData])
   useEffect(() => {
     if (screen === 'receipt' && autoPrintReceipt && orderId) {
       handlePrintReceipt()
@@ -830,6 +870,9 @@ export default function BillingPage() {
           orderNote={orderNote}
           onNewSale={handleNewSale}
           onPrint={handlePrintReceipt}
+          onPrintLabel={
+            printerType !== 'label' ? handlePrintLabelReceipt : undefined
+          }
           onEmail={() => {
             if (!medusaOrderId) {
               toast.error('Could not email receipt', {

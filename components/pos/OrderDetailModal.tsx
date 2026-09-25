@@ -16,8 +16,10 @@ import {
 import { usePrinterStore } from '@/store/printerStore'
 import {
   printReceipt,
+  printReceiptOnLabel,
   NoPrinterConnectedError,
 } from '@/lib/printer/print-receipt'
+import type { ReceiptData } from '@/lib/printer/escpos'
 import { ReceiptBody } from './Receipt'
 import EmailReceiptModal from './EmailReceiptModal'
 import { waitForPrintImages } from '@/lib/utils'
@@ -61,6 +63,7 @@ export interface OrderDetailData {
     brand?: string
     price: number
     quantity: number
+    variantTitle?: string | null
   }[]
   customer: {
     name: string
@@ -69,6 +72,9 @@ export interface OrderDetailData {
   } | null
   subtotal: number
   discountTotal: number
+  shippingTotal?: number
+  giftCardTotal?: number
+  giftCardCode?: string | null
   tax: number
   total: number
   paymentMethod: string
@@ -84,6 +90,16 @@ export interface OrderDetailData {
   returned: boolean
   isPickup?: boolean
   fulfillmentStatus?: string
+  // Signed tracking token (see lib/api/order-track-token.ts) so a reprinted
+  // receipt's QR works the same as the one printed at sale time.
+  trackingToken?: string
+  shippingAddress?: {
+    name: string
+    address1: string
+    address2: string
+    city: string
+    postalCode: string
+  } | null
 }
 interface Props {
   order: OrderDetailData
@@ -101,6 +117,7 @@ export default function OrderDetailModal({
   const [labelLoading, setLabelLoading] = useState(false)
   const [fulfillError, setFulfillError] = useState('')
   const [showEmailReceipt, setShowEmailReceipt] = useState(false)
+  const printerType = usePrinterStore((s) => s.connectionType)
   const handleFulfill = async () => {
     setFulfilling(true)
     setFulfillError('')
@@ -214,6 +231,61 @@ export default function OrderDetailModal({
   const adjustedTotal = order.total + rounding
   const change = order.paymentMethod === 'cash' ? rounding : 0
   const canPrintReceipt = !!(order.medusaOrderId || order.id)
+  const buildReceiptData = (): ReceiptData => ({
+    storeName: STORE_DISPLAY_NAME,
+    addressLine1: STORE_ADDRESS_LINE1,
+    addressLine2: STORE_ADDRESS_LINE2,
+    phone: CONTACT_PHONE,
+    // Friendly number (e.g. SR-123) — not the long internal Medusa id.
+    orderId: order.id,
+    dateStr,
+    timeStr,
+    cashier: order.cashier,
+    items: order.items.map((i) => ({
+      name: i.name,
+      variantTitle: i.variantTitle ?? null,
+      quantity: i.quantity,
+      lineTotal: i.price * i.quantity,
+    })),
+    subtotal: order.subtotal,
+    discountAmount: order.discountTotal,
+    discountLabel: 'Discount',
+    shippingAmount: order.shippingTotal ?? 0,
+    giftCardAmount: order.giftCardTotal ?? 0,
+    giftCardMasked: order.giftCardCode
+      ? `Code: ${order.giftCardCode}`
+      : undefined,
+    tax: order.tax,
+    vatPct: Math.round(VAT_RATE * 100),
+    total: order.total,
+    rounding: 0,
+    payMethodLabel: PAY_LABELS[order.paymentMethod] || order.paymentMethod,
+    change: 0,
+    splitPayments: order.splitPayments?.map((s) => ({
+      label: PAY_LABELS[s.method] || s.method,
+      amount: s.amount,
+    })),
+    shipTo: order.shippingAddress
+      ? {
+          name: order.shippingAddress.name,
+          address1: [
+            order.shippingAddress.address1,
+            order.shippingAddress.address2,
+          ]
+            .filter(Boolean)
+            .join(', '),
+          cityPostcode:
+            `${order.shippingAddress.city} ${order.shippingAddress.postalCode}`.trim(),
+        }
+      : null,
+    orderNote: order.note,
+    currencySymbol: CURRENCY_SYMBOL,
+    logoUrl: SITE_LOGO,
+    trackingUrl:
+      order.medusaOrderId && order.trackingToken
+        ? `${SITE_URL}/track/${encodeURIComponent(order.medusaOrderId)}?t=${encodeURIComponent(order.trackingToken)}`
+        : `${SITE_URL}/orders/${encodeURIComponent(order.medusaOrderId ?? order.id)}`,
+  })
   const handlePrintReceipt = async () => {
     const { connectionType } = usePrinterStore.getState()
     if (connectionType === 'none') {
@@ -223,53 +295,42 @@ export default function OrderDetailModal({
       return
     }
     try {
-      await printReceipt({
-        storeName: STORE_DISPLAY_NAME,
-        addressLine1: STORE_ADDRESS_LINE1,
-        addressLine2: STORE_ADDRESS_LINE2,
-        phone: CONTACT_PHONE,
-        orderId: order.medusaOrderId ?? order.id,
-        dateStr,
-        timeStr,
-        cashier: order.cashier,
-        items: order.items.map((i) => ({
-          name: i.name,
-          quantity: i.quantity,
-          lineTotal: i.price * i.quantity,
-        })),
-        subtotal: order.subtotal,
-        discountAmount: order.discountTotal,
-        discountLabel: 'Discount',
-        giftCardAmount: 0,
-        tax: order.tax,
-        vatPct: Math.round(VAT_RATE * 100),
-        total: order.total,
-        rounding: 0,
-        payMethodLabel: PAY_LABELS[order.paymentMethod] || order.paymentMethod,
-        change: 0,
-        splitPayments: order.splitPayments?.map((s) => ({
-          label: PAY_LABELS[s.method] || s.method,
-          amount: s.amount,
-        })),
-        orderNote: order.note,
-        currencySymbol: CURRENCY_SYMBOL,
-        logoUrl: SITE_LOGO,
-        trackingUrl: `${SITE_URL}/orders/${encodeURIComponent(order.medusaOrderId ?? order.id)}`,
-      })
+      await printReceipt(buildReceiptData())
     } catch (err: unknown) {
       if (err instanceof NoPrinterConnectedError) {
         await waitForPrintImages()
         window.print()
         return
       }
-      toast.error('Could not print to receipt printer', {
-        description:
-          err instanceof Error
-            ? err.message
-            : 'Unknown error — falling back to browser print.',
-      })
+      toast.error(
+        connectionType === 'label'
+          ? 'Could not print on label printer'
+          : 'Could not print to receipt printer',
+        {
+          description:
+            err instanceof Error
+              ? err.message
+              : connectionType === 'label'
+                ? 'Unknown error'
+                : 'Unknown error — falling back to browser print.',
+        },
+      )
+      // A label printer failing must not spit a second copy out of the
+      // regular 80mm print dialog.
+      if (connectionType === 'label') return
       await waitForPrintImages()
       window.print()
+    }
+  }
+  // Reprint this (old) order on the label printer, whatever printer is set
+  // up for normal receipts.
+  const handlePrintLabelReceipt = async () => {
+    try {
+      await printReceiptOnLabel(buildReceiptData())
+    } catch (err: unknown) {
+      toast.error('Could not print on label printer', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
     }
   }
   const isShippedStatus = ['shipped', 'partially_shipped'].includes(
@@ -328,7 +389,10 @@ export default function OrderDetailModal({
              print pagination and forces a full Letter/A4 page even though
              @page above says 80mm. Free it up during print. */
           .pos-terminal-shell,
-          .pos-terminal-main {
+          .pos-terminal-main,
+          .dashboard-shell,
+          .dashboard-content,
+          .dashboard-main {
             height: auto !important;
             min-height: 0 !important;
             overflow: visible !important;
@@ -374,9 +438,18 @@ export default function OrderDetailModal({
                   icon={<IconPrinter />}
                   items={[
                     {
-                      label: 'Print receipt',
+                      label:
+                        printerType === 'label'
+                          ? 'Print receipt (label printer)'
+                          : 'Print receipt',
                       disabled: !canPrintReceipt,
                       onClick: handlePrintReceipt,
+                    },
+                    {
+                      label: 'Print on label printer',
+                      hidden: printerType === 'label',
+                      disabled: !canPrintReceipt,
+                      onClick: handlePrintLabelReceipt,
                     },
                     {
                       label: 'Email receipt',

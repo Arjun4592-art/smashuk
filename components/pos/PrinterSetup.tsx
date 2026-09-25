@@ -31,6 +31,8 @@ import {
   isAndroidDevice,
   printTestPageViaPassPRNT,
 } from '@/lib/printer/passprnt-transport'
+import { printTestLabel, describeLabelSize } from '@/lib/printer/label-print'
+import LabelSizePicker from '@/components/printing/LabelSizePicker'
 
 interface PrinterOption {
   type: PrinterConnectionType
@@ -48,6 +50,12 @@ const ALL_OPTIONS: PrinterOption[] = [
     icon: '🖨️',
     desc: 'Uses your device’s normal print dialog. Works on every OS — good for Mac, or any AirPrint/OS-paired printer. On iPad, a Star TSP100 over classic Bluetooth won’t show up here — use Star PassPRNT instead.',
     recommended: true,
+  },
+  {
+    type: 'label',
+    label: 'Label printer',
+    icon: '🏷️',
+    desc: 'Zebra, TSC, Xprinter, Brother, Munbyn… any label printer installed on this computer. Receipts are printed sized to your label through the system print dialog — set the label size below.',
   },
   {
     type: 'star-passprnt',
@@ -155,6 +163,8 @@ export default function PrinterSetup() {
     serialHandle,
     lanAgentHandle,
     openDrawerOnPrint,
+    labelWidthMm,
+    labelHeightMm,
     setConnectionType,
     setPaperWidth,
     setUSBHandle,
@@ -293,6 +303,33 @@ export default function PrinterSetup() {
     }
   }
 
+  // Same idea as connectBrowser, but the test page is a label sized to the
+  // label size chosen below. Only a confirmed real printout counts.
+  const connectLabel = async () => {
+    setBusy(true)
+    try {
+      await printTestLabel()
+      const confirmed = window.confirm(
+        'Did the test label print correctly on your label printer?\n\nClick OK only if it actually printed and nothing was cut off. Click Cancel to try again (check the label size below).',
+      )
+      if (!confirmed) {
+        toast.error('Not connected', {
+          description:
+            'Pick your label printer in the print dialog and make sure the paper size matches the label size, then try again.',
+        })
+        return
+      }
+      setConnectionType('label')
+      toast.success('Label printer connected')
+    } catch (err: unknown) {
+      toast.error('Could not open the print dialog', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // Fires a real test print through PassPRNT. PassPRNT's own success/
   // failure result comes back via consumePassPrntCallback() after the
   // 'back' URL reloads this page (see POSTerminalLayout) — so there's
@@ -396,13 +433,15 @@ export default function PrinterSetup() {
           ? `${networkHandle?.host}:${networkHandle?.port}`
           : connectionType === 'browser'
             ? 'System print dialog'
-            : connectionType === 'serial'
-              ? serialHandle?.label || 'Paired serial printer'
-              : connectionType === 'lan-agent'
-                ? `Bridge @ ${lanAgentHandle?.host}:${lanAgentHandle?.port}`
-                : connectionType === 'star-passprnt'
-                  ? 'Star PassPRNT app'
-                  : null
+            : connectionType === 'label'
+              ? 'Label printer (system print dialog)'
+              : connectionType === 'serial'
+                ? serialHandle?.label || 'Paired serial printer'
+                : connectionType === 'lan-agent'
+                  ? `Bridge @ ${lanAgentHandle?.host}:${lanAgentHandle?.port}`
+                  : connectionType === 'star-passprnt'
+                    ? 'Star PassPRNT app'
+                    : null
 
   return (
     <div className='rounded-xl overflow-hidden bg-white border border-gray-200'>
@@ -423,7 +462,13 @@ export default function PrinterSetup() {
                 {connectedLabel}
               </p>
               <p className='text-xs text-gray-500 mt-0.5 capitalize'>
-                {connectionType} · {paperWidth}
+                {connectionType} ·{' '}
+                {connectionType === 'label'
+                  ? describeLabelSize({
+                      widthMm: labelWidthMm,
+                      heightMm: labelHeightMm,
+                    })
+                  : paperWidth}
                 {connectionType === 'usb' && usbOk === false && (
                   <span className='text-red-600 font-medium'>
                     {' '}
@@ -457,11 +502,13 @@ export default function PrinterSetup() {
                           ? connectSerial()
                           : opt.type === 'browser'
                             ? connectBrowser()
-                            : opt.type === 'star-passprnt'
-                              ? connectPassPRNT()
-                              : opt.type === 'lan-agent'
-                                ? undefined // handled by the form below
-                                : setConnectionType('network')
+                            : opt.type === 'label'
+                              ? connectLabel()
+                              : opt.type === 'star-passprnt'
+                                ? connectPassPRNT()
+                                : opt.type === 'lan-agent'
+                                  ? undefined // handled by the form below
+                                  : setConnectionType('network')
                   }
                   className='flex flex-col items-start text-left px-4 py-3 rounded-lg border border-gray-200 hover:border-[#008060] hover:bg-[#F2F7F5] transition-colors disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:bg-transparent'
                 >
@@ -566,9 +613,22 @@ export default function PrinterSetup() {
           </div>
         )}
 
+        <div className='pt-2 border-t border-gray-100 space-y-2'>
+          <div>
+            <p className='text-sm font-medium text-gray-800'>Label size</p>
+            <p className='text-xs text-gray-500 mt-0.5'>
+              Used when printing on a label printer (also from the dashboard)
+            </p>
+          </div>
+          <LabelSizePicker />
+        </div>
+
         <div className='flex items-center justify-between pt-2 border-t border-gray-100'>
           <div>
             <p className='text-sm font-medium text-gray-800'>Paper width</p>
+            <p className='text-xs text-gray-500 mt-0.5'>
+              For receipt (roll) printers, not label printers
+            </p>
           </div>
           <div className='flex rounded-lg border border-gray-200 overflow-hidden'>
             {(['58mm', '80mm'] as const).map((w) => (

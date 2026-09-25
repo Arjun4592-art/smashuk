@@ -20,7 +20,14 @@ import {
   Pie,
   Cell,
 } from 'recharts'
-import { getAnalytics } from '@/lib/api/dashboard'
+import {
+  getAnalytics,
+  getProfitReport,
+  getCategories,
+  getCustomers,
+  getInventory,
+  type ProfitReport,
+} from '@/lib/api/dashboard'
 import { useAuthStore } from '@/store/authStore'
 const Icons = {
   revenue: (
@@ -449,6 +456,7 @@ function SalesPageContent() {
   const [reportHistory, setReportHistory] = useState<ReportRecord[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [clearingHistory, setClearingHistory] = useState(false)
+  const [exportingLabel, setExportingLabel] = useState<string | null>(null)
   const [liveData, setLiveData] = useState<{
     connected: boolean
     activeVisitors?: number
@@ -539,6 +547,96 @@ function SalesPageContent() {
   useEffect(() => {
     if (view === 'reports') fetchHistory()
   }, [view, fetchHistory])
+  // --- Profit / gross-margin report (sales by channel, cost of inventory,
+  // gross profit — filterable by category & product) ---
+  const [profitReport, setProfitReport] = useState<ProfitReport | null>(null)
+  const [profitLoading, setProfitLoading] = useState(false)
+  const [profitError, setProfitError] = useState<string | null>(null)
+  const [profitChannel, setProfitChannel] = useState<'all' | 'website' | 'pos'>(
+    'all',
+  )
+  const [profitCategory, setProfitCategory] = useState('')
+  const [profitProductId, setProfitProductId] = useState('')
+  const [categoryOptions, setCategoryOptions] = useState<
+    {
+      id: string
+      name: string
+    }[]
+  >([])
+  useEffect(() => {
+    if (view !== 'reports') return
+    let cancelled = false
+    ;(async () => {
+      setProfitLoading(true)
+      setProfitError(null)
+      try {
+        const [report, cats] = await Promise.all([
+          getProfitReport({ range: dateRange }),
+          categoryOptions.length ? Promise.resolve(null) : getCategories(),
+        ])
+        if (cancelled) return
+        setProfitReport(report)
+        if (cats) {
+          setCategoryOptions(
+            cats.categories.map((c: any) => ({ id: c.id, name: c.name })),
+          )
+        }
+      } catch (err: any) {
+        if (!cancelled) setProfitError(err.message)
+      } finally {
+        if (!cancelled) setProfitLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, dateRange])
+  const profitProducts = profitReport?.products ?? []
+  // Category filter matches by category id -> name (products carry the name only).
+  const profitCategoryName = profitCategory
+    ? (categoryOptions.find((c) => c.id === profitCategory)?.name ?? '')
+    : ''
+  const filteredProfitProducts = profitProducts
+    .filter((p) => !profitCategoryName || p.category === profitCategoryName)
+    .filter((p) => !profitProductId || p.productId === profitProductId)
+    .map((p) => {
+      const source =
+        profitChannel === 'website'
+          ? p.website
+          : profitChannel === 'pos'
+            ? p.pos
+            : {
+                revenue: p.revenue,
+                cost: p.cost,
+                grossProfit: p.grossProfit,
+              }
+      return {
+        ...p,
+        displayRevenue: source.revenue,
+        displayCost: source.cost,
+        displayGrossProfit: source.grossProfit,
+        displayMargin:
+          source.revenue > 0
+            ? Math.round((source.grossProfit / source.revenue) * 1000) / 10
+            : 0,
+      }
+    })
+    .sort((a, b) => b.displayGrossProfit - a.displayGrossProfit)
+  const profitTotals = filteredProfitProducts.reduce(
+    (acc, p) => ({
+      revenue: acc.revenue + p.displayRevenue,
+      cost: acc.cost + p.displayCost,
+      grossProfit: acc.grossProfit + p.displayGrossProfit,
+      unitsSold: acc.unitsSold + p.unitsSold,
+    }),
+    { revenue: 0, cost: 0, grossProfit: 0, unitsSold: 0 },
+  )
+  const profitTotalMargin =
+    profitTotals.revenue > 0
+      ? Math.round((profitTotals.grossProfit / profitTotals.revenue) * 1000) /
+        10
+      : 0
   async function recordDownload(
     name: string,
     type: string,
@@ -1286,6 +1384,287 @@ function SalesPageContent() {
                 {Icons.report} Generate Report
               </button>
             </div>
+
+            {}
+            <div className='border border-[#E1E3E5] rounded-xl overflow-hidden bg-white'>
+              <div className='flex items-center justify-between px-5 py-3 bg-[#F6F6F7] border-b border-[#E1E3E5] flex-wrap gap-2'>
+                <div>
+                  <p className='text-[12px] font-semibold text-[#6D7175] uppercase tracking-wide'>
+                    Profit & Gross Margin
+                  </p>
+                  <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
+                    Sales by channel, cost of inventory & gross profit — filter
+                    by category or product
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (filteredProfitProducts.length === 0) {
+                      toast.error('Nothing to export yet')
+                      return
+                    }
+                    const rows = filteredProfitProducts.map((p) => ({
+                      Product: p.name,
+                      SKU: p.sku,
+                      Category: p.category,
+                      'Units Sold': p.unitsSold,
+                      Revenue: p.displayRevenue,
+                      'Cost of Inventory': p.displayCost,
+                      'Gross Profit': p.displayGrossProfit,
+                      'Margin %': p.displayMargin,
+                    }))
+                    rows.push({
+                      Product: 'TOTAL',
+                      SKU: '',
+                      Category: '',
+                      'Units Sold': profitTotals.unitsSold,
+                      Revenue: Math.round(profitTotals.revenue * 100) / 100,
+                      'Cost of Inventory':
+                        Math.round(profitTotals.cost * 100) / 100,
+                      'Gross Profit':
+                        Math.round(profitTotals.grossProfit * 100) / 100,
+                      'Margin %': profitTotalMargin,
+                    })
+                    const fileName = `gross-profit-report-${profitChannel}-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`
+                    const csv = Papa.unparse(rows)
+                    const blob = new Blob([csv], {
+                      type: 'text/csv;charset=utf-8;',
+                    })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = fileName
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                    toast.success('Gross profit report exported')
+                    await recordDownload(
+                      'Gross Profit Report',
+                      'profit-report',
+                      rows.length,
+                      fileName,
+                    )
+                  }}
+                  className='flex items-center gap-1.5 px-3.5 py-1.5 bg-white hover:bg-[#F6F6F7] text-[#202223] text-[12.5px] font-medium rounded-lg border border-[#E1E3E5] cursor-pointer transition-colors'
+                >
+                  {Icons.download} Export CSV
+                </button>
+              </div>
+
+              {}
+              <div className='flex items-center gap-3 px-5 py-3 border-b border-[#E1E3E5] flex-wrap'>
+                <select
+                  value={profitChannel}
+                  onChange={(e) =>
+                    setProfitChannel(
+                      e.target.value as 'all' | 'website' | 'pos',
+                    )
+                  }
+                  className='px-3 py-1.5 text-[12.5px] border border-[#E1E3E5] rounded-lg bg-white text-[#202223] cursor-pointer'
+                >
+                  <option value='all'>All channels</option>
+                  <option value='website'>Website only</option>
+                  <option value='pos'>POS only</option>
+                </select>
+                <select
+                  value={profitCategory}
+                  onChange={(e) => setProfitCategory(e.target.value)}
+                  className='px-3 py-1.5 text-[12.5px] border border-[#E1E3E5] rounded-lg bg-white text-[#202223] cursor-pointer'
+                >
+                  <option value=''>All categories</option>
+                  {categoryOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={profitProductId}
+                  onChange={(e) => setProfitProductId(e.target.value)}
+                  className='px-3 py-1.5 text-[12.5px] border border-[#E1E3E5] rounded-lg bg-white text-[#202223] cursor-pointer max-w-[220px]'
+                >
+                  <option value=''>All products</option>
+                  {profitProducts.map((p) => (
+                    <option key={p.productId} value={p.productId}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                {(profitCategory ||
+                  profitProductId ||
+                  profitChannel !== 'all') && (
+                  <button
+                    onClick={() => {
+                      setProfitChannel('all')
+                      setProfitCategory('')
+                      setProfitProductId('')
+                    }}
+                    className='text-[12px] text-[#2C6ECB] hover:underline bg-transparent border-none cursor-pointer'
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+
+              {profitLoading ? (
+                <div className='p-5 space-y-2'>
+                  {[...Array(4)].map((_, i) => (
+                    <div
+                      key={i}
+                      className='h-8 bg-[#F1F1F1] rounded-lg animate-pulse'
+                    />
+                  ))}
+                </div>
+              ) : profitError ? (
+                <p className='text-[13px] text-[#D82C0D] p-5'>{profitError}</p>
+              ) : (
+                <>
+                  {}
+                  <div className='grid grid-cols-2 lg:grid-cols-4 gap-px bg-[#E1E3E5]'>
+                    {[
+                      {
+                        label: 'Revenue',
+                        value: profitTotals.revenue,
+                      },
+                      {
+                        label: 'Cost of Inventory',
+                        value: profitTotals.cost,
+                      },
+                      {
+                        label: 'Gross Profit',
+                        value: profitTotals.grossProfit,
+                      },
+                      {
+                        label: 'Gross Margin',
+                        value: profitTotalMargin,
+                        isPct: true,
+                      },
+                    ].map((s) => (
+                      <div key={s.label} className='bg-white px-5 py-4'>
+                        <p className='text-[11.5px] text-[#6D7175] mb-1'>
+                          {s.label}
+                        </p>
+                        <p className='text-[18px] font-semibold text-[#202223] font-sora'>
+                          {s.isPct
+                            ? `${s.value}%`
+                            : `£${s.value.toLocaleString('en-GB', {
+                                maximumFractionDigits: 2,
+                              })}`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {}
+                  <div className='overflow-x-auto'>
+                    <table className='w-full text-[12.5px]'>
+                      <thead>
+                        <tr className='bg-[#FAFAFA] border-b border-[#E1E3E5]'>
+                          <th className='text-left font-medium text-[#6D7175] px-5 py-2.5'>
+                            Product
+                          </th>
+                          <th className='text-left font-medium text-[#6D7175] px-3 py-2.5'>
+                            SKU
+                          </th>
+                          <th className='text-left font-medium text-[#6D7175] px-3 py-2.5'>
+                            Category
+                          </th>
+                          <th className='text-right font-medium text-[#6D7175] px-3 py-2.5'>
+                            Units
+                          </th>
+                          <th className='text-right font-medium text-[#6D7175] px-3 py-2.5'>
+                            Revenue
+                          </th>
+                          <th className='text-right font-medium text-[#6D7175] px-3 py-2.5'>
+                            Cost
+                          </th>
+                          <th className='text-right font-medium text-[#6D7175] px-3 py-2.5'>
+                            Gross Profit
+                          </th>
+                          <th className='text-right font-medium text-[#6D7175] px-5 py-2.5'>
+                            Margin
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className='divide-y divide-[#F1F1F1]'>
+                        {filteredProfitProducts.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={8}
+                              className='text-center text-[#8C9196] px-5 py-8'
+                            >
+                              No sales in this range for the selected filters
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredProfitProducts.map((p) => (
+                            <tr
+                              key={p.productId}
+                              className='hover:bg-[#FAFAFA]'
+                            >
+                              <td className='px-5 py-2.5 font-medium text-[#202223]'>
+                                {p.name}
+                              </td>
+                              <td className='px-3 py-2.5 text-[#6D7175] font-mono text-[11.5px]'>
+                                {p.sku || '—'}
+                              </td>
+                              <td className='px-3 py-2.5 text-[#6D7175]'>
+                                {p.category}
+                              </td>
+                              <td className='px-3 py-2.5 text-right text-[#202223]'>
+                                {p.unitsSold}
+                              </td>
+                              <td className='px-3 py-2.5 text-right text-[#202223]'>
+                                £{p.displayRevenue.toLocaleString('en-GB')}
+                              </td>
+                              <td className='px-3 py-2.5 text-right text-[#202223]'>
+                                £{p.displayCost.toLocaleString('en-GB')}
+                              </td>
+                              <td className='px-3 py-2.5 text-right font-medium text-[#008060]'>
+                                £{p.displayGrossProfit.toLocaleString('en-GB')}
+                              </td>
+                              <td className='px-5 py-2.5 text-right text-[#6D7175]'>
+                                {p.displayMargin}%
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                      {filteredProfitProducts.length > 0 && (
+                        <tfoot>
+                          <tr className='bg-[#FAFAFA] border-t-2 border-[#E1E3E5] font-semibold'>
+                            <td
+                              className='px-5 py-3 text-[#202223]'
+                              colSpan={3}
+                            >
+                              Total (collective)
+                            </td>
+                            <td className='px-3 py-3 text-right text-[#202223]'>
+                              {profitTotals.unitsSold}
+                            </td>
+                            <td className='px-3 py-3 text-right text-[#202223]'>
+                              £{profitTotals.revenue.toLocaleString('en-GB')}
+                            </td>
+                            <td className='px-3 py-3 text-right text-[#202223]'>
+                              £{profitTotals.cost.toLocaleString('en-GB')}
+                            </td>
+                            <td className='px-3 py-3 text-right text-[#008060]'>
+                              £
+                              {profitTotals.grossProfit.toLocaleString('en-GB')}
+                            </td>
+                            <td className='px-5 py-3 text-right text-[#6D7175]'>
+                              {profitTotalMargin}%
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+
             <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
               {[
                 {
@@ -1320,50 +1699,83 @@ function SalesPageContent() {
                   icon: Icons.customers,
                   color: 'bg-purple-100 text-purple-700',
                   desc: 'Acquisition & retention',
-                  rows: null,
+                  rows: async () => {
+                    const { customers } = await getCustomers({ limit: 500 })
+                    return customers.map((c: (typeof customers)[number]) => ({
+                      Customer: c.name,
+                      Email: c.email,
+                      Phone: c.phone,
+                      City: c.city,
+                      State: c.state,
+                      'Total Orders': c.totalOrders,
+                      'Total Spent': c.totalSpent,
+                      'Joined On': c.joinedAt,
+                      'Last Order': c.lastOrder,
+                    }))
+                  },
                 },
                 {
                   label: 'Inventory Report',
                   icon: Icons.avgOrder,
                   color: 'bg-[#FFC453]/20 text-[#916A00]',
                   desc: 'Stock levels & value',
-                  rows: null,
+                  rows: async () => {
+                    const items = await getInventory({ limit: 1000 })
+                    return items.map((i: (typeof items)[number]) => ({
+                      Product: i.name,
+                      SKU: i.sku,
+                      Category: i.category,
+                      Brand: i.brand,
+                      Stock: i.stock,
+                      Reserved: i.reserved,
+                      Incoming: i.incoming,
+                      Price: i.price,
+                      'Cost Price': i.costPrice,
+                      'Stock Value': i.stock * i.costPrice,
+                    }))
+                  },
                 },
               ].map((r) => (
                 <button
                   key={r.label}
+                  disabled={exportingLabel === r.label}
                   onClick={async () => {
-                    const rows = r.rows?.()
-                    if (!rows || rows.length === 0) {
-                      toast.info(
-                        rows === undefined
-                          ? 'Not available on this page yet — check the Inventory page for stock exports.'
-                          : 'No data to export for this range yet.',
+                    setExportingLabel(r.label)
+                    try {
+                      const rows = await r.rows?.()
+                      if (!rows || rows.length === 0) {
+                        toast.info('No data to export for this range yet.')
+                        return
+                      }
+                      const fileName = `${r.label.toLowerCase().replace(/ /g, '-')}-${new Date().toISOString().slice(0, 10)}.csv`
+                      const csv = Papa.unparse(
+                        rows as Record<string, unknown>[],
                       )
-                      return
+                      const blob = new Blob([csv], {
+                        type: 'text/csv;charset=utf-8;',
+                      })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = fileName
+                      document.body.appendChild(a)
+                      a.click()
+                      document.body.removeChild(a)
+                      URL.revokeObjectURL(url)
+                      toast.success(`${r.label} exported`)
+                      await recordDownload(
+                        r.label,
+                        r.label.toLowerCase().replace(/ /g, '-'),
+                        rows.length,
+                        fileName,
+                      )
+                    } catch (err: any) {
+                      toast.error(err?.message ?? `Failed to export ${r.label}`)
+                    } finally {
+                      setExportingLabel(null)
                     }
-                    const fileName = `${r.label.toLowerCase().replace(/ /g, '-')}-${new Date().toISOString().slice(0, 10)}.csv`
-                    const csv = Papa.unparse(rows as Record<string, unknown>[])
-                    const blob = new Blob([csv], {
-                      type: 'text/csv;charset=utf-8;',
-                    })
-                    const url = URL.createObjectURL(blob)
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = fileName
-                    document.body.appendChild(a)
-                    a.click()
-                    document.body.removeChild(a)
-                    URL.revokeObjectURL(url)
-                    toast.success(`${r.label} exported`)
-                    await recordDownload(
-                      r.label,
-                      r.label.toLowerCase().replace(/ /g, '-'),
-                      rows.length,
-                      fileName,
-                    )
                   }}
-                  className='flex flex-col items-start gap-3 p-4 border border-[#E1E3E5] rounded-xl hover:border-[#008060]/30 hover:bg-[#F2F7F5] transition-all cursor-pointer bg-white text-left'
+                  className='flex flex-col items-start gap-3 p-4 border border-[#E1E3E5] rounded-xl hover:border-[#008060]/30 hover:bg-[#F2F7F5] transition-all cursor-pointer bg-white text-left disabled:opacity-50 disabled:cursor-wait'
                 >
                   <div
                     className={`w-9 h-9 rounded-lg flex items-center justify-center ${r.color}`}
@@ -1374,7 +1786,11 @@ function SalesPageContent() {
                     <p className='text-[13px] font-semibold text-[#202223]'>
                       {r.label}
                     </p>
-                    <p className='text-[11.5px] text-[#6D7175]'>{r.desc}</p>
+                    {exportingLabel === r.label ? (
+                      <p className='text-[11.5px] text-[#8C9196]'>Preparing…</p>
+                    ) : (
+                      <p className='text-[11.5px] text-[#6D7175]'>{r.desc}</p>
+                    )}
                   </div>
                 </button>
               ))}

@@ -47,6 +47,7 @@ function toOrderDetail(o: PosOrderRecord): OrderDetailData {
       brand: i.product.brand,
       price: i.product.price,
       quantity: i.quantity,
+      variantTitle: i.product.variantTitle,
     })),
     customer: o.customer
       ? {
@@ -57,6 +58,9 @@ function toOrderDetail(o: PosOrderRecord): OrderDetailData {
       : null,
     subtotal: o.subtotal,
     discountTotal: o.discountTotal,
+    shippingTotal: o.shippingTotal,
+    giftCardTotal: o.giftCardTotal,
+    giftCardCode: o.giftCardCode,
     tax: o.tax,
     total: o.total,
     paymentMethod: o.paymentMethod,
@@ -66,6 +70,9 @@ function toOrderDetail(o: PosOrderRecord): OrderDetailData {
     returned: o.returned,
     isPickup: o.isPickup,
     fulfillmentStatus: o.fulfillmentStatus,
+    trackingToken: o.trackingToken,
+    shippingAddress: o.shippingAddress,
+    splitPayments: o.splitPayments,
   }
 }
 export default function OrdersPage() {

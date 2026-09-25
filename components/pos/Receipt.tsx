@@ -51,6 +51,9 @@ interface Props {
   orderNote?: string
   onNewSale: () => void
   onPrint: () => void
+  // Optional extra button: print this receipt on the label printer.
+  // Omit it (or pass undefined) to hide the button.
+  onPrintLabel?: () => void
   onEmail: () => void
 }
 const fmt = (n: number) =>
@@ -98,6 +101,7 @@ export default function Receipt({
   orderNote,
   onNewSale,
   onPrint,
+  onPrintLabel,
   onEmail,
 }: Props) {
   const now = new Date()
@@ -287,6 +291,19 @@ export default function Receipt({
               Email
             </button>
           </div>
+
+          {onPrintLabel && (
+            <button
+              onClick={onPrintLabel}
+              className='w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-medium transition-colors hover:bg-[#F6F6F7]'
+              style={{
+                borderColor: '#E1E3E5',
+                color: '#6D7175',
+              }}
+            >
+              🏷️ Print on label printer
+            </button>
+          )}
 
           <button
             onClick={onNewSale}

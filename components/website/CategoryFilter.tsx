@@ -3,74 +3,29 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { ArrowRightIcon } from '@/components/ui/Icons'
-const CATEGORIES = [
-  {
-    sport: 'badminton',
-    icon: '🏸',
-    label: 'Badminton',
-    image:
-      'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=600&q=80',
-    count: 120,
-    highlight: true,
-  },
-  {
-    sport: 'tennis',
-    icon: '🎾',
-    label: 'Tennis',
-    image:
-      'https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?w=600&q=80',
-    count: 95,
-  },
-  {
-    sport: 'padel',
-    icon: '🏓',
-    label: 'Padel',
-    image:
-      'https://images.pexels.com/photos/33641987/pexels-photo-33641987.jpeg?w=600&auto=compress&cs=tinysrgb',
-    count: 48,
-  },
-  {
-    sport: 'squash',
-    icon: '🥎',
-    label: 'Squash',
-    image:
-      'https://images.pexels.com/photos/7648075/pexels-photo-7648075.jpeg?w=600&auto=compress&cs=tinysrgb',
-    count: 36,
-  },
-  {
-    sport: 'clothing',
-    icon: '👕',
-    label: 'Clothing',
-    image:
-      'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=600&q=80',
-    count: 80,
-  },
-  {
-    sport: 'shoes',
-    icon: '👟',
-    label: 'Shoes',
-    image:
-      'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=600&q=80',
-    count: 64,
-  },
-  {
-    sport: 'bags',
-    icon: '🎒',
-    label: 'Racket Bags',
-    image:
-      'https://images.unsplash.com/photo-1724352012670-aae65f2bbd84?w=600&q=80',
-    count: 28,
-  },
-  {
-    sport: 'accessories',
-    icon: '🧤',
-    label: 'Accessories',
-    image:
-      'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=600&q=80',
-    count: 52,
-  },
-]
-export default function CategoryFilter() {
+import {
+  DEFAULT_CATEGORIES_COPY,
+  DEFAULT_CATEGORY_TILES,
+  type HomeCategoryTile,
+} from '@/lib/home-layout-shared'
+interface CategoryFilterProps {
+  eyebrow?: string
+  heading?: string
+  subheading?: string
+  ctaLabel?: string
+  ctaHref?: string
+  tiles?: HomeCategoryTile[]
+}
+// Copy and tiles come from Dashboard → Marketing → Home Page. With no props it
+// renders the original built-in set.
+export default function CategoryFilter({
+  eyebrow = DEFAULT_CATEGORIES_COPY.eyebrow,
+  heading = DEFAULT_CATEGORIES_COPY.heading,
+  subheading = DEFAULT_CATEGORIES_COPY.subheading,
+  ctaLabel = DEFAULT_CATEGORIES_COPY.ctaLabel,
+  ctaHref = DEFAULT_CATEGORIES_COPY.ctaHref,
+  tiles = DEFAULT_CATEGORY_TILES,
+}: CategoryFilterProps = {}) {
   const [hovered, setHovered] = useState<string | null>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const isPausedRef = useRef(false)
@@ -124,24 +79,31 @@ export default function CategoryFilter() {
         {}
         <div className='flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-10'>
           <div>
-            <p className='text-[10px] font-bold text-[#E8553A] uppercase tracking-[0.22em] font-montserrat mb-2'>
-              Browse by Sport
-            </p>
-            <h2 className='font-montserrat font-black text-3xl sm:text-4xl text-[#0A1F44] tracking-tight leading-none'>
-              What Do You Play?
-            </h2>
-            <p className='text-[#4B5563] font-lato mt-3 max-w-md text-sm leading-relaxed'>
-              Badminton to Padel, Rackets to Shoes — premium gear for every
-              racket sport and every level.
-            </p>
+            {eyebrow && (
+              <p className='text-[10px] font-bold text-[#E8553A] uppercase tracking-[0.22em] font-montserrat mb-2'>
+                {eyebrow}
+              </p>
+            )}
+            {heading && (
+              <h2 className='font-montserrat font-black text-3xl sm:text-4xl text-[#0A1F44] tracking-tight leading-none'>
+                {heading}
+              </h2>
+            )}
+            {subheading && (
+              <p className='text-[#4B5563] font-lato mt-3 max-w-md text-sm leading-relaxed'>
+                {subheading}
+              </p>
+            )}
           </div>
-          <Link
-            href='/shop'
-            className='inline-flex items-center gap-2 bg-[#0A1F44] hover:bg-[#E8553A] text-white font-montserrat font-bold px-6 py-3 rounded-full transition-all duration-300 shadow-md hover:-translate-y-0.5 hover:shadow-[#E8553A]/25 hover:shadow-lg shrink-0 text-sm'
-          >
-            All Products
-            <ArrowRightIcon size={14} />
-          </Link>
+          {ctaLabel && ctaHref && (
+            <Link
+              href={ctaHref}
+              className='inline-flex items-center gap-2 bg-[#0A1F44] hover:bg-[#E8553A] text-white font-montserrat font-bold px-6 py-3 rounded-full transition-all duration-300 shadow-md hover:-translate-y-0.5 hover:shadow-[#E8553A]/25 hover:shadow-lg shrink-0 text-sm'
+            >
+              {ctaLabel}
+              <ArrowRightIcon size={14} />
+            </Link>
+          )}
         </div>
 
         {}
@@ -157,12 +119,12 @@ export default function CategoryFilter() {
             WebkitOverflowScrolling: 'touch',
           }}
         >
-          {CATEGORIES.map((cat) => (
+          {tiles.map((cat) => (
             <Link
-              key={cat.sport}
-              href={`/shop?sport=${cat.sport}`}
+              key={cat.id}
+              href={cat.href}
               prefetch={false}
-              onMouseEnter={() => setHovered(cat.sport)}
+              onMouseEnter={() => setHovered(cat.id)}
               onMouseLeave={() => setHovered(null)}
               className='group relative rounded-2xl overflow-hidden block shrink-0 snap-start w-[46%] sm:w-[31%] lg:w-[23%] xl:w-[19%]'
               style={{
@@ -170,12 +132,16 @@ export default function CategoryFilter() {
               }}
             >
               {}
-              <img
-                src={cat.image}
-                alt={cat.label}
-                loading='lazy'
-                className='absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110'
-              />
+              {cat.image ? (
+                <img
+                  src={cat.image}
+                  alt={cat.label}
+                  loading='lazy'
+                  className='absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110'
+                />
+              ) : (
+                <div className='absolute inset-0 bg-[#0A1F44]' />
+              )}
 
               {}
               <div className='absolute inset-0 bg-linear-to-t from-[#0A1F44]/95 via-[#0A1F44]/40 to-transparent transition-opacity duration-300 group-hover:from-[#0A1F44]' />
@@ -183,12 +149,16 @@ export default function CategoryFilter() {
               {}
               <div className='absolute top-3 left-3 right-3 flex items-start justify-between'>
                 {}
-                <div className='w-10 h-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20 group-hover:bg-[#E8553A]/80 group-hover:border-[#E8553A] transition-all duration-300'>
-                  <span className='text-xl leading-none'>{cat.icon}</span>
-                </div>
+                {cat.icon ? (
+                  <div className='w-10 h-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20 group-hover:bg-[#E8553A]/80 group-hover:border-[#E8553A] transition-all duration-300'>
+                    <span className='text-xl leading-none'>{cat.icon}</span>
+                  </div>
+                ) : (
+                  <span />
+                )}
 
                 {}
-                {cat.highlight && (
+                {cat.popular && (
                   <span className='bg-[#E8553A] text-white text-[9px] font-black font-montserrat px-2 py-1 rounded-full uppercase tracking-wider'>
                     Popular
                   </span>
@@ -200,13 +170,15 @@ export default function CategoryFilter() {
                 <h3 className='font-montserrat font-black text-white text-base leading-tight'>
                   {cat.label}
                 </h3>
-                <p className='text-white/60 text-[11px] font-lato mt-0.5'>
-                  {cat.count}+ products
-                </p>
+                {cat.countLabel && (
+                  <p className='text-white/60 text-[11px] font-lato mt-0.5'>
+                    {cat.countLabel}
+                  </p>
+                )}
 
                 {}
                 <div
-                  className={`flex items-center gap-1.5 mt-3 text-[11px] font-bold font-montserrat text-[#E8553A] transition-all duration-300 ${hovered === cat.sport ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}
+                  className={`flex items-center gap-1.5 mt-3 text-[11px] font-bold font-montserrat text-[#E8553A] transition-all duration-300 ${hovered === cat.id ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}
                 >
                   Shop Now
                   <ArrowRightIcon

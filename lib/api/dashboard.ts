@@ -770,3 +770,54 @@ export async function getAnalytics(range: string = 'last30') {
   })
   return data
 }
+export interface ProfitReportChannelBreakdown {
+  revenue: number
+  cost: number
+  grossProfit: number
+}
+export interface ProfitReportProduct {
+  productId: string
+  name: string
+  sku: string
+  category: string
+  unitsSold: number
+  revenue: number
+  cost: number
+  grossProfit: number
+  margin: number
+  website: ProfitReportChannelBreakdown
+  pos: ProfitReportChannelBreakdown
+}
+export interface ProfitReportCategory {
+  category: string
+  revenue: number
+  cost: number
+  grossProfit: number
+  margin: number
+}
+export interface ProfitReport {
+  range: string
+  summary: {
+    revenue: number
+    cost: number
+    grossProfit: number
+    margin: number
+    website: ProfitReportChannelBreakdown & { margin: number }
+    pos: ProfitReportChannelBreakdown & { margin: number }
+  }
+  byCategory: ProfitReportCategory[]
+  products: ProfitReportProduct[]
+}
+export async function getProfitReport(params?: {
+  range?: string
+  channel?: 'all' | 'website' | 'pos'
+  category?: string
+  productId?: string
+}): Promise<ProfitReport> {
+  return api<ProfitReport>('/api/admin/reports/profit', {
+    range: params?.range ?? 'last30',
+    channel: params?.channel ?? 'all',
+    category: params?.category,
+    productId: params?.productId,
+  })
+}
