@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from 'react'
 import { getOrder } from '@/lib/api/dashboard'
+import { usePrinterStore } from '@/store/printerStore'
 import {
   SITE_LOGO,
   STORE_DISPLAY_NAME,
@@ -9,6 +10,13 @@ import {
   STORE_ADDRESS_LINE2,
   CONTACT_EMAIL,
 } from '@/lib/constants'
+
+// Printed on the same TSP100IIIBI as POS receipts (paired as a normal
+// system printer — see store/printerStore.ts), so the page needs to be
+// sized to the thermal roll rather than A4, or the driver will scale/clip
+// it. Falls back to A4 automatically if paperWidth was never set (i.e. no
+// receipt printer has been configured on this device yet).
+const PAPER_MM: Record<'58mm' | '80mm', number> = { '58mm': 58, '80mm': 80 }
 
 function fmt(amount: number, currency = 'GBP') {
   const symbol =
@@ -30,6 +38,13 @@ export default function PackingSlipPage({
   const { id } = use(params)
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const connectionType = usePrinterStore((s) => s.connectionType)
+  const paperWidth = usePrinterStore((s) => s.paperWidth)
+  // Any receipt-style transport (incl. the TSP100IIIBI paired as a system
+  // printer under 'browser') means this device prints on a thermal roll,
+  // not A4. 'label'/'none' fall back to the original A4 layout.
+  const thermal = connectionType !== 'none' && connectionType !== 'label'
+  const rollMm = PAPER_MM[paperWidth]
 
   useEffect(() => {
     getOrder(id)
@@ -102,14 +117,27 @@ export default function PackingSlipPage({
             max-width: none !important;
             /* page margin lives here, not in @page, so the browser
                does not draw its own header/footer band */
-            padding: 15mm !important;
+            padding: ${thermal ? '3mm' : '15mm'} !important;
+            ${thermal ? `width: ${rollMm}mm !important; font-size: 8.5pt !important;` : ''}
+          }
+          ${
+            thermal
+              ? `
+          /* Two-column layouts don't fit an 80mm/58mm roll — stack them. */
+          .packing-slip .thermal-stack { display: block !important; }
+          .packing-slip .thermal-stack > * + * { margin-top: 3mm !important; }
+          .packing-slip img.logo { height: 8mm !important; }
+          `
+              : ''
           }
           table { page-break-inside: auto; }
           tr { page-break-inside: avoid; page-break-after: auto; }
           thead { display: table-header-group; }
           /* margin: 0 suppresses the browser's URL / date / page-number
-             header & footer in Chrome, Edge and Safari */
-          @page { margin: 0; size: A4; }
+             header & footer in Chrome, Edge and Safari.
+             Continuous roll (auto height) when printing on the TSP100IIIBI
+             via the OS print dialog; A4 otherwise. */
+          @page { margin: 0; size: ${thermal ? `${rollMm}mm auto` : 'A4'}; }
         }
         body { font-family: Arial, sans-serif; }
         @media screen {
@@ -146,7 +174,7 @@ export default function PackingSlipPage({
           <img
             src={SITE_LOGO}
             alt={STORE_DISPLAY_NAME}
-            className='h-14 w-auto'
+            className='logo h-14 w-auto'
           />
         </div>
 
@@ -168,7 +196,7 @@ export default function PackingSlipPage({
         </div>
 
         {/* Addresses */}
-        <div className='grid grid-cols-2 gap-8 mb-8'>
+        <div className='thermal-stack grid grid-cols-2 gap-8 mb-8'>
           {/* Ship To */}
           <div>
             <p className='text-xs font-semibold text-[#1e2a6e] uppercase tracking-wider mb-2'>

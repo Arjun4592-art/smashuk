@@ -45,23 +45,23 @@ interface PrinterOption {
 
 const ALL_OPTIONS: PrinterOption[] = [
   {
-    type: 'browser',
-    label: 'Browser / System',
-    icon: '🖨️',
-    desc: 'Uses your device’s normal print dialog. Works on every OS — good for Mac, or any AirPrint/OS-paired printer. On iPad, a Star TSP100 over classic Bluetooth won’t show up here — use Star PassPRNT instead.',
+    type: 'label',
+    label: 'Label printer (TSP100IIIBI)',
+    icon: '🏷️',
+    desc: 'Recommended for the TSP100IIIBI loaded with 4×2in (102×51mm) die-cut label rolls (e.g. Double Dragon). Pair it once in the tablet’s Bluetooth settings (install its print service if the OS asks for one) — it then shows up as a normal system printer, no app needed. Receipts print sized to the label below — set the size to match your roll.',
     recommended: true,
   },
   {
-    type: 'label',
-    label: 'Label printer',
-    icon: '🏷️',
-    desc: 'Zebra, TSC, Xprinter, Brother, Munbyn… any label printer installed on this computer. Receipts are printed sized to your label through the system print dialog — set the label size below.',
+    type: 'browser',
+    label: 'Browser / System',
+    icon: '🖨️',
+    desc: 'Uses your device’s normal print dialog on continuous receipt-roll paper (58mm/80mm) instead of die-cut labels. Same OS-Bluetooth pairing as the Label printer option above, just without a fixed label size.',
   },
   {
     type: 'star-passprnt',
     label: 'Star PassPRNT',
     icon: '⭐',
-    desc: 'For iPad or Android tablets paired with a Star Bluetooth printer (e.g. TSP100IIIBI). Requires the free Star PassPRNT app installed and configured with the printer first — this is the recommended option on iPad since Safari has no generic Bluetooth print driver.',
+    desc: 'Fallback for a TSP100IIIBI that doesn’t show up under Label printer/Browser after OS-level Bluetooth pairing. Requires the free Star PassPRNT app installed and configured with the printer first.',
   },
   {
     type: 'usb',
