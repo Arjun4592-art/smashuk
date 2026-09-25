@@ -49,7 +49,13 @@ interface PrinterState {
 export const usePrinterStore = create<PrinterState>()(
   persist(
     (set) => ({
-      connectionType: 'none',
+      // Default to the label printer: the physical roll loaded (Double
+      // Dragon 102×51mm / 4×2in die-cut labels — same size as the
+      // "Smash String Recorder" ticket reference) is fed through the
+      // TSP100IIIBI's OS print dialog, sized via @page — see
+      // lib/printer/label-print.ts. labelWidthMm/labelHeightMm below
+      // already match this roll exactly.
+      connectionType: 'label',
       paperWidth: '80mm',
       usbHandle: null,
       btHandle: null,
