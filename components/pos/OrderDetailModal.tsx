@@ -23,6 +23,7 @@ import type { ReceiptData } from '@/lib/printer/escpos'
 import { ReceiptBody } from './Receipt'
 import EmailReceiptModal from './EmailReceiptModal'
 import { waitForPrintImages } from '@/lib/utils'
+import { printShippingLabel } from '@/lib/printer/print-shipping-label'
 import type { CartDisplayItem } from '@/types'
 import {
   Badge,
@@ -171,16 +172,9 @@ export default function OrderDetailModal({
         toast.error('Parcel2Go has not returned a label URL yet.')
         return
       }
-      // Parcel2Go returns a data: URI; browsers block window.open on those,
-      // so convert it into a blob: URL first.
-      let target: string = labelUrl
-      if (labelUrl.startsWith('data:')) {
-        const blob = await (await fetch(labelUrl)).blob()
-        target = URL.createObjectURL(blob)
-      }
-      window.open(target, '_blank', 'noopener,noreferrer')
+      await printShippingLabel(labelUrl)
     } catch (err: unknown) {
-      toast.error('Could not fetch shipping label', {
+      toast.error('Could not print shipping label', {
         description: err instanceof Error ? err.message : undefined,
       })
     } finally {

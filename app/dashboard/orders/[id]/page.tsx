@@ -14,6 +14,7 @@ import {
 import ReturnExchangeModal from '@/components/dashboard/ReturnExchangeModal'
 import LabelSizeDialog from '@/components/printing/LabelSizeDialog'
 import { printReceiptOnLabel } from '@/lib/printer/label-print'
+import { printShippingLabel } from '@/lib/printer/print-shipping-label'
 import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
 import OrderTimeline from '@/components/dashboard/OrderTimeline'
 import {
@@ -53,7 +54,13 @@ const ORDER_METADATA_SKIP = new Set([
 ])
 
 type Action =
-  'confirm' | 'cancel' | 'archive' | 'fulfill' | 'capture' | 'ship' | 'deliver'
+  | 'confirm'
+  | 'cancel'
+  | 'archive'
+  | 'fulfill'
+  | 'capture'
+  | 'ship'
+  | 'deliver'
 
 const ACTION_VERB: Record<Action, string> = {
   confirm: 'complete',
@@ -141,16 +148,9 @@ export default function OrderDetailPage({
         toast.error('Parcel2Go has not returned a label URL yet.')
         return
       }
-      // Parcel2Go returns a data: URI; browsers block window.open on those,
-      // so convert it into a blob: URL first.
-      let target: string = label_url
-      if (label_url.startsWith('data:')) {
-        const blob = await (await fetch(label_url)).blob()
-        target = URL.createObjectURL(blob)
-      }
-      window.open(target, '_blank', 'noopener,noreferrer')
+      await printShippingLabel(label_url)
     } catch (err: any) {
-      toast.error(err.message ?? 'Failed to fetch shipping label')
+      toast.error(err.message ?? 'Failed to print shipping label')
     } finally {
       setLabelLoading(false)
     }

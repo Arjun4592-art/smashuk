@@ -17,6 +17,7 @@ import OrderTimeline from '@/components/dashboard/OrderTimeline'
 import ReturnExchangeModal from '@/components/dashboard/ReturnExchangeModal'
 import LabelSizeDialog from '@/components/printing/LabelSizeDialog'
 import { printReceiptOnLabel } from '@/lib/printer/label-print'
+import { printShippingLabel } from '@/lib/printer/print-shipping-label'
 import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
 const ORDER_STATUS_STYLES: Record<string, string> = {
   pending: 'bg-[#FFC453]/20 text-[#916A00]',
@@ -346,17 +347,10 @@ export default function OrderDetailPage({
         alert('Parcel2Go has not returned a label URL yet.')
         return
       }
-      // Parcel2Go returns the label as a data: URI; browsers block window.open on
-      // those, so turn it into a blob: URL first.
-      let labelTarget: string = label_url
-      if (label_url.startsWith('data:')) {
-        const labelBlob = await (await fetch(label_url)).blob()
-        labelTarget = URL.createObjectURL(labelBlob)
-      }
-      window.open(labelTarget, '_blank', 'noopener,noreferrer')
+      await printShippingLabel(label_url)
     } catch (err: unknown) {
       alert(
-        'Failed to fetch shipping label: ' +
+        'Failed to print shipping label: ' +
           (err instanceof Error ? err.message : 'Unknown error'),
       )
     } finally {
