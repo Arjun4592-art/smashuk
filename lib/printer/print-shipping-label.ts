@@ -1,141 +1,66 @@
-const LABEL_WIDTH_MM = 101.6 // 4 in
-const LABEL_HEIGHT_MM = 152.4 // 6 in
+import { pdfUrlToPrintHtml } from './pdf-to-print-html'
 
-function isIOS(): boolean {
-  if (typeof navigator === 'undefined') return false
-  return (
-    /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
-    // iPadOS reports itself as a Mac with a touch screen.
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  )
-}
-
-async function toPrintableUrl(labelUrl: string): Promise<string> {
-  // `labelUrl` is expected to be a same-origin URL by this point — callers
-  // route through /api/admin/orders/[id]/shipping-label/file (or the POS
-  // equivalent) rather than handing Parcel2Go's own URL to the print
-  // iframe/popup below, since a cross-origin frame's contentWindow can't be
-  // touched (`iframe.contentWindow.addEventListener(...)` throws a
-  // SecurityError: "Blocked a frame ... from accessing a cross-origin
-  // frame."). A data: URI can still turn up here (e.g. in tests), and
-  // browsers block window.open/iframe navigation to those in some contexts,
-  // so always go through a blob: URL for that case.
-  if (!labelUrl.startsWith('data:')) return labelUrl
-  const blob = await (await fetch(labelUrl)).blob()
-  return URL.createObjectURL(blob)
-}
-
-// Many mobile browsers (seen in practice on Android Chrome and iPadOS
-// Safari/Chrome) render this same-origin PDF through their own built-in PDF
-// viewer component. That component runs as if it were a genuinely
-// cross-origin frame for scripting purposes: NOT just `addEventListener`,
-// but `focus()` and `print()` on it can also throw the same "Blocked a
-// frame ... from accessing a cross-origin frame" SecurityError, even though
-// the URL is same-origin. There is no scriptable way around that — so
-// instead of trying to silently trigger the OS print dialog, we fall back
-// to just opening the label in a normal tab, where the browser's own PDF
-// toolbar has a print button the person can tap themselves.
-function openLabelTab(url: string): void {
-  window.open(url, '_blank')
-}
-
-// Desktop/Android: hidden iframe, print it, clean up after. Falls back to
-// openLabelTab() if the frame turns out to be script-blocked.
-function printViaIframe(url: string, revoke: boolean): Promise<void> {
+// Renders `html` into a hidden iframe and triggers the OS print dialog.
+// Same technique as lib/printer/browser-print.ts and label-print.ts: the
+// `afterprint` listener goes on the TOP-level `window`, not on the iframe's
+// `contentWindow` — that's what keeps this safe to call on every browser,
+// including the mobile ones that would otherwise throw "Blocked a frame
+// ... from accessing a cross-origin frame" (see pdf-to-print-html.ts for
+// why that error happens and why we render to plain HTML first).
+function printHtml(html: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const iframe = document.createElement('iframe')
-    iframe.setAttribute('aria-hidden', 'true')
-    iframe.style.cssText = `position:fixed;left:-10000px;top:0;border:0;width:${LABEL_WIDTH_MM}mm;height:${LABEL_HEIGHT_MM}mm;`
-
-    let removed = false
-    const remove = () => {
-      if (removed) return
-      removed = true
-      iframe.remove()
-      if (revoke) URL.revokeObjectURL(url)
+    if (typeof document === 'undefined') {
+      reject(new Error('Printing is only available in the browser.'))
+      return
     }
-    // Safety net only — normally removed on `afterprint`.
-    const safety = setTimeout(remove, 5 * 60 * 1000)
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = '0'
+    iframe.setAttribute('aria-hidden', 'true')
 
-    const fallbackToTab = () => {
-      clearTimeout(safety)
-      remove()
-      openLabelTab(url)
+    let settled = false
+    const cleanup = () => {
+      if (settled) return
+      settled = true
+      window.removeEventListener('afterprint', onAfterPrint)
+      // Give the print dialog a beat before we tear the iframe down —
+      // removing it too early can cancel printing on some browsers.
+      setTimeout(() => iframe.remove(), 500)
+    }
+    const onAfterPrint = () => {
+      cleanup()
       resolve()
     }
 
     iframe.onload = () => {
-      let win: Window | null = null
       try {
-        win = iframe.contentWindow
-      } catch {
-        fallbackToTab()
-        return
-      }
-      if (!win) {
-        fallbackToTab()
-        return
-      }
-      try {
-        win.addEventListener('afterprint', () => {
-          clearTimeout(safety)
-          setTimeout(remove, 300)
-        })
+        const win = iframe.contentWindow
+        if (!win) throw new Error('Could not open the print preview.')
+        window.addEventListener('afterprint', onAfterPrint)
         win.focus()
         win.print()
-        // Chrome blocks here until the dialog closes; Safari/Firefox return
-        // straight away — either way the job has been handed to the OS.
-        resolve()
-      } catch {
-        // Scripting blocked on this frame — see comment on openLabelTab.
-        fallbackToTab()
+        // Some browsers don't reliably fire `afterprint` for an iframe's
+        // content, so make sure we resolve (and eventually clean up) even
+        // if that event never arrives.
+        setTimeout(() => {
+          if (!settled) {
+            settled = true
+            setTimeout(() => iframe.remove(), 1000)
+            resolve()
+          }
+        }, 1000)
+      } catch (err) {
+        cleanup()
+        reject(err instanceof Error ? err : new Error(String(err)))
       }
     }
-    iframe.onerror = () => {
-      clearTimeout(safety)
-      remove()
-      reject(new Error('Could not load the shipping label.'))
-    }
 
-    iframe.src = url
+    iframe.srcdoc = html
     document.body.appendChild(iframe)
-  })
-}
-
-// iPhone/iPad Safari prints the WHOLE parent page when asked to print an
-// iframe, so there we use a popup instead. window.open must run
-// synchronously inside the tap, before any await — the caller's click
-// handler is what makes that true here. If scripting the resulting tab
-// turns out to be blocked (see openLabelTab comment above), the tab is
-// already open and showing the label, so we just leave it for the person
-// to print manually rather than erroring out.
-function printViaPopup(url: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const win = window.open(url, '_blank')
-    if (!win) {
-      reject(
-        new Error(
-          'Pop-up blocked. Allow pop-ups for this site to print the label.',
-        ),
-      )
-      return
-    }
-    try {
-      win.addEventListener('load', () => {
-        try {
-          win.focus()
-          win.print()
-        } catch {
-          // Scripting blocked on this frame — the tab is already open with
-          // the label, nothing more we can do from here.
-        }
-        resolve()
-      })
-    } catch {
-      // `addEventListener` itself is blocked — same story, tab is already
-      // open and showing the label.
-      resolve()
-    }
   })
 }
 
@@ -144,16 +69,6 @@ export async function printShippingLabel(labelUrl: string): Promise<void> {
   if (typeof document === 'undefined') {
     throw new Error('Printing is only available in the browser.')
   }
-  const url = await toPrintableUrl(labelUrl)
-  const revoke = url !== labelUrl
-  try {
-    if (isIOS()) {
-      await printViaPopup(url)
-    } else {
-      await printViaIframe(url, revoke)
-    }
-  } catch (err) {
-    if (revoke) URL.revokeObjectURL(url)
-    throw err
-  }
+  const html = await pdfUrlToPrintHtml(labelUrl)
+  await printHtml(html)
 }
