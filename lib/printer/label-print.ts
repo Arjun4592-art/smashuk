@@ -329,12 +329,27 @@ function printViaIframe(html: string, size: LabelSize): Promise<void> {
         if (!win) throw new Error('Could not open the print preview.')
         await waitForDocReady(win.document)
         fitPageToContent(win.document, size)
-        win.addEventListener('afterprint', () => {
-          clearTimeout(safety)
-          setTimeout(remove, 300)
-        })
+        // Some mobile browsers (seen on Android/iPadOS Chrome & Safari)
+        // treat this frame as cross-origin-like for scripting even though
+        // it's an in-page srcdoc frame, and `addEventListener` throws
+        // "Blocked a frame ... from accessing a cross-origin frame." That
+        // must not abort printing — fall back to a timer-based cleanup.
+        let gotAfterPrintSignal = false
+        try {
+          win.addEventListener('afterprint', () => {
+            gotAfterPrintSignal = true
+            clearTimeout(safety)
+            setTimeout(remove, 300)
+          })
+        } catch {
+          // Ignored — handled by the safety-net timeout below.
+        }
         win.focus()
         win.print()
+        if (!gotAfterPrintSignal) {
+          clearTimeout(safety)
+          setTimeout(remove, 60 * 1000)
+        }
         // Chrome blocks here until the dialog closes; Safari/Firefox return
         // straight away — either way the job has been handed to the OS.
         resolve()
@@ -365,7 +380,12 @@ async function printViaPopup(html: string, size: LabelSize): Promise<void> {
   win.document.close()
   await waitForDocReady(win.document)
   fitPageToContent(win.document, size)
-  win.addEventListener('afterprint', () => win.close())
+  try {
+    win.addEventListener('afterprint', () => win.close())
+  } catch {
+    // Same cross-origin-like restriction as in printViaIframe above — skip
+    // the auto-close signal rather than throwing and skipping print().
+  }
   win.focus()
   win.print()
 }
