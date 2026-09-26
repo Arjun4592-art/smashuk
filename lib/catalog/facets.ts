@@ -106,7 +106,7 @@ export function buildFacets(
     if (scoped.length === 0) return []
     const map = new Map<string, Set<string>>()
     for (const p of scoped) {
-      for (const s of p.specs ?? []) {
+      for (const s of p.filterSpecs ?? p.specs ?? []) {
         if (!s.label || !s.value) continue
         const canonicalLabel = canonicalizeSpecLabel(p.sport, p.category, s.label)
         if (!canonicalLabel) continue
@@ -202,7 +202,7 @@ export function buildFacets(
   const specValueCounts = (() => {
     const map = new Map<string, number>()
     for (const p of scoped) {
-      for (const s of p.specs ?? []) {
+      for (const s of p.filterSpecs ?? p.specs ?? []) {
         if (!s.label || !s.value) continue
         const canonicalLabel = canonicalizeSpecLabel(p.sport, p.category, s.label)
         if (!canonicalLabel) continue

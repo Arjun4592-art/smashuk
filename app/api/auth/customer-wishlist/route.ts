@@ -1,95 +1,137 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { SURFACE_COOKIES } from '@/lib/api/auth-cookie';
-const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000';
-const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? '';
+import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
+const MEDUSA_URL =
+  process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
+const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
 export async function GET() {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get(SURFACE_COOKIES.website.tokenCookie)?.value;
+    const cookieStore = await cookies()
+    const token = cookieStore.get(SURFACE_COOKIES.website.tokenCookie)?.value
     if (!token) {
-      return NextResponse.json({
-        error: 'Unauthorized'
-      }, {
-        status: 401
-      });
+      return NextResponse.json(
+        {
+          error: 'Unauthorized',
+        },
+        {
+          status: 401,
+        },
+      )
     }
-    const res = await fetch(`${MEDUSA_URL}/store/customers/me?fields=%2Bmetadata`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'x-publishable-api-key': PUBLISHABLE_KEY
+    const res = await fetch(
+      `${MEDUSA_URL}/store/customers/me?fields=%2Bmetadata`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-publishable-api-key': PUBLISHABLE_KEY,
+        },
+        cache: 'no-store',
       },
-      cache: 'no-store'
-    });
+    )
     if (!res.ok) {
-      return NextResponse.json({
-        error: 'Failed to load wishlist'
-      }, {
-        status: res.status
-      });
+      return NextResponse.json(
+        {
+          error: 'Failed to load wishlist',
+        },
+        {
+          status: res.status,
+        },
+      )
     }
-    const data = await res.json();
-    const wishlist = Array.isArray(data?.customer?.metadata?.wishlist) ? data.customer.metadata.wishlist : [];
+    const data = await res.json()
+    const wishlist = Array.isArray(data?.customer?.metadata?.wishlist)
+      ? data.customer.metadata.wishlist
+      : []
     return NextResponse.json({
-      productIds: wishlist
-    });
+      productIds: wishlist,
+    })
   } catch (err: any) {
-    return NextResponse.json({
-      error: 'Failed to load wishlist'
-    }, {
-      status: 500
-    });
+    return NextResponse.json(
+      {
+        error: 'Failed to load wishlist',
+      },
+      {
+        status: 500,
+      },
+    )
   }
 }
 export async function POST(req: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get(SURFACE_COOKIES.website.tokenCookie)?.value;
+    const cookieStore = await cookies()
+    const token = cookieStore.get(SURFACE_COOKIES.website.tokenCookie)?.value
     if (!token) {
-      return NextResponse.json({
-        error: 'Unauthorized'
-      }, {
-        status: 401
-      });
+      return NextResponse.json(
+        {
+          error: 'Unauthorized',
+        },
+        {
+          status: 401,
+        },
+      )
     }
-    const {
-      productIds
-    } = await req.json();
+    const { productIds } = await req.json()
     if (!Array.isArray(productIds)) {
-      return NextResponse.json({
-        error: 'productIds must be an array'
-      }, {
-        status: 400
-      });
+      return NextResponse.json(
+        {
+          error: 'productIds must be an array',
+        },
+        {
+          status: 400,
+        },
+      )
     }
+    // Read the customer's current metadata first and merge into it, rather
+    // than sending only { wishlist: productIds } — metadata can carry other
+    // keys (e.g. stripe_customer_id, read in lib/api/store.ts), and a plain
+    // replace here would wipe them out on every wishlist save.
+    const currentRes = await fetch(
+      `${MEDUSA_URL}/store/customers/me?fields=%2Bmetadata`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-publishable-api-key': PUBLISHABLE_KEY,
+        },
+        cache: 'no-store',
+      },
+    )
+    const currentData = await currentRes.json().catch(() => ({}))
+    const currentMetadata = currentData?.customer?.metadata ?? {}
     const res = await fetch(`${MEDUSA_URL}/store/customers/me`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
-        'x-publishable-api-key': PUBLISHABLE_KEY
+        'x-publishable-api-key': PUBLISHABLE_KEY,
       },
       body: JSON.stringify({
         metadata: {
-          wishlist: productIds
-        }
-      })
-    });
+          ...currentMetadata,
+          wishlist: productIds,
+        },
+      }),
+    })
     if (!res.ok) {
-      return NextResponse.json({
-        error: 'Failed to save wishlist'
-      }, {
-        status: res.status
-      });
+      return NextResponse.json(
+        {
+          error: 'Failed to save wishlist',
+        },
+        {
+          status: res.status,
+        },
+      )
     }
     return NextResponse.json({
-      success: true
-    });
+      success: true,
+    })
   } catch (err: any) {
-    return NextResponse.json({
-      error: 'Failed to save wishlist'
-    }, {
-      status: 500
-    });
+    return NextResponse.json(
+      {
+        error: 'Failed to save wishlist',
+      },
+      {
+        status: 500,
+      },
+    )
   }
 }

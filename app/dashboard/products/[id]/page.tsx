@@ -789,6 +789,31 @@ export default function EditProductPage({
   }
   const filledOptions = (v: Variant) =>
     v.options.filter((o) => o.name.trim() && o.value.trim())
+  // Each variant's option rows are added independently in the UI ("+ Add
+  // Option"), so their array order can differ per variant — one variant
+  // might have Size added before Color, another Color before Size. Medusa
+  // has no opinion on option *value* order (options is a name→value map),
+  // but the variant *title* here is a plain string built by joining
+  // `filled` in whatever order it happens to be in, so without sorting to a
+  // shared order first, the Admin's Variants list ends up with titles like
+  // "3.0 / White" next to "White / 3.5" for the same product. Sort every
+  // variant's filled options into the product's existing option order (or,
+  // for options not yet saved to the product, the order they were first
+  // seen across variants) before joining.
+  const canonicalOptionTitles =
+    existingOptions.length > 0
+      ? existingOptions.map((o) => o.title.trim())
+      : Array.from(
+          new Set(
+            variants.flatMap((v) => filledOptions(v).map((o) => o.name.trim())),
+          ),
+        )
+  const sortedFilled = (v: Variant) =>
+    [...filledOptions(v)].sort(
+      (a, b) =>
+        canonicalOptionTitles.indexOf(a.name.trim()) -
+        canonicalOptionTitles.indexOf(b.name.trim()),
+    )
   const buildPayload = (saveStatus: 'published' | 'draft') => {
     const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
     const baseVariant = {
@@ -824,7 +849,7 @@ export default function EditProductPage({
     const extraVariants = variants
       .filter((v) => filledOptions(v).length > 0)
       .map((v) => {
-        const filled = filledOptions(v)
+        const filled = sortedFilled(v)
         return {
           id: v.medusaId || undefined,
           title: filled.map((o) => o.value.trim()).join(' / '),
@@ -932,7 +957,7 @@ export default function EditProductPage({
             variants
               .filter((v) => v.stock && filledOptions(v).length > 0)
               .map((v) => [
-                filledOptions(v)
+                sortedFilled(v)
                   .map((o) => o.value.trim())
                   .join(' / '),
                 Number(v.stock),

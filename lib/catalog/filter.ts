@@ -115,7 +115,7 @@ export function applySpecFilters(
   return products.filter((p) =>
     entries.every(([label, values]) =>
       values.some((v) =>
-        p.specs?.some((s) => {
+        (p.filterSpecs ?? p.specs)?.some((s) => {
           const canonicalLabel = canonicalizeSpecLabel(
             p.sport,
             p.category,
