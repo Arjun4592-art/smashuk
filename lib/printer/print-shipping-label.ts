@@ -46,12 +46,30 @@ function printViaIframe(url: string, revoke: boolean): Promise<void> {
       try {
         const win = iframe.contentWindow
         if (!win) throw new Error('Could not open the print preview.')
-        win.addEventListener('afterprint', () => {
-          clearTimeout(safety)
-          setTimeout(remove, 300)
-        })
+        // Mobile Chrome/Safari render this same-origin PDF through their
+        // built-in PDF viewer, which behaves like a cross-origin window for
+        // this one frame: `focus`/`print` still work, but `addEventListener`
+        // throws "Blocked a frame ... from accessing a cross-origin frame."
+        // That must not abort printing — just fall back to a timer-based
+        // cleanup instead of the `afterprint` signal.
+        let gotAfterPrintSignal = false
+        try {
+          win.addEventListener('afterprint', () => {
+            gotAfterPrintSignal = true
+            clearTimeout(safety)
+            setTimeout(remove, 300)
+          })
+        } catch {
+          // Ignored — handled by the safety-net timeout below.
+        }
         win.focus()
         win.print()
+        if (!gotAfterPrintSignal) {
+          // No `afterprint` signal available on this frame; give the OS
+          // dialog a reasonable amount of time to be used, then clean up.
+          clearTimeout(safety)
+          setTimeout(remove, 60 * 1000)
+        }
         // Chrome blocks here until the dialog closes; Safari/Firefox return
         // straight away — either way the job has been handed to the OS.
         resolve()
@@ -87,11 +105,32 @@ function printViaPopup(url: string): Promise<void> {
       )
       return
     }
-    win.addEventListener('load', () => {
-      win.focus()
-      win.print()
-      resolve()
-    })
+    // Same cross-origin-looking PDF-viewer restriction as in printViaIframe
+    // above can apply to this popup's window too (seen in practice on
+    // iPadOS Safari): `addEventListener('load', ...)` can throw even though
+    // the popup opened fine. Fall back to a short fixed delay so the label
+    // still prints instead of the whole action erroring out.
+    try {
+      win.addEventListener('load', () => {
+        win.focus()
+        win.print()
+        resolve()
+      })
+    } catch {
+      setTimeout(() => {
+        try {
+          win.focus()
+        } catch {
+          // ignore
+        }
+        try {
+          win.print()
+        } catch {
+          // ignore
+        }
+        resolve()
+      }, 800)
+    }
   })
 }
 
