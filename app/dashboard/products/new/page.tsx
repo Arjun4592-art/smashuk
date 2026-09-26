@@ -557,6 +557,23 @@ export default function AddProductPage() {
         values: entry.canonicalValues,
       })
     })
+    // Each variant's option rows are filled in independently in the UI, so
+    // their order can differ per variant (one variant might have Size
+    // added before Color, another Color before Size). The variant `title`
+    // below is just a plain string joining `filled` in whatever order it
+    // happens to be in, so without sorting to a shared order first, the
+    // Admin's Variants list ends up with titles like "3.0 / White" next to
+    // "White / 3.5" for the same product. `options` above is already in a
+    // stable, canonical order (the order these option titles were first
+    // resolved in), so sort every variant's filled options to match it
+    // before joining.
+    const canonicalOptionTitles = options.map((o) => o.title)
+    const sortedFilled = (v: Variant) =>
+      [...filledOptions(v)].sort(
+        (a, b) =>
+          canonicalOptionTitles.indexOf(a.name.trim()) -
+          canonicalOptionTitles.indexOf(b.name.trim()),
+      )
     const baseVariant = {
       title: 'Default',
       sku: form.sku || undefined,
@@ -579,7 +596,7 @@ export default function AddProductPage() {
     const extraVariants = variants
       .filter((v) => filledOptions(v).length > 0)
       .map((v) => {
-        const filled = filledOptions(v)
+        const filled = sortedFilled(v)
         return {
           title: filled.map((o) => o.value.trim()).join(' / '),
           sku: v.sku || undefined,
@@ -690,7 +707,7 @@ export default function AddProductPage() {
             variants
               .filter((v) => v.stock && filledOptions(v).length > 0)
               .map((v) => [
-                filledOptions(v)
+                sortedFilled(v)
                   .map((o) => o.value.trim())
                   .join(' / '),
                 Number(v.stock),

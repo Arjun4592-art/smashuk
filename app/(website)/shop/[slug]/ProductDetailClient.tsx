@@ -234,7 +234,8 @@ async function resolveStringOptions(sport?: string): Promise<StringOption[]> {
         // variant that has a price; otherwise take the first one.
         const variant =
           variants.find(
-            (v: any) => typeof v.calculated_price?.calculated_amount === 'number',
+            (v: any) =>
+              typeof v.calculated_price?.calculated_amount === 'number',
           ) ?? variants[0]
         if (!variant) return null
         const gbp = (variant.prices ?? []).find(
@@ -1347,6 +1348,22 @@ export default function ProductDetailClient({
     selectedVariant?.images?.length > 0
       ? selectedVariant.images.map((img: any) => img.url)
       : product.images
+  // Each variant can carry its own price (Variants tab in the dashboard
+  // overrides price per size/colour) — `product.price`/`originalPrice` are
+  // only ever the FIRST variant's price, fixed at the server. Display must
+  // track whichever variant is actually selected, or the price shown never
+  // changes when the shopper picks a different size/colour.
+  const selectedVariantPrice: number =
+    selectedVariant?.calculated_price?.calculated_amount ??
+    selectedVariant?.prices?.find((pr: any) => pr.currency_code === 'gbp')
+      ?.amount ??
+    product.price
+  const selectedVariantOriginalPrice: number | undefined =
+    selectedVariant?.calculated_price?.original_amount !== undefined &&
+    selectedVariant?.calculated_price?.original_amount !== null &&
+    selectedVariant.calculated_price.original_amount !== selectedVariantPrice
+      ? selectedVariant.calculated_price.original_amount
+      : product.originalPrice
   useEffect(() => {
     setActiveImage(0)
   }, [selectedVariantId])
@@ -1474,9 +1491,11 @@ export default function ProductDetailClient({
         ? 'tennis'
         : 'badminton'
   const addItem = useCartStore((s) => s.addItem)
-  const discount = product.originalPrice
+  const discount = selectedVariantOriginalPrice
     ? Math.round(
-        ((product.originalPrice - product.price) / product.originalPrice) * 100,
+        ((selectedVariantOriginalPrice - selectedVariantPrice) /
+          selectedVariantOriginalPrice) *
+          100,
       )
     : 0
   const displayBadge = product.badge ?? (discount > 0 ? 'SALE' : null)
@@ -1499,7 +1518,7 @@ export default function ProductDetailClient({
       ) => b.minQty - a.minQty,
     )[0].discountPct
   }, [product.tierPricing, quantity])
-  const tierUnitPrice = product.price * (1 - tierDiscountPct / 100)
+  const tierUnitPrice = selectedVariantPrice * (1 - tierDiscountPct / 100)
   const handleAddToCart = async () => {
     if (adding || added) return
     const variant = selectedVariant
@@ -1791,12 +1810,12 @@ export default function ProductDetailClient({
             {}
             <div className='order-3 lg:order-2 flex items-center gap-4 mb-6 pb-6 border-b border-gray-100'>
               <span className='font-montserrat font-black text-4xl text-[#0A1F44]'>
-                {formatPrice(product.price)}
+                {formatPrice(selectedVariantPrice)}
               </span>
-              {product.originalPrice && (
+              {selectedVariantOriginalPrice && (
                 <>
                   <span className='text-xl text-gray-400 line-through font-lato'>
-                    {formatPrice(product.originalPrice)}
+                    {formatPrice(selectedVariantOriginalPrice)}
                   </span>
                   <span className='bg-[#E8553A]/10 text-[#E8553A] font-montserrat font-black text-sm px-3 py-1 rounded-full'>
                     Save {discount}%

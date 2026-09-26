@@ -11,8 +11,17 @@ const STORE_HEADERS = {
 const PAGE_SIZE = 100
 const MAX_PAGES = 50
 
+// Same field-projection gotcha as STORE_PRODUCT_FIELDS in lib/api/store.ts:
+// Medusa's inventory-availability resolver needs `manage_inventory` present
+// in the projection (even though nothing here reads it directly) for
+// `inventory_quantity` to resolve at all, and `*variants.calculated_price`
+// must be the FIRST field when combined with inventory fields in the same
+// list. Without `+variants.inventory_quantity,+variants.manage_inventory`
+// here, every variant's inventory_quantity comes back null/0 — which is
+// exactly why this feed showed EVERY product as "out of stock" in Meta
+// Commerce Manager.
 const FEED_FIELDS =
-  'id,title,description,handle,thumbnail,*images,*variants,*variants.prices,*variants.calculated_price,+metadata,*categories'
+  '*variants.calculated_price,id,title,description,handle,thumbnail,*images,*variants,*variants.prices,+variants.inventory_quantity,+variants.manage_inventory,+metadata,*categories'
 
 async function getFirstRegionId(): Promise<string | null> {
   try {
@@ -125,7 +134,10 @@ export async function GET() {
       const currency = (gbpPrices[0]?.currency_code ?? 'gbp').toUpperCase()
 
       const availability =
-        (variant.inventory_quantity ?? 0) > 0 ? 'in stock' : 'out of stock'
+        variant.manage_inventory === false ||
+        (variant.inventory_quantity ?? 0) > 0
+          ? 'in stock'
+          : 'out of stock'
       const image = product.images?.[0]?.url ?? product.thumbnail ?? ''
       const link = `${SITE_URL}/shop/${product.handle}`
       const brand = product.metadata?.brand || SITE_NAME

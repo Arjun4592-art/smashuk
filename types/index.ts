@@ -125,6 +125,14 @@ export interface Product {
     label: string
     value: string
   }[]
+  // Superset of `specs` used ONLY for shop sidebar/facet filtering — also
+  // includes one entry per variant option value (Size, Colour, etc). Never
+  // render this on the PDP/QuickView "Specifications" panel; use `specs`
+  // there, or every colour/size option will show up as a spec row.
+  filterSpecs?: {
+    label: string
+    value: string
+  }[]
   stringUpgradeAvailable?: boolean
   stringUpgradeType?: 'free' | 'paid'
   variants?: ProductVariant[]

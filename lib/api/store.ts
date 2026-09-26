@@ -147,7 +147,13 @@ export function normalizeProduct(p: any): Product {
     tags: p.tags?.map((t: any) => t.value) ?? [],
     createdAt: p.created_at,
     updatedAt: p.updated_at,
-    specs: [...extractSpecs(p.metadata), ...extractOptionSpecs(p.options)],
+    // `specs` is metadata-only — this is what the PDP/QuickView
+    // "Specifications" panel renders verbatim, so it must never contain
+    // variant option values (that used to dump every Colour/Size value in
+    // as a fake "spec"). `filterSpecs` is the superset the shop sidebar
+    // facets/filtering actually need; see extractOptionSpecs() below.
+    specs: extractSpecs(p.metadata),
+    filterSpecs: [...extractSpecs(p.metadata), ...extractOptionSpecs(p.options)],
     stringUpgradeAvailable: p.metadata?.string_upgrade_available === true,
     stringUpgradeType:
       p.metadata?.string_upgrade_type === 'paid' ? 'paid' : 'free',
