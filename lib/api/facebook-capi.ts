@@ -142,6 +142,15 @@ export async function sendFacebookCapiEvent(
         custom_data: customData,
       },
     ],
+    // Set FACEBOOK_TEST_EVENT_CODE temporarily (e.g. in .env.local or your
+    // hosting provider's env settings) to the code shown under Events
+    // Manager > Test Events. While set, every event sent through this
+    // function is tagged so it shows up instantly there for verification,
+    // without affecting live ad optimization. Remove/unset it afterwards —
+    // leaving it set in production stops events from counting normally.
+    ...(process.env.FACEBOOK_TEST_EVENT_CODE
+      ? { test_event_code: process.env.FACEBOOK_TEST_EVENT_CODE }
+      : {}),
   }
 
   try {
