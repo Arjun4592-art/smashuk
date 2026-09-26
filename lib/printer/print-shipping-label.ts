@@ -11,8 +11,15 @@ function isIOS(): boolean {
 }
 
 async function toPrintableUrl(labelUrl: string): Promise<string> {
-  // Parcel2Go returns a data: URI; browsers block window.open/iframe
-  // navigation to those in some contexts, so always go through a blob: URL.
+  // `labelUrl` is expected to be a same-origin URL by this point — callers
+  // route through /api/admin/orders/[id]/shipping-label/file (or the POS
+  // equivalent) rather than handing Parcel2Go's own URL to the print
+  // iframe/popup below, since a cross-origin frame's contentWindow can't be
+  // touched (`iframe.contentWindow.addEventListener(...)` throws a
+  // SecurityError: "Blocked a frame ... from accessing a cross-origin
+  // frame."). A data: URI can still turn up here (e.g. in tests), and
+  // browsers block window.open/iframe navigation to those in some contexts,
+  // so always go through a blob: URL for that case.
   if (!labelUrl.startsWith('data:')) return labelUrl
   const blob = await (await fetch(labelUrl)).blob()
   return URL.createObjectURL(blob)

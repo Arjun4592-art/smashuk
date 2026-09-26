@@ -14,6 +14,16 @@ const MAX_PAGES = 50 // safety cap: 5,000 products, matches app/sitemap.ts
 const FEED_FIELDS =
   'id,title,description,handle,thumbnail,*images,*variants,*variants.prices,*variants.calculated_price,+metadata,*categories'
 
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+}
+
 function xmlEscape(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -110,7 +120,7 @@ function buildItemXml(product: any, variant: any): string {
     '<item>',
     `<g:id>${xmlEscape(offerId(variant))}</g:id>`,
     `<title>${xmlEscape(title)}</title>`,
-    `<description>${xmlEscape((product.description ?? '').replace(/<[^>]*>/g, '').slice(0, 5000))}</description>`,
+    `<description>${xmlEscape(decodeHtmlEntities((product.description ?? '').replace(/<[^>]*>/g, '')).slice(0, 5000))}</description>`,
     `<link>${xmlEscape(link)}</link>`,
     `<g:image_link>${xmlEscape(image)}</g:image_link>`,
     `<g:availability>${availability}</g:availability>`,

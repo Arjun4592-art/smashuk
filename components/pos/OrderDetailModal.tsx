@@ -172,7 +172,11 @@ export default function OrderDetailModal({
         toast.error('Parcel2Go has not returned a label URL yet.')
         return
       }
-      await printShippingLabel(labelUrl)
+      // Print via our own same-origin proxy, not Parcel2Go's URL directly —
+      // the print iframe can't access a cross-origin frame's contentWindow.
+      await printShippingLabel(
+        `/api/pos/orders/${order.medusaOrderId ?? order.id}/label/file`,
+      )
     } catch (err: unknown) {
       toast.error('Could not print shipping label', {
         description: err instanceof Error ? err.message : undefined,

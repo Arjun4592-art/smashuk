@@ -54,13 +54,7 @@ const ORDER_METADATA_SKIP = new Set([
 ])
 
 type Action =
-  | 'confirm'
-  | 'cancel'
-  | 'archive'
-  | 'fulfill'
-  | 'capture'
-  | 'ship'
-  | 'deliver'
+  'confirm' | 'cancel' | 'archive' | 'fulfill' | 'capture' | 'ship' | 'deliver'
 
 const ACTION_VERB: Record<Action, string> = {
   confirm: 'complete',
@@ -148,7 +142,9 @@ export default function OrderDetailPage({
         toast.error('Parcel2Go has not returned a label URL yet.')
         return
       }
-      await printShippingLabel(label_url)
+      // Print via our own same-origin proxy, not Parcel2Go's URL directly —
+      // the print iframe can't access a cross-origin frame's contentWindow.
+      await printShippingLabel(`/api/admin/orders/${id}/shipping-label/file`)
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to print shipping label')
     } finally {

@@ -12,7 +12,7 @@ const PAGE_SIZE = 100
 const MAX_PAGES = 50
 
 const FEED_FIELDS =
-  'id,title,description,handle,thumbnail,*images,*variants,*variants.prices,*variants.calculated_price,+metadata'
+  'id,title,description,handle,thumbnail,*images,*variants,*variants.prices,*variants.calculated_price,+metadata,*categories'
 
 async function getFirstRegionId(): Promise<string | null> {
   try {
@@ -53,6 +53,16 @@ async function fetchAllProducts(): Promise<any[]> {
   return products
 }
 
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+}
+
 function csvEscape(value: string): string {
   const needsQuoting = /[",\n]/.test(value)
   const escaped = value.replace(/"/g, '""')
@@ -82,6 +92,10 @@ const HEADERS = [
   'image_link',
   'brand',
   'quantity_to_sell_on_facebook',
+  'gtin',
+  'mpn',
+  'identifier_exists',
+  'product_type',
 ]
 
 export async function GET() {
@@ -119,11 +133,19 @@ export async function GET() {
         variant.title && variant.title !== 'Default'
           ? `${product.title} - ${variant.title}`
           : product.title
+      const gtin = variant.ean || variant.barcode || ''
+      const mpn = variant.sku || ''
+      const identifierExists = gtin ? 'yes' : 'no'
+      const productType = product.categories?.length
+        ? product.categories.map((c: any) => c.name).join(' > ')
+        : ''
 
       const row = [
         offerId(variant),
         title,
-        (product.description ?? '').replace(/<[^>]*>/g, '').slice(0, 5000),
+        decodeHtmlEntities(
+          (product.description ?? '').replace(/<[^>]*>/g, ''),
+        ).slice(0, 5000),
         availability,
         'new',
         `${regularAmount.toFixed(2)} ${currency}`,
@@ -132,6 +154,10 @@ export async function GET() {
         image,
         brand,
         String(variant.inventory_quantity ?? 0),
+        gtin,
+        mpn,
+        identifierExists,
+        productType,
       ].map((v) => csvEscape(String(v)))
 
       rows.push(row.join(','))

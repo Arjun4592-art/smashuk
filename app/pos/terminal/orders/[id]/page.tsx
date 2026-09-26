@@ -347,7 +347,9 @@ export default function OrderDetailPage({
         alert('Parcel2Go has not returned a label URL yet.')
         return
       }
-      await printShippingLabel(label_url)
+      // Print via our own same-origin proxy, not Parcel2Go's URL directly —
+      // the print iframe can't access a cross-origin frame's contentWindow.
+      await printShippingLabel(`/api/admin/orders/${id}/shipping-label/file`)
     } catch (err: unknown) {
       alert(
         'Failed to print shipping label: ' +
