@@ -1,19 +1,3 @@
-// Renders a same-origin PDF into a plain, self-contained, printable HTML
-// document — one <img> per page, each sized in mm to match the PDF's own
-// page size.
-//
-// WHY THIS EXISTS: handing a PDF straight to an <iframe>/popup and calling
-// `.focus()` / `.print()` / `.addEventListener()` on its `contentWindow`
-// fails on many mobile browsers (Android Chrome, iPadOS Safari/Chrome) with
-// "Blocked a frame ... from accessing a cross-origin frame" — even when the
-// PDF is served from our own origin. That happens because those browsers
-// hand PDF content to an internal PDF-viewer component that behaves like a
-// genuinely cross-origin frame for scripting purposes.
-//
-// Rendering the PDF to <img> tags ourselves sidesteps that completely: the
-// iframe then only ever contains an ordinary HTML document (same technique
-// already used for receipts/labels in label-print.ts and browser-print.ts),
-// which every browser lets us script and print without a popup.
 
 const PT_TO_MM = 25.4 / 72
 
@@ -32,7 +16,7 @@ async function loadPdfJs() {
 
 export async function pdfUrlToPrintHtml(url: string): Promise<string> {
   const pdfjsLib = await loadPdfJs()
-  const doc = await pdfjsLib.getDocument(url).promise
+  const doc = await pdfjsLib.getDocument({ url }).promise
   const RENDER_SCALE = 2 // render at 2x for crisp print output
 
   const pageHtml: string[] = []
