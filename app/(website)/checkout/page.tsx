@@ -1,5 +1,6 @@
 'use client'
 
+import { getVatDestination } from '@/lib/vat'
 import {
   useState,
   useEffect,
@@ -25,6 +26,7 @@ import {
 } from '@/lib/api/store'
 import { useAuthStore } from '@/store/authStore'
 import { trackBeginCheckout } from '@/lib/analytics-events'
+import { displayRows } from '@/lib/cart-links'
 import {
   FREE_SHIPPING_THRESHOLD,
   STANDARD_SHIPPING_COST,
@@ -405,13 +407,21 @@ export default function CheckoutPage() {
         ? 0
         : STANDARD_SHIPPING_COST
 
-  const displayTotal = Math.max(
-    0,
-    subtotal - discountAmount + displayShipping - giftCardTotal,
-  )
+  // Channel Islands deliveries are outside UK VAT: prices are VAT-inclusive, so
+  // strip VAT from goods + shipping and show no VAT line.
+  const vatDestination =
+    deliveryMode === 'ship'
+      ? getVatDestination(form.pincode)
+      : getVatDestination(null)
+  const grossBeforeGiftCard = subtotal - discountAmount + displayShipping
+  const netBeforeGiftCard = vatDestination.vatExempt
+    ? Math.round((grossBeforeGiftCard / (1 + taxRate)) * 100) / 100
+    : grossBeforeGiftCard
+  const displayTotal = Math.max(0, netBeforeGiftCard - giftCardTotal)
 
-  const displayTax =
-    Math.round((displayTotal - displayTotal / (1 + taxRate)) * 100) / 100
+  const displayTax = vatDestination.vatExempt
+    ? 0
+    : Math.round((displayTotal - displayTotal / (1 + taxRate)) * 100) / 100
   useEffect(() => {
     if (deliveryMode === 'pickup') {
       if (pickupOption && selectedShippingOptionId !== pickupOption.id) {
@@ -575,7 +585,7 @@ export default function CheckoutPage() {
               city: form.city,
               province: form.state,
               postal_code: form.pincode,
-              country_code: 'gb',
+              country_code: getVatDestination(form.pincode).countryCode,
               phone: form.phone || undefined,
             }
       const billingAddress =
@@ -988,7 +998,7 @@ export default function CheckoutPage() {
               </div>
 
               <div className='space-y-3 mb-5 max-h-48 overflow-y-auto'>
-                {items.map((item) => (
+                {displayRows(items).map(({ item, stringAddon }) => (
                   <div
                     key={`${item.product.id}-${item.variant?.id}`}
                     className='flex items-center gap-3'
@@ -1007,9 +1017,22 @@ export default function CheckoutPage() {
                       <p className='text-xs text-gray-400 font-lato'>
                         Qty: {item.quantity}
                       </p>
+                      {item.metadata?.string_choice && (
+                        <p className='text-xs text-gray-400 font-lato truncate'>
+                          String: {item.metadata.string_choice}
+                          {item.metadata.string_tension
+                            ? ` · ${item.metadata.string_tension}`
+                            : ''}
+                        </p>
+                      )}
                     </div>
                     <span className='text-sm font-black font-montserrat text-[#0A1F44]'>
-                      {formatCurrency(item.product.price * item.quantity)}
+                      {formatCurrency(
+                        item.product.price * item.quantity +
+                          (stringAddon
+                            ? stringAddon.product.price * stringAddon.quantity
+                            : 0),
+                      )}
                     </span>
                   </div>
                 ))}

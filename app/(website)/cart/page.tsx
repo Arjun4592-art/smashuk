@@ -24,6 +24,7 @@ import { getRecentlyViewedIds } from '@/lib/recently-viewed'
 import { trackViewCart } from '@/lib/analytics-events'
 import ProductCard from '@/components/website/ProductCard'
 import type { Product } from '@/types'
+import { displayRows, findParentItem, lineTotal } from '@/lib/cart-links'
 export default function CartPage() {
   const {
     items,
@@ -227,145 +228,168 @@ export default function CartPage() {
             </div>
 
             <div className='divide-y divide-gray-100'>
-              {items.map((item) => (
-                <div
-                  key={`${item.product.id}-${item.variant?.id}`}
-                  className='grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-4 sm:gap-6 py-6 items-start sm:items-center'
-                >
-                  {}
-                  <div className='flex gap-4'>
-                    <Link
-                      href={`/shop/${item.product.slug}`}
-                      className='shrink-0'
-                    >
-                      <div className='w-20 h-20 rounded-lg overflow-hidden bg-gray-50 border border-gray-100'>
-                        <img
-                          src={item.product.images[0]}
-                          alt={item.product.name}
-                          className='w-full h-full object-cover'
-                        />
-                      </div>
-                    </Link>
-                    <div className='min-w-0'>
-                      <p className='text-[11px] text-gray-400 font-lato uppercase tracking-wider mb-0.5'>
-                        {item.product.brand}
-                      </p>
-                      <Link href={`/shop/${item.product.slug}`}>
-                        <h3 className='font-montserrat font-bold text-[#0A1F44] text-sm hover:text-[#E8553A] transition-colors leading-snug'>
-                          {item.product.name}
-                        </h3>
+              {displayRows(items).map(({ item, stringAddon }) => {
+                const parentItem = findParentItem(item, items)
+                return (
+                  <div
+                    key={`${item.product.id}-${item.variant?.id}`}
+                    className='grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-4 sm:gap-6 py-6 items-start sm:items-center'
+                  >
+                    {}
+                    <div className='flex gap-4'>
+                      <Link
+                        href={`/shop/${item.product.slug}`}
+                        className='shrink-0'
+                      >
+                        <div className='w-20 h-20 rounded-lg overflow-hidden bg-gray-50 border border-gray-100'>
+                          <img
+                            src={item.product.images[0]}
+                            alt={item.product.name}
+                            className='w-full h-full object-cover'
+                          />
+                        </div>
                       </Link>
-                      {item.variant &&
-                        (item.variant.size || item.variant.color) && (
+                      <div className='min-w-0'>
+                        <p className='text-[11px] text-gray-400 font-lato uppercase tracking-wider mb-0.5'>
+                          {item.product.brand}
+                        </p>
+                        <Link href={`/shop/${item.product.slug}`}>
+                          <h3 className='font-montserrat font-bold text-[#0A1F44] text-sm hover:text-[#E8553A] transition-colors leading-snug'>
+                            {item.product.name}
+                          </h3>
+                        </Link>
+                        {item.variant &&
+                          (item.variant.size || item.variant.color) && (
+                            <p className='text-xs text-gray-400 font-lato mt-1'>
+                              {[item.variant.size, item.variant.color]
+                                .filter(Boolean)
+                                .join(' / ')}
+                            </p>
+                          )}
+                        {item.metadata?.string_choice ? (
                           <p className='text-xs text-gray-400 font-lato mt-1'>
-                            {[item.variant.size, item.variant.color]
-                              .filter(Boolean)
-                              .join(' / ')}
+                            String Upgrade: {item.metadata.string_choice}
+                            {item.metadata.string_tension
+                              ? ` · ${item.metadata.string_tension}`
+                              : ''}
+                            {stringAddon
+                              ? ` · +${formatCurrency(stringAddon.product.price)}`
+                              : ''}
+                          </p>
+                        ) : (
+                          item.metadata?.string_upgrade && (
+                            <p className='text-xs text-gray-400 font-lato mt-1'>
+                              String Upgrade: {item.metadata.string_upgrade}
+                            </p>
+                          )
+                        )}
+                        {item.metadata?.grip_choice && (
+                          <p className='text-xs text-gray-400 font-lato mt-1'>
+                            Racket Grip: {item.metadata.grip_choice}
                           </p>
                         )}
-                      {item.metadata?.string_choice ? (
-                        <p className='text-xs text-gray-400 font-lato mt-1'>
-                          String Upgrade: {item.metadata.string_choice}
-                          {item.metadata.string_tension
-                            ? ` · ${item.metadata.string_tension}`
-                            : ''}
-                        </p>
-                      ) : (
-                        item.metadata?.string_upgrade && (
+                        {item.metadata?.linked_product && (
                           <p className='text-xs text-gray-400 font-lato mt-1'>
-                            String Upgrade: {item.metadata.string_upgrade}
+                            For: {item.metadata.linked_product}
                           </p>
-                        )
-                      )}
-                      {item.metadata?.grip_choice && (
-                        <p className='text-xs text-gray-400 font-lato mt-1'>
-                          Racket Grip: {item.metadata.grip_choice}
-                        </p>
-                      )}
-                      {item.metadata?.linked_product && (
-                        <p className='text-xs text-gray-400 font-lato mt-1'>
-                          For: {item.metadata.linked_product}
-                        </p>
-                      )}
-                      {item.discount ? (
-                        <p className='text-sm font-lato mt-1.5'>
-                          <span className='text-[#E8553A] font-bold'>
-                            {formatCurrency(item.product.price - item.discount)}
-                          </span>{' '}
-                          <span className='text-gray-400 line-through'>
+                        )}
+                        {item.discount ? (
+                          <p className='text-sm font-lato mt-1.5'>
+                            <span className='text-[#E8553A] font-bold'>
+                              {formatCurrency(
+                                item.product.price - item.discount,
+                              )}
+                            </span>{' '}
+                            <span className='text-gray-400 line-through'>
+                              {formatCurrency(item.product.price)}
+                            </span>
+                          </p>
+                        ) : item.product.originalPrice &&
+                          item.product.originalPrice > item.product.price ? (
+                          <p className='text-sm font-lato mt-1.5'>
+                            <span className='text-[#E8553A] font-bold'>
+                              {formatCurrency(item.product.price)}
+                            </span>{' '}
+                            <span className='text-gray-400 line-through'>
+                              {formatCurrency(item.product.originalPrice)}
+                            </span>
+                          </p>
+                        ) : (
+                          <p className='text-sm font-lato text-gray-500 mt-1.5 sm:hidden'>
                             {formatCurrency(item.product.price)}
-                          </span>
-                        </p>
-                      ) : item.product.originalPrice &&
-                        item.product.originalPrice > item.product.price ? (
-                        <p className='text-sm font-lato mt-1.5'>
-                          <span className='text-[#E8553A] font-bold'>
-                            {formatCurrency(item.product.price)}
-                          </span>{' '}
-                          <span className='text-gray-400 line-through'>
-                            {formatCurrency(item.product.originalPrice)}
-                          </span>
-                        </p>
-                      ) : (
-                        <p className='text-sm font-lato text-gray-500 mt-1.5 sm:hidden'>
-                          {formatCurrency(item.product.price)}
-                        </p>
-                      )}
-                      <button
-                        onClick={() =>
-                          removeItem(item.product.id, item.variant?.id)
-                        }
-                        className='inline-flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 font-lato mt-2 transition-colors'
-                      >
-                        <TrashIcon size={12} /> Remove
-                      </button>
-                    </div>
-                  </div>
-
-                  {}
-                  <div className='flex sm:justify-center'>
-                    <div className='flex items-center border border-gray-200 rounded-lg overflow-hidden'>
-                      <button
-                        onClick={() =>
-                          updateQuantity(
-                            item.product.id,
-                            item.quantity - 1,
-                            item.variant?.id,
+                          </p>
+                        )}
+                        {item.metadata?.linked_product ? (
+                          parentItem ? (
+                            <Link
+                              href={`/shop/${parentItem.product.slug}`}
+                              className='inline-flex items-center gap-1 text-xs text-gray-400 hover:text-[#E8553A] font-lato mt-2 transition-colors'
+                            >
+                              Edit from {item.metadata.linked_product}
+                            </Link>
+                          ) : (
+                            <p className='text-xs text-gray-400 font-lato mt-2'>
+                              Edit from {item.metadata.linked_product}
+                            </p>
                           )
-                        }
-                        className='w-9 h-9 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
-                      >
-                        <MinusIcon size={14} />
-                      </button>
-                      <span className='w-10 text-center font-montserrat font-bold text-[#0A1F44] text-sm'>
-                        {item.quantity}
+                        ) : (
+                          <button
+                            onClick={() =>
+                              removeItem(item.product.id, item.variant?.id)
+                            }
+                            className='inline-flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 font-lato mt-2 transition-colors'
+                          >
+                            <TrashIcon size={12} /> Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {}
+                    <div className='flex sm:justify-center'>
+                      <div className='flex items-center border border-gray-200 rounded-lg overflow-hidden'>
+                        <button
+                          onClick={() =>
+                            updateQuantity(
+                              item.product.id,
+                              item.quantity - 1,
+                              item.variant?.id,
+                            )
+                          }
+                          className='w-9 h-9 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
+                        >
+                          <MinusIcon size={14} />
+                        </button>
+                        <span className='w-10 text-center font-montserrat font-bold text-[#0A1F44] text-sm'>
+                          {item.quantity}
+                        </span>
+                        <button
+                          onClick={() =>
+                            updateQuantity(
+                              item.product.id,
+                              item.quantity + 1,
+                              item.variant?.id,
+                            )
+                          }
+                          className='w-9 h-9 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
+                        >
+                          <PlusIcon size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {}
+                    <div className='sm:w-24 sm:text-right'>
+                      <span className='font-montserrat font-black text-[#0A1F44] text-base'>
+                        {formatCurrency(
+                          lineTotal(item) +
+                            (stringAddon ? lineTotal(stringAddon) : 0),
+                        )}
                       </span>
-                      <button
-                        onClick={() =>
-                          updateQuantity(
-                            item.product.id,
-                            item.quantity + 1,
-                            item.variant?.id,
-                          )
-                        }
-                        className='w-9 h-9 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
-                      >
-                        <PlusIcon size={14} />
-                      </button>
                     </div>
                   </div>
-
-                  {}
-                  <div className='sm:w-24 sm:text-right'>
-                    <span className='font-montserrat font-black text-[#0A1F44] text-base'>
-                      {formatCurrency(
-                        (item.product.price - (item.discount ?? 0)) *
-                          item.quantity,
-                      )}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             {}

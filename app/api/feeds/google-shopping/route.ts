@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { SITE_URL, SITE_NAME } from '@/lib/constants'
+import { getStoreChannelProductIds, googleOfferId } from '@/lib/google-merchant'
 
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
@@ -80,19 +81,15 @@ async function fetchAllProducts(): Promise<any[]> {
   return products
 }
 
-// Keeps the original Shopify offer ID where we backfilled it (see
-// scripts/backfill-shopify-ids.ts), so Merchant Center treats this as the
-// same listing instead of a brand-new one.
-function offerId(variant: any): string {
-  const shopifyProductId = variant.metadata?.shopify_product_id
-  const shopifyVariantId = variant.metadata?.shopify_variant_id
-  if (shopifyProductId && shopifyVariantId) {
-    return `shopify_GB_${shopifyProductId}_${shopifyVariantId}`
-  }
-  return variant.sku || variant.id
-}
-
-function buildItemXml(product: any, variant: any): string {
+// Products NOT sold in the physical store must opt out of the local marketing
+// methods, otherwise Merchant Center reports them as "Missing local inventory
+// data". `storeProductIds` is null when the Store channel couldn't be read; in
+// that case nothing is excluded (fail safe).
+function buildItemXml(
+  product: any,
+  variant: any,
+  storeProductIds: Set<string> | null,
+): string {
   const gbpPrices = (variant.prices ?? []).filter(
     (pr: any) => pr.currency_code === 'gbp',
   )
@@ -128,7 +125,7 @@ function buildItemXml(product: any, variant: any): string {
 
   const parts = [
     '<item>',
-    `<g:id>${xmlEscape(offerId(variant))}</g:id>`,
+    `<g:id>${xmlEscape(googleOfferId(variant))}</g:id>`,
     `<title>${xmlEscape(title)}</title>`,
     `<description>${xmlEscape(decodeHtmlEntities((product.description ?? '').replace(/<[^>]*>/g, '')).slice(0, 5000))}</description>`,
     `<link>${xmlEscape(link)}</link>`,
@@ -144,6 +141,9 @@ function buildItemXml(product: any, variant: any): string {
       ? `<g:gtin>${xmlEscape(gtin)}</g:gtin>`
       : `<g:identifier_exists>no</g:identifier_exists>`,
     variant.sku ? `<g:mpn>${xmlEscape(variant.sku)}</g:mpn>` : '',
+    storeProductIds && !storeProductIds.has(product.id)
+      ? '<g:excluded_destination>free_local_listings</g:excluded_destination>\n<g:excluded_destination>local_inventory_ads</g:excluded_destination>'
+      : '',
     product.categories?.length
       ? `<g:product_type>${xmlEscape(product.categories.map((c: any) => c.name).join(' > '))}</g:product_type>`
       : '',
@@ -153,11 +153,14 @@ function buildItemXml(product: any, variant: any): string {
 }
 
 export async function GET() {
-  const products = await fetchAllProducts()
+  const [products, storeProductIds] = await Promise.all([
+    fetchAllProducts(),
+    getStoreChannelProductIds(),
+  ])
   const items: string[] = []
   for (const product of products) {
     for (const variant of product.variants ?? []) {
-      items.push(buildItemXml(product, variant))
+      items.push(buildItemXml(product, variant, storeProductIds))
     }
   }
 

@@ -1587,6 +1587,8 @@ export default function ProductDetailClient({
           },
           {
             linked_product: product.name,
+            linked_product_id: product.id,
+            linked_variant_id: variant.id,
             grip_choice: selectedGrip.name,
           },
         )
@@ -1619,6 +1621,8 @@ export default function ProductDetailClient({
           },
           {
             linked_product: product.name,
+            linked_product_id: product.id,
+            linked_variant_id: variant.id,
             string_choice: `${stringSelection.string.brand} ${stringSelection.string.name}`,
             string_tension: `${stringSelection.tension} lbs`,
           },

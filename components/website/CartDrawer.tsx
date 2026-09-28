@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useCartStore } from '@/store/cartStore'
 import { formatCurrency } from '@/lib/utils'
+import { displayRows, findParentItem } from '@/lib/cart-links'
 import {
   CloseIcon,
   TrashIcon,
@@ -151,89 +152,121 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
               </button>
             </div>
           ) : (
-            items.map((item) => (
-              <div
-                key={`${item.product.id}-${item.variant?.id}`}
-                className='bg-white rounded-2xl p-3.5 border border-[#E5E7EB] hover:border-[#E8553A]/30 hover:shadow-sm transition-all duration-200'
-              >
-                <div className='flex gap-3'>
-                  {}
-                  <div className='w-[72px] h-[72px] rounded-xl overflow-hidden bg-[#F2F4F7] shrink-0 border border-[#E5E7EB]'>
-                    <img
-                      src={item.product.images[0]}
-                      alt={item.product.name}
-                      className='w-full h-full object-cover'
-                    />
-                  </div>
+            displayRows(items).map(({ item, stringAddon }) => {
+              const parentItem = findParentItem(item, items)
+              return (
+                <div
+                  key={`${item.product.id}-${item.variant?.id}`}
+                  className='bg-white rounded-2xl p-3.5 border border-[#E5E7EB] hover:border-[#E8553A]/30 hover:shadow-sm transition-all duration-200'
+                >
+                  <div className='flex gap-3'>
+                    {}
+                    <div className='w-[72px] h-[72px] rounded-xl overflow-hidden bg-[#F2F4F7] shrink-0 border border-[#E5E7EB]'>
+                      <img
+                        src={item.product.images[0]}
+                        alt={item.product.name}
+                        className='w-full h-full object-cover'
+                      />
+                    </div>
 
-                  {}
-                  <div className='flex-1 min-w-0'>
-                    <p className='text-[10px] text-[#E8553A] font-bold font-lato uppercase tracking-wider'>
-                      {item.product.brand}
-                    </p>
-                    <h4 className='font-montserrat font-bold text-[13px] text-[#0A1F44] leading-snug line-clamp-2 mt-0.5'>
-                      {item.product.name}
-                    </h4>
-                    {item.variant && (
-                      <p className='text-[11px] text-[#9CA3AF] font-lato mt-0.5'>
-                        {item.variant.size}
-                        {item.variant.color ? ` · ${item.variant.color}` : ''}
+                    {}
+                    <div className='flex-1 min-w-0'>
+                      <p className='text-[10px] text-[#E8553A] font-bold font-lato uppercase tracking-wider'>
+                        {item.product.brand}
                       </p>
+                      <h4 className='font-montserrat font-bold text-[13px] text-[#0A1F44] leading-snug line-clamp-2 mt-0.5'>
+                        {item.product.name}
+                      </h4>
+                      {item.variant && (
+                        <p className='text-[11px] text-[#9CA3AF] font-lato mt-0.5'>
+                          {item.variant.size}
+                          {item.variant.color ? ` · ${item.variant.color}` : ''}
+                        </p>
+                      )}
+                      {item.metadata?.string_choice && (
+                        <p className='text-[11px] text-[#9CA3AF] font-lato mt-0.5'>
+                          String: {item.metadata.string_choice}
+                          {item.metadata.string_tension
+                            ? ` · ${item.metadata.string_tension}`
+                            : ''}
+                          {stringAddon
+                            ? ` · +${formatCurrency(stringAddon.product.price)}`
+                            : ''}
+                        </p>
+                      )}
+                    </div>
+
+                    {}
+                    {item.metadata?.linked_product ? (
+                      <Link
+                        href={
+                          parentItem ? `/shop/${parentItem.product.slug}` : '#'
+                        }
+                        aria-label='Edit from product page'
+                        title={`Edit from ${item.metadata.linked_product}`}
+                        className='w-7 h-7 rounded-lg bg-[#F2F4F7] hover:bg-[#E8553A]/10 hover:text-[#E8553A] text-[#9CA3AF] flex items-center justify-center transition-colors shrink-0 text-[10px] font-bold'
+                      >
+                        i
+                      </Link>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          removeItem(item.product.id, item.variant?.id)
+                        }
+                        aria-label='Remove item'
+                        className='w-7 h-7 rounded-lg bg-[#F2F4F7] hover:bg-red-50 hover:text-red-500 text-[#9CA3AF] flex items-center justify-center transition-colors shrink-0'
+                      >
+                        <TrashIcon size={12} />
+                      </button>
                     )}
                   </div>
 
                   {}
-                  <button
-                    onClick={() =>
-                      removeItem(item.product.id, item.variant?.id)
-                    }
-                    aria-label='Remove item'
-                    className='w-7 h-7 rounded-lg bg-[#F2F4F7] hover:bg-red-50 hover:text-red-500 text-[#9CA3AF] flex items-center justify-center transition-colors shrink-0'
-                  >
-                    <TrashIcon size={12} />
-                  </button>
-                </div>
-
-                {}
-                <div className='flex items-center justify-between mt-3 pt-3 border-t border-[#F2F4F7]'>
-                  <span className='font-montserrat font-black text-base text-[#0A1F44]'>
-                    {formatCurrency(item.product.price * item.quantity)}
-                  </span>
-
-                  <div className='flex items-center gap-1 bg-[#F2F4F7] rounded-xl p-1'>
-                    <button
-                      onClick={() =>
-                        updateQuantity(
-                          item.product.id,
-                          item.quantity - 1,
-                          item.variant?.id,
-                        )
-                      }
-                      aria-label='Decrease quantity'
-                      className='w-7 h-7 rounded-lg bg-white border border-[#E5E7EB] hover:border-[#E8553A] hover:text-[#E8553A] flex items-center justify-center transition-colors'
-                    >
-                      <MinusIcon size={11} />
-                    </button>
-                    <span className='w-8 text-center text-sm font-black font-montserrat text-[#0A1F44]'>
-                      {item.quantity}
+                  <div className='flex items-center justify-between mt-3 pt-3 border-t border-[#F2F4F7]'>
+                    <span className='font-montserrat font-black text-base text-[#0A1F44]'>
+                      {formatCurrency(
+                        item.product.price * item.quantity +
+                          (stringAddon
+                            ? stringAddon.product.price * stringAddon.quantity
+                            : 0),
+                      )}
                     </span>
-                    <button
-                      onClick={() =>
-                        updateQuantity(
-                          item.product.id,
-                          item.quantity + 1,
-                          item.variant?.id,
-                        )
-                      }
-                      aria-label='Increase quantity'
-                      className='w-7 h-7 rounded-lg bg-white border border-[#E5E7EB] hover:border-[#E8553A] hover:text-[#E8553A] flex items-center justify-center transition-colors'
-                    >
-                      <PlusIcon size={11} />
-                    </button>
+
+                    <div className='flex items-center gap-1 bg-[#F2F4F7] rounded-xl p-1'>
+                      <button
+                        onClick={() =>
+                          updateQuantity(
+                            item.product.id,
+                            item.quantity - 1,
+                            item.variant?.id,
+                          )
+                        }
+                        aria-label='Decrease quantity'
+                        className='w-7 h-7 rounded-lg bg-white border border-[#E5E7EB] hover:border-[#E8553A] hover:text-[#E8553A] flex items-center justify-center transition-colors'
+                      >
+                        <MinusIcon size={11} />
+                      </button>
+                      <span className='w-8 text-center text-sm font-black font-montserrat text-[#0A1F44]'>
+                        {item.quantity}
+                      </span>
+                      <button
+                        onClick={() =>
+                          updateQuantity(
+                            item.product.id,
+                            item.quantity + 1,
+                            item.variant?.id,
+                          )
+                        }
+                        aria-label='Increase quantity'
+                        className='w-7 h-7 rounded-lg bg-white border border-[#E5E7EB] hover:border-[#E8553A] hover:text-[#E8553A] flex items-center justify-center transition-colors'
+                      >
+                        <PlusIcon size={11} />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
 
@@ -283,7 +316,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
             {}
             <Link
               href='/checkout'
-                prefetch={false}
+              prefetch={false}
               onClick={onClose}
               className='flex items-center justify-center gap-2 w-full bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-black py-3.5 rounded-xl transition-colors shadow-lg shadow-[#E8553A]/20 hover:-translate-y-0.5 transition-all duration-200'
             >
@@ -292,7 +325,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
             </Link>
             <Link
               href='/cart'
-                prefetch={false}
+              prefetch={false}
               onClick={onClose}
               className='flex items-center justify-center w-full border border-[#E5E7EB] hover:border-[#0A1F44] text-[#0A1F44] font-montserrat font-semibold py-3 rounded-xl transition-colors text-sm'
             >

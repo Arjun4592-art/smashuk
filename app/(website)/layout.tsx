@@ -4,6 +4,7 @@ import AuthProvider from '@/components/providers/AuthProvider'
 import CookieConsent from '@/components/website/CookieConsent'
 import ChatWidget from '@/components/website/ChatWidget'
 import RevealInit from '@/components/website/local-store/RevealInit'
+import { GoogleReviewBadge } from '@/components/website/GoogleCustomerReviews'
 import { getPromoBanner } from '@/lib/promo-banner'
 export default async function WebsiteLayout({
   children,
@@ -21,8 +22,9 @@ export default async function WebsiteLayout({
       <main className='ls-luxury min-h-screen'>{children}</main>
       <Footer />
       <CookieConsent />
-      
+
       <RevealInit />
+      <GoogleReviewBadge />
     </AuthProvider>
   )
 }

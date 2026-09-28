@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useCartStore } from '@/store/cartStore'
 import { getCart } from '@/lib/api/store'
 import { trackPurchase } from '@/lib/analytics-events'
+import { GoogleSurveyOptIn } from '@/components/website/GoogleCustomerReviews'
+import { estimateDeliveryDate } from '@/lib/google-customer-reviews'
 const isPickupOption = (name: string) => /pickup|store|collect/i.test(name)
 type Status = 'checking' | 'completing' | 'success' | 'error'
 function CompleteInner() {
@@ -14,6 +16,12 @@ function CompleteInner() {
   const storeCartId = useCartStore((s) => s.cartId)
   const [status, setStatus] = useState<Status>('checking')
   const [errorMessage, setErrorMessage] = useState('')
+  const [optIn, setOptIn] = useState<{
+    orderId: string
+    email: string
+    deliveryCountry: string
+    estimatedDeliveryDate: string
+  } | null>(null)
   useEffect(() => {
     const cartId = searchParams.get('cart_id') || storeCartId
     const redirectStatus = searchParams.get('redirect_status')
@@ -117,10 +125,29 @@ function CompleteInner() {
           })
         }
         clearCart()
+        // Google Customer Reviews opt-in. Google's dialog needs the customer
+        // to answer it, so in that case we must not auto-redirect away.
+        const optInEmail = order?.email || order?.customer?.email
+        if (order?.id && optInEmail) {
+          setOptIn({
+            orderId: order.display_id ? `SR-${order.display_id}` : order.id,
+            email: optInEmail,
+            deliveryCountry: (
+              order.shipping_address?.country_code ||
+              address?.country_code ||
+              'gb'
+            ).toUpperCase(),
+            estimatedDeliveryDate: estimateDeliveryDate(
+              shippingMethodName,
+              isPickupOrder,
+            ),
+          })
+        } else {
+          setTimeout(() => {
+            router.push('/profile?tab=orders')
+          }, 1500)
+        }
         setStatus('success')
-        setTimeout(() => {
-          router.push('/profile?tab=orders')
-        }, 1500)
       } catch (err: any) {
         if (cancelled) return
         setStatus('error')
@@ -157,9 +184,21 @@ function CompleteInner() {
             <h1 className='font-montserrat font-black text-xl text-[#0A1F44] mb-2'>
               Order placed successfully! 🎉
             </h1>
-            <p className='text-sm text-gray-500 font-lato'>
-              Redirecting you to your orders…
-            </p>
+            {optIn ? (
+              <>
+                <GoogleSurveyOptIn {...optIn} />
+                <Link
+                  href='/profile?tab=orders'
+                  className='inline-block mt-2 bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-6 py-3 rounded-xl transition-colors'
+                >
+                  View my orders
+                </Link>
+              </>
+            ) : (
+              <p className='text-sm text-gray-500 font-lato'>
+                Redirecting you to your orders…
+              </p>
+            )}
           </>
         )}
 
