@@ -2,7 +2,14 @@ import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { CONTACT_PHONE, CONTACT_EMAIL, SITE_NAME } from '@/lib/constants'
 import { safeJson } from '@/lib/api/safe-json'
 
+function activeFulfillment(order: any) {
+  const list: any[] = order.fulfillments ?? []
+  return list.find((f) => !f.canceled_at) ?? list[0]
+}
+
 export function getTrackingSteps(order: any) {
+  const fulfillment = activeFulfillment(order)
+  const fd = fulfillment?.data ?? {}
   const status = order.fulfillment_status ?? order.status ?? 'pending'
   const paymentStatus = order.payment_status ?? 'pending'
   return [
@@ -48,7 +55,7 @@ export function getTrackingSteps(order: any) {
         'delivered',
         'partially_delivered',
       ].includes(status),
-      date: order.fulfillments?.[0]?.shipped_at ?? null,
+      date: fd.courier_collected_at ?? fulfillment?.shipped_at ?? null,
     },
     {
       id: 'delivered',
@@ -56,7 +63,7 @@ export function getTrackingSteps(order: any) {
       description: 'Order delivered successfully',
       icon: '🎉',
       done: ['delivered', 'partially_delivered'].includes(status),
-      date: null,
+      date: fd.courier_delivered_at ?? fulfillment?.delivered_at ?? null,
     },
   ]
 }
@@ -142,9 +149,18 @@ export async function getStoreLocation() {
 }
 
 export function getEstimatedDelivery(order: any): string {
+  const fd = activeFulfillment(order)?.data ?? {}
+  const fromCourier = fd.estimated_delivery
+    ? new Date(fd.estimated_delivery)
+    : null
   const created = new Date(order.created_at)
-  const estimated = new Date(created)
-  estimated.setDate(estimated.getDate() + 5)
+  const estimated =
+    fromCourier && !isNaN(fromCourier.getTime())
+      ? fromCourier
+      : new Date(created)
+  if (!fromCourier || isNaN(fromCourier.getTime())) {
+    estimated.setDate(estimated.getDate() + 5)
+  }
   return estimated.toLocaleDateString('en-GB', {
     weekday: 'long',
     day: 'numeric',
@@ -152,14 +168,6 @@ export function getEstimatedDelivery(order: any): string {
   })
 }
 
-/**
- * Builds the tracking payload shared by both the logged-in "My Orders"
- * tracking endpoint (app/api/store/tracking) and the public, no-login QR/
- * email link (app/api/public/order-status). `full` controls how much detail
- * is included — the public link deliberately omits the customer's full
- * shipping address (only city/postcode) since anyone with the link/QR can
- * open it without authenticating.
- */
 export async function buildTrackingPayload(
   order: any,
   opts: { full: boolean },
@@ -171,6 +179,24 @@ export async function buildTrackingPayload(
     ? null
     : (order.fulfillments?.[0]?.tracking_numbers?.[0] ?? null)
   const carrier = order.fulfillments?.[0]?.provider_id ?? 'Parcel2Go'
+  const cd = activeFulfillment(order)?.data ?? {}
+  const courier = isPickup
+    ? null
+    : {
+        status: cd.courier_status ?? null,
+        statusAt: cd.courier_status_at ?? null,
+        collectedAt: cd.courier_collected_at ?? null,
+        outForDeliveryAt: cd.courier_out_for_delivery_at ?? null,
+        deliveredAt: cd.courier_delivered_at ?? null,
+        estimatedDeliveryIso: cd.estimated_delivery ?? null,
+        estimatedIsApproximate: cd.estimated_delivery_source === 'fallback',
+        events: Array.isArray(cd.courier_events)
+          ? cd.courier_events.slice(-8).map((e: any) => ({
+              at: e.at,
+              text: e.text,
+            }))
+          : [],
+      }
   const shippingAddress = isPickup
     ? null
     : opts.full
@@ -197,6 +223,7 @@ export async function buildTrackingPayload(
     trackingNumber,
     carrier,
     estimatedDelivery: isPickup ? null : getEstimatedDelivery(order),
+    courier,
     items: (order.items ?? []).map((i: any) => ({
       id: i.id,
       title: i.title,

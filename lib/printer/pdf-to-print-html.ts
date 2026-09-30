@@ -1,14 +1,9 @@
-
 const PT_TO_MM = 25.4 / 72
 
-// Loaded lazily so this never runs during SSR, and so pages that never
-// print a shipping label don't pay for pdf.js in their bundle.
 async function loadPdfJs() {
-  const pdfjsLib = await import('pdfjs-dist')
-  // Vite/webpack/Turbopack all understand this `new URL(...)` pattern and
-  // bundle the worker file as its own asset with a correct, same-origin URL.
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
+    'pdfjs-dist/legacy/build/pdf.worker.min.mjs',
     import.meta.url,
   ).toString()
   return pdfjsLib
@@ -17,7 +12,7 @@ async function loadPdfJs() {
 export async function pdfUrlToPrintHtml(url: string): Promise<string> {
   const pdfjsLib = await loadPdfJs()
   const doc = await pdfjsLib.getDocument({ url }).promise
-  const RENDER_SCALE = 2 // render at 2x for crisp print output
+  const RENDER_SCALE = 2
 
   const pageHtml: string[] = []
   let pageWidthMm = 0
@@ -43,7 +38,6 @@ export async function pdfUrlToPrintHtml(url: string): Promise<string> {
     pageHtml.push(
       `<div class="page"><img src="${canvas.toDataURL('image/png')}" /></div>`,
     )
-    // Free the canvas memory before moving to the next page.
     canvas.width = 0
     canvas.height = 0
   }

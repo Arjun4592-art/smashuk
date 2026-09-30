@@ -57,9 +57,21 @@ export async function GET(req: NextRequest) {
       )
     }
     const { order } = await safeJson(res, 'app/api/store/tracking/route.ts')
-    // Logged-in view — the customer already owns this order, so show the
-    // full shipping address (see app/api/public/order-status/route.ts for
-    // the no-login QR/email link, which only shows city/postcode).
+    try {
+      const { medusaServiceFetch } =
+        await import('@/lib/api/medusa-service-token')
+      const adminRes = await medusaServiceFetch(
+        `/admin/orders/${order.id}?fields=id,*fulfillments`,
+      )
+      if (adminRes.ok) {
+        const adminData = await adminRes.json()
+        if (adminData?.order?.fulfillments) {
+          order.fulfillments = adminData.order.fulfillments
+        }
+      }
+    } catch (enrichErr) {
+      console.error('[tracking] fulfillment enrichment failed:', enrichErr)
+    }
     const tracking = await buildTrackingPayload(order, { full: true })
     return NextResponse.json({
       tracking,

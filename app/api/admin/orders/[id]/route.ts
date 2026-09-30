@@ -121,8 +121,6 @@ export async function GET(
       parsed.order.payments = (parsed.order.payment_collections ?? []).flatMap(
         (pc: any) => pc.payments ?? [],
       )
-      // Signed so a reprinted receipt's QR / tracking link works the same
-      // as the one printed at sale time (see lib/api/order-track-token.ts).
       parsed.order.trackingToken = signOrderTrackToken(parsed.order.id)
       const rawSplit = parsed.order.metadata?.split_payments
       if (typeof rawSplit === 'string') {
@@ -210,6 +208,59 @@ export async function PATCH(
         break
       }
       case 'cancel': {
+        let cancelRefundAmount = 0
+        let preOrder: any = null
+        try {
+          const orderRes = await fetcher(
+            `/admin/orders/${id}?fields=id,display_id,email,metadata,*items,*payment_collections.payments`,
+          )
+          const orderData = await orderRes.json().catch(() => ({}))
+          preOrder = orderData?.order ?? null
+        } catch (loadErr) {
+          console.error(`[order cancel] could not load order ${id}:`, loadErr)
+        }
+        if (preOrder) {
+          preOrder.payments = (preOrder.payment_collections ?? []).flatMap(
+            (pc: any) => pc.payments ?? [],
+          )
+          const isCashOrder =
+            preOrder.metadata?.payment_method === 'cash' ||
+            (preOrder.payments.length > 0 &&
+              preOrder.payments.every(
+                (p: any) =>
+                  !p.provider_id || p.provider_id === 'pp_system_default',
+              ))
+          if (!isCashOrder) {
+            const refundablePayments = preOrder.payments.filter(
+              (p: any) => p.captured_at && !p.canceled_at,
+            )
+            const totalRefundable = refundablePayments.reduce(
+              (sum: number, p: any) =>
+                sum +
+                (p.amount - (p.refunded_amount ?? p.amount_refunded ?? 0)),
+              0,
+            )
+            if (totalRefundable > 0) {
+              try {
+                await refundOrderAmount(preOrder, totalRefundable, fetcher)
+                cancelRefundAmount = totalRefundable
+              } catch (refundErr: any) {
+                console.error(
+                  `[order cancel] refund failed for ${id}:`,
+                  refundErr,
+                )
+                return NextResponse.json(
+                  {
+                    error: `Refund failed, so the order was NOT cancelled: ${
+                      refundErr?.message ?? 'unknown error'
+                    }`,
+                  },
+                  { status: 502 },
+                )
+              }
+            }
+          }
+        }
         const res = await fetcher(`/admin/orders/${id}/cancel`, {
           method: 'POST',
         })
@@ -218,61 +269,17 @@ export async function PATCH(
           return NextResponse.json(
             {
               error: data?.message ?? `Failed to cancel order (${res.status})`,
+              ...(cancelRefundAmount > 0 && {
+                warning: `£${cancelRefundAmount} was already refunded to the customer, but cancelling the order failed. Retry cancel — it will not refund twice.`,
+              }),
             },
             {
               status: res.status,
             },
           )
         }
-        let cancelRefundAmount = 0
-        let cancelRefundFailed = false
         try {
-          const orderRes = await fetcher(
-            `/admin/orders/${id}?fields=id,display_id,email,metadata,*items,*payment_collections.payments`,
-          )
-          const orderData = await orderRes.json().catch(() => ({}))
-          const fullOrder = orderData?.order
-          if (fullOrder) {
-            fullOrder.payments = (fullOrder.payment_collections ?? []).flatMap(
-              (pc: any) => pc.payments ?? [],
-            )
-            // Cash orders (POS "cash" sales, or any payment sitting on
-            // Medusa's no-op `pp_system_default` provider) never went
-            // through Stripe, so there is nothing to refund electronically —
-            // the till/cashier handles giving the cash back physically.
-            // Only payments actually captured through a real provider
-            // (Stripe, PayPal, etc.) get auto-refunded here.
-            const isCashOrder =
-              fullOrder.metadata?.payment_method === 'cash' ||
-              (fullOrder.payments.length > 0 &&
-                fullOrder.payments.every(
-                  (p: any) =>
-                    !p.provider_id || p.provider_id === 'pp_system_default',
-                ))
-            if (!isCashOrder) {
-              const refundablePayments = fullOrder.payments.filter(
-                (p: any) => p.captured_at && p.status !== 'canceled',
-              )
-              const totalRefundable = refundablePayments.reduce(
-                (sum: number, p: any) =>
-                  sum +
-                  (p.amount - (p.refunded_amount ?? p.amount_refunded ?? 0)),
-                0,
-              )
-              if (totalRefundable > 0) {
-                try {
-                  await refundOrderAmount(fullOrder, totalRefundable, fetcher)
-                  cancelRefundAmount = totalRefundable
-                } catch (refundErr: any) {
-                  cancelRefundFailed = true
-                  console.error(
-                    `[order cancel] auto-refund failed for ${id}:`,
-                    refundErr,
-                  )
-                }
-              }
-            }
-          }
+          const fullOrder = preOrder
           if (fullOrder?.email) {
             const { subject, html, text, resendTemplate } =
               orderCancelledEmail(fullOrder)
@@ -316,10 +323,6 @@ export async function PATCH(
           ...data,
           refunded: cancelRefundAmount > 0,
           refundAmount: cancelRefundAmount,
-          ...(cancelRefundFailed && {
-            warning:
-              'Order was cancelled, but the automatic refund failed — please refund manually from the order page.',
-          }),
         }
         break
       }
@@ -391,10 +394,6 @@ export async function PATCH(
             captureErr,
           )
         }
-        // Pickup orders don't get a separate "ship" step — marking them
-        // fulfilled here IS the "ready for collection" moment, so that's
-        // the customer email we send (courier orders get
-        // shippingConfirmationEmail instead, from the 'ship' action).
         try {
           const orderRes = await fetcher(
             `/admin/orders/${id}?fields=id,display_id,email,metadata,*items,customer.first_name`,

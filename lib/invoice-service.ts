@@ -13,7 +13,7 @@ import {
 } from './api/medusa-service-token'
 import { signOrderTrackToken } from './api/order-track-token'
 const BUSINESS_DETAILS = {
-  name: process.env.BUSINESS_LEGAL_NAME || 'SmashRocker Pro Ltd',
+  name: process.env.BUSINESS_LEGAL_NAME || 'Smash Racket Pro Ltd',
   addressLines: (process.env.BUSINESS_ADDRESS_LINES || '')
     .split('|')
     .filter(Boolean),
@@ -84,19 +84,6 @@ async function uploadPdfToMedusa(
   if (!url) {
     throw new Error('[invoicing] Medusa upload response missing file url')
   }
-  // Medusa's local file provider builds this url from its OWN server-side
-  // config (its BACKEND_URL env), not from anything this Next app sends —
-  // so if that box still has BACKEND_URL=http://localhost:9000 (common
-  // when it was provisioned before the production domain existed), every
-  // upload keeps coming back as a localhost link no matter which frontend
-  // (demo.smashuk.co, POS, etc.) triggered the generation.
-  //
-  // We deliberately do NOT reuse NEXT_PUBLIC_MEDUSA_BACKEND_URL here: on
-  // the VPS that variable is (correctly) left as http://localhost:9000
-  // so server-to-server calls between the two apps on the same box stay
-  // fast and don't round-trip through the public internet. MEDUSA_PUBLIC_URL
-  // is a separate, public-only value used purely to rewrite links that a
-  // customer's browser or email client will actually open.
   const publicOrigin = (
     process.env.MEDUSA_PUBLIC_URL ??
     process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ??
@@ -195,15 +182,11 @@ export async function generateInvoiceForOrder(
     0,
   )
   const orderNumber = order.display_id ? `SR-${order.display_id}` : order.id
+  const destCountry = (order.shipping_address?.country_code ?? '').toLowerCase()
+  const isVatExemptDestination = destCountry === 'je' || destCountry === 'gg'
   const customerName =
     `${order.customer?.first_name ?? ''} ${order.customer?.last_name ?? ''}`.trim() ||
     'Customer'
-  // Ship to only makes sense for an order that's actually being shipped
-  // (website checkout with a delivery address, or a POS sale where staff
-  // picked "Ship" instead of in-store pickup/carry-out) — gated on the
-  // order actually having a shipping method + address, not on channel, so
-  // a POS "Ship" sale gets the same Ship to block a website order does. A
-  // POS/website pickup sale has no shipping_methods and so never shows it.
   const isShippedOrder =
     (order.shipping_methods ?? []).length > 0 &&
     !!order.shipping_address?.address_1
@@ -252,7 +235,7 @@ export async function generateInvoiceForOrder(
         : item.title,
       quantity: item.quantity,
       unitPriceExVat: item.unit_price,
-      vatRatePercent: 20,
+      vatRatePercent: isVatExemptDestination ? 0 : 20,
     })),
     shippingExVat: shippingExVat || undefined,
     shipTo: isShippedOrder

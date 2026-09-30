@@ -11,11 +11,6 @@ import {
   CONTACT_EMAIL,
 } from '@/lib/constants'
 
-// Printed on the same TSP100IIIBI as POS receipts (paired as a normal
-// system printer — see store/printerStore.ts), so the page needs to be
-// sized to the thermal roll rather than A4, or the driver will scale/clip
-// it. Falls back to A4 automatically if paperWidth was never set (i.e. no
-// receipt printer has been configured on this device yet).
 const PAPER_MM: Record<'58mm' | '80mm', number> = { '58mm': 58, '80mm': 80 }
 
 function fmt(amount: number, currency = 'GBP') {
@@ -40,9 +35,6 @@ export default function PackingSlipPage({
   const [loading, setLoading] = useState(true)
   const connectionType = usePrinterStore((s) => s.connectionType)
   const paperWidth = usePrinterStore((s) => s.paperWidth)
-  // Any receipt-style transport (incl. the TSP100IIIBI paired as a system
-  // printer under 'browser') means this device prints on a thermal roll,
-  // not A4. 'label'/'none' fall back to the original A4 layout.
   const thermal = connectionType !== 'none' && connectionType !== 'label'
   const rollMm = PAPER_MM[paperWidth]
 
@@ -55,7 +47,6 @@ export default function PackingSlipPage({
 
   useEffect(() => {
     if (order) {
-      // Auto-print when order loads
       setTimeout(() => window.print(), 500)
     }
   }, [order])
@@ -185,7 +176,7 @@ export default function PackingSlipPage({
               Packing Slip
             </h1>
             <p className='text-sm text-gray-500 mt-1'>
-              SmashRocker Pro Ltd &bull; {CONTACT_EMAIL.toLowerCase()}
+              Smash Racket Pro Ltd &bull; {CONTACT_EMAIL.toLowerCase()}
             </p>
           </div>
           <div className='text-right'>
@@ -359,7 +350,7 @@ export default function PackingSlipPage({
             Thank you for shopping with
           </p>
           <p className='text-sm font-semibold text-[#1e2a6e]'>
-            SmashRocker Pro Ltd
+            Smash Racket Pro Ltd
           </p>
           <p className='text-xs text-gray-400 mt-3'>
             Questions? {CONTACT_EMAIL.toLowerCase()}

@@ -1,6 +1,10 @@
 'use client'
 
-import { getVatDestination } from '@/lib/vat'
+import {
+  getVatDestination,
+  CHANNEL_ISLANDS_SHIPPING_COST,
+  CHANNEL_ISLANDS_OPTION_RE,
+} from '@/lib/vat'
 import {
   useState,
   useEffect,
@@ -17,6 +21,7 @@ import {
   addShippingAddress,
   listShippingOptions,
   addShippingMethod,
+  setCartDestination,
   initiatePayment,
   placeOrder,
   getAddresses,
@@ -44,8 +49,6 @@ const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '',
 )
 const PAYMENT_METHOD = 'card'
-// Express / next-day delivery is discontinued. Any Medusa option matching this
-// is ignored so customers can never see or pick it.
 const EXPRESS_OPTION_RE = /express|fast|tracked ?24|next.?day/i
 
 const DELIVERY_INFO_SECTIONS: {
@@ -301,13 +304,6 @@ export default function CheckoutPage() {
   const { setCartId } = useCartStore()
   const cartValidatedRef = useRef(false)
   const cartValidatingRef = useRef(false)
-  // The cart id saved in the browser can go stale (cart deleted / DB reset /
-  // different backend) and Medusa then answers "Cart id not found", which
-  // leaves shipping options empty (Pickup disabled) and breaks checkout.
-  // When that happens, build a fresh cart with the same items and switch to
-  // it. NOTE: no "cancelled" guard here on purpose — this effect re-runs
-  // (dev StrictMode / `items` changing) and a guard would throw away the new
-  // cart, leaving the stale id in place.
   useEffect(() => {
     if (!cartId || items.length === 0) return
     if (cartValidatedRef.current || cartValidatingRef.current) return
@@ -331,8 +327,6 @@ export default function CheckoutPage() {
               )
             }
           }
-          // Switch only after the items are in, so shipping options load for
-          // a complete cart.
           setCartId(newCart.id)
         }
         cartValidatedRef.current = true
@@ -349,8 +343,6 @@ export default function CheckoutPage() {
     listShippingOptions(cartId)
       .then((opts) => {
         if (cancelled) return
-        // Express / next-day delivery is discontinued — only Standard (and
-        // Free / Pickup) options are offered, even if one still exists in Medusa.
         setShippingOptions(
           (opts ?? []).filter(
             (o: any) => !EXPRESS_OPTION_RE.test(o.name ?? ''),
@@ -371,17 +363,20 @@ export default function CheckoutPage() {
     .filter((i) => i.product.slug !== GIFT_CARD_PRODUCT_HANDLE)
     .reduce((s, i) => s + i.product.price * i.quantity, 0)
   const isPickupOption = (name: string) => /pickup|store|collect/i.test(name)
+  const isChannelIslandsOption = (name: string) =>
+    CHANNEL_ISLANDS_OPTION_RE.test(name)
   const pickupOption = shippingOptions.find((o) => isPickupOption(o.name ?? ''))
   const isFreeDeliveryOption = (opt: any) =>
-    !isPickupOption(opt.name ?? '') && /free/i.test(opt.name ?? '')
+    !isPickupOption(opt.name ?? '') &&
+    !isChannelIslandsOption(opt.name ?? '') &&
+    /free/i.test(opt.name ?? '')
   const isPaidDeliveryOption = (opt: any) =>
     !isPickupOption(opt.name ?? '') &&
+    !isChannelIslandsOption(opt.name ?? '') &&
     !isFreeDeliveryOption(opt) &&
     !EXPRESS_OPTION_RE.test(opt.name ?? '')
   const freeDeliveryOption = shippingOptions.find(isFreeDeliveryOption)
   const paidDeliveryOption = shippingOptions.find(isPaidDeliveryOption)
-  // Shipping is automatic (no customer choice): the Free option when the
-  // order reaches the free-shipping threshold, otherwise the paid Standard option.
   const resolvedDeliveryOption =
     (physicalSubtotal >= freeShippingThreshold
       ? freeDeliveryOption
@@ -392,31 +387,32 @@ export default function CheckoutPage() {
   const isPickupSelected =
     !!pickupOption && selectedShippingOptionId === pickupOption.id
   const activeDeliveryOption = resolvedDeliveryOption
-  // Shipping rule: free at/above the threshold, otherwise flat Standard rate.
-  // If Medusa's options haven't loaded yet, show that same rule instead of
-  // guessing, so the summary is right before the options arrive.
-  const displayShipping = isPickupSelected
-    ? 0
-    : activeDeliveryOption
-      ? activeDeliveryOption === freeDeliveryOption
-        ? 0
-        : (activeDeliveryOption.calculated_price?.calculated_amount ??
-          activeDeliveryOption.amount ??
-          shipping)
-      : physicalSubtotal >= freeShippingThreshold
-        ? 0
-        : STANDARD_SHIPPING_COST
-
-  // Channel Islands deliveries are outside UK VAT: prices are VAT-inclusive, so
-  // strip VAT from goods + shipping and show no VAT line.
   const vatDestination =
     deliveryMode === 'ship'
       ? getVatDestination(form.pincode)
       : getVatDestination(null)
-  const grossBeforeGiftCard = subtotal - discountAmount + displayShipping
+  const isChannelIslandsDelivery =
+    deliveryMode === 'ship' && vatDestination.vatExempt
+
+  const displayShipping = isPickupSelected
+    ? 0
+    : isChannelIslandsDelivery
+      ? CHANNEL_ISLANDS_SHIPPING_COST
+      : activeDeliveryOption
+        ? activeDeliveryOption === freeDeliveryOption
+          ? 0
+          : (activeDeliveryOption.calculated_price?.calculated_amount ??
+            activeDeliveryOption.amount ??
+            shipping)
+        : physicalSubtotal >= freeShippingThreshold
+          ? 0
+          : STANDARD_SHIPPING_COST
+
+  const goodsAfterDiscount = subtotal - discountAmount
   const netBeforeGiftCard = vatDestination.vatExempt
-    ? Math.round((grossBeforeGiftCard / (1 + taxRate)) * 100) / 100
-    : grossBeforeGiftCard
+    ? Math.round((goodsAfterDiscount / (1 + taxRate)) * 100) / 100 +
+      displayShipping
+    : goodsAfterDiscount + displayShipping
   const displayTotal = Math.max(0, netBeforeGiftCard - giftCardTotal)
 
   const displayTax = vatDestination.vatExempt
@@ -434,8 +430,6 @@ export default function CheckoutPage() {
     const selectionStillValid = shippingOptions.some(
       (o) => o.id === selectedShippingOptionId,
     )
-    // Always follow the free-shipping threshold (free option at/above it,
-    // paid option below it).
     if (
       !selectionStillValid ||
       selectedShippingOptionId !== resolvedDeliveryOption.id
@@ -611,7 +605,25 @@ export default function CheckoutPage() {
         billingAddress,
         form.email,
       )
-      const optionId = selectedShippingOptionId || shippingOptions[0]?.id
+      const destCountry = shippingAddress.country_code
+      const isCIOrder =
+        deliveryMode !== 'pickup' && getVatDestination(form.pincode).vatExempt
+      await setCartDestination(cartId, destCountry)
+      let optionId = selectedShippingOptionId || shippingOptions[0]?.id
+      if (isCIOrder) {
+        const freshOptions = await listShippingOptions(cartId)
+        const ciOption = (freshOptions ?? []).find((o: any) =>
+          isChannelIslandsOption(o.name ?? ''),
+        )
+        if (!ciOption) {
+          throw new Error(
+            'Delivery to the Channel Islands is not available right now. Please contact us.',
+          )
+        }
+        optionId = ciOption.id
+        setShippingOptions(freshOptions)
+        setSelectedShippingOptionId(ciOption.id)
+      }
       if (optionId) {
         await addShippingMethod(cartId, optionId)
       }

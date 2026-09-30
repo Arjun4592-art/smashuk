@@ -3,6 +3,15 @@ export type VatDestination = {
   vatExempt: boolean
 }
 
+export const CHANNEL_ISLANDS_SHIPPING_COST = 9.99
+
+export const CHANNEL_ISLANDS_OPTION_RE = /channel|jersey|guernsey/i
+
+export function isChannelIslandsCountry(code?: string | null) {
+  const c = (code ?? '').toLowerCase()
+  return c === 'je' || c === 'gg'
+}
+
 export function getVatDestination(
   postcode: string | null | undefined,
 ): VatDestination {

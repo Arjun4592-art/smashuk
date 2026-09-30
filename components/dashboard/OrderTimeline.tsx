@@ -85,6 +85,30 @@ function buildTimeline(order: any): TimelineEvent[] {
         extra: f.tracking_numbers?.join(', ') || undefined,
       })
     }
+    if (f.data?.courier_collected_at) {
+      events.push({
+        id: `courier-collected-${f.id}`,
+        type: 'shipped',
+        message: 'Courier collected the parcel',
+        timestamp: f.data.courier_collected_at,
+      })
+    }
+    if (f.data?.courier_out_for_delivery_at) {
+      events.push({
+        id: `courier-ofd-${f.id}`,
+        type: 'shipped',
+        message: 'Out for delivery',
+        timestamp: f.data.courier_out_for_delivery_at,
+      })
+    }
+    if (f.data?.courier_delivered_at) {
+      events.push({
+        id: `courier-delivered-${f.id}`,
+        type: 'delivered',
+        message: 'Courier delivered the parcel',
+        timestamp: f.data.courier_delivered_at,
+      })
+    }
     if (f.delivered_at) {
       events.push({
         id: `deliver-${f.id}`,
@@ -117,7 +141,6 @@ function buildTimeline(order: any): TimelineEvent[] {
       events.push({
         id: `return-ok-${r.id}`,
         type: 'return_approved',
-        // refund_amount is stored in major units (£), not pence
         message: `Refund of ${money(r.refund_amount)} was issued`,
         timestamp: doneAt,
       })
@@ -168,20 +191,26 @@ function buildTimeline(order: any): TimelineEvent[] {
   )
 }
 
+const UK_TZ = 'Europe/London'
+
+const ukDayKey = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: UK_TZ })
+
 const timeOf = (ts: string) =>
   new Date(ts).toLocaleTimeString('en-GB', {
+    timeZone: UK_TZ,
     hour: '2-digit',
     minute: '2-digit',
   })
 
 function dayLabel(ts: string) {
   const d = new Date(ts)
-  const today = new Date()
-  const yesterday = new Date()
-  yesterday.setDate(today.getDate() - 1)
-  if (d.toDateString() === today.toDateString()) return 'Today'
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  const key = ukDayKey(d)
+  if (key === ukDayKey(new Date())) return 'Today'
+  if (key === ukDayKey(new Date(Date.now() - 24 * 60 * 60 * 1000))) {
+    return 'Yesterday'
+  }
   return d.toLocaleDateString('en-GB', {
+    timeZone: UK_TZ,
     day: 'numeric',
     month: 'long',
     year: 'numeric',

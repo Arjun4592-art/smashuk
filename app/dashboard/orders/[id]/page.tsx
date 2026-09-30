@@ -10,8 +10,11 @@ import {
   approveOrderReturn,
   rejectOrderReturn,
   getShippingLabel,
+  swapOrderItem,
+  refreshCourierTracking,
 } from '@/lib/api/dashboard'
 import ReturnExchangeModal from '@/components/dashboard/ReturnExchangeModal'
+import SwapItemModal from '@/components/dashboard/SwapItemModal'
 import LabelSizeDialog from '@/components/printing/LabelSizeDialog'
 import { printReceiptOnLabel } from '@/lib/printer/label-print'
 import { printShippingLabel } from '@/lib/printer/print-shipping-label'
@@ -37,13 +40,34 @@ import {
   type Tone,
 } from '@/components/orders/OrderUI'
 
-/**
- * Parcel2Go label is only available once the order is fulfilled.
- * If the label can be created on an unfulfilled order too, flip this to
- * `false` and the "Print shipping label" button shows up as the dark
- * primary button on unfulfilled orders (exactly like the Shopify app).
- */
 const LABEL_REQUIRES_FULFILLMENT: boolean = true
+
+function courierDate(iso?: string | null) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d.getTime())
+    ? ''
+    : d.toLocaleDateString('en-GB', {
+        timeZone: 'Europe/London',
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+      })
+}
+
+function courierDateTime(iso?: string | null) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d.getTime())
+    ? ''
+    : d.toLocaleString('en-GB', {
+        timeZone: 'Europe/London',
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      }) + ' UK'
+}
 
 const ITEM_METADATA_SKIP = new Set(['source', 'isGift'])
 const ORDER_METADATA_SKIP = new Set([
@@ -109,6 +133,8 @@ export default function OrderDetailPage({
   const [labelLoading, setLabelLoading] = useState(false)
   const [confirmAction, setConfirmAction] = useState<Action | null>(null)
   const [showReturnModal, setShowReturnModal] = useState(false)
+  const [showSwapModal, setShowSwapModal] = useState(false)
+  const [courierLoading, setCourierLoading] = useState(false)
   const [returnActionLoading, setReturnActionLoading] = useState('')
   const [showDetails, setShowDetails] = useState(false)
   const [showLabelSize, setShowLabelSize] = useState(false)
@@ -132,8 +158,6 @@ export default function OrderDetailPage({
     fetchOrder()
   }, [fetchOrder])
 
-  /* ───────────── actions (same functions as before) ───────────── */
-
   const handlePrintLabel = async () => {
     setLabelLoading(true)
     try {
@@ -142,8 +166,6 @@ export default function OrderDetailPage({
         toast.error('Parcel2Go has not returned a label URL yet.')
         return
       }
-      // Print via our own same-origin proxy, not Parcel2Go's URL directly —
-      // the print iframe can't access a cross-origin frame's contentWindow.
       await printShippingLabel(`/api/admin/orders/${id}/shipping-label/file`)
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to print shipping label')
@@ -152,8 +174,6 @@ export default function OrderDetailPage({
     }
   }
 
-  // Receipt for this order (new or old) on the label printer. Label size is
-  // the one set in POS → Settings → Printer / "Label size…" below.
   const handlePrintReceiptLabel = async () => {
     if (!order) return
     try {
@@ -163,23 +183,68 @@ export default function OrderDetailPage({
     }
   }
 
+  const handleRefreshCourier = async () => {
+    setCourierLoading(true)
+    try {
+      const result = await refreshCourierTracking(id)
+      await fetchOrder(true)
+      toast.success(
+        result.tracking.markedDelivered
+          ? 'Courier says delivered — order marked as delivered'
+          : result.tracking.status
+            ? `Courier status: ${result.tracking.status}`
+            : 'No courier updates yet',
+      )
+    } catch (err: any) {
+      toast.error(err.message ?? 'Could not fetch courier tracking')
+    } finally {
+      setCourierLoading(false)
+    }
+  }
+
+  const handleSwapItem = async (payload: {
+    item_id: string
+    variant_id: string
+    quantity: number
+    keep_price: boolean
+    notify_customer: boolean
+  }) => {
+    const result = await swapOrderItem(id, payload)
+    setShowSwapModal(false)
+    await fetchOrder(true)
+    const diff = result.difference ?? 0
+    const diffNote =
+      Math.abs(diff) < 0.01
+        ? ''
+        : diff > 0
+          ? ` Customer owes £${diff.toFixed(2)} more.`
+          : ` Refund £${Math.abs(diff).toFixed(2)} to the customer.`
+    toast.success(`Item replaced.${diffNote}`, {
+      duration: 12000,
+      action: {
+        label: 'Print packing slip',
+        onClick: () =>
+          window.open(
+            `/dashboard/orders/${id}/packing-slip`,
+            '_blank',
+            'noopener,noreferrer',
+          ),
+      },
+    })
+  }
+
   const handleAction = async (action: Action) => {
     setActionLoading(action)
     try {
       const result: any = await updateOrderStatus(id, action)
       if (action === 'cancel') {
         if (result?.warning) {
-          // Order cancelled but the auto-refund call failed — this needs a
-          // human to go refund the payment manually, so it's a warning
-          // toast rather than the usual success one.
           toast.warning(result.warning)
         } else if (result?.refunded) {
           toast.success(
             `Order cancelled — £${Number(result.refundAmount).toFixed(2)} refunded to the customer`,
           )
         } else {
-          // Either a cash order (nothing to refund electronically) or the
-          // order had no captured payment to begin with.
           toast.success('Order cancelled')
         }
       } else {
@@ -268,8 +333,6 @@ export default function OrderDetailPage({
     }
   }
 
-  /* ───────────── loading / error ───────────── */
-
   if (loading) {
     return (
       <div className='-m-4 lg:m-0 lg:max-w-6xl lg:mx-auto animate-pulse'>
@@ -296,8 +359,6 @@ export default function OrderDetailPage({
     )
   }
 
-  /* ───────────── derived state ───────────── */
-
   const currency = order.currency_code ?? 'gbp'
   const items: any[] = order.items ?? []
   const payments: any[] = order.payments ?? []
@@ -309,6 +370,9 @@ export default function OrderDetailPage({
   const isPickup = order.metadata?.fulfillment_type === 'pickup'
   const isCanceled = order.status === 'canceled' || fs === 'canceled'
   const isArchived = order.status === 'archived'
+  const p2g: any = (order.fulfillments ?? []).find(
+    (f: any) => f?.data?.parcel2go_order_id && !f.canceled_at,
+  )?.data
   const isUnfulfilled =
     (fs === 'not_fulfilled' || fs === 'partially_fulfilled' || !fs) &&
     !isCanceled
@@ -343,7 +407,6 @@ export default function OrderDetailPage({
       ].filter(Boolean)
     : []
 
-  // Fulfillment badge
   let fBadge: { tone: Tone; glyph: 'empty' | 'partial' | 'full'; text: string }
   if (isCanceled) fBadge = { tone: 'gray', glyph: 'full', text: 'Cancelled' }
   else if (isDelivered)
@@ -364,7 +427,6 @@ export default function OrderDetailPage({
     fBadge = { tone: 'yellow', glyph: 'partial', text: 'Partially fulfilled' }
   else fBadge = { tone: 'yellow', glyph: 'empty', text: 'Unfulfilled' }
 
-  // Payment badge
   const ps: string = order.payment_status ?? ''
   const pBadge: {
     tone: Tone
@@ -392,7 +454,6 @@ export default function OrderDetailPage({
     .filter(Boolean)
     .join(' • ')
 
-  // Buttons — max two, never a wall of them
   type Btns = {
     primary?: { label: string; onClick: () => void; loading?: boolean }
     secondary?: { label: string; onClick: () => void; loading?: boolean }
@@ -450,7 +511,6 @@ export default function OrderDetailPage({
     }
   }
 
-  // Money
   const subtotal = order.subtotal ?? 0
   const capturedTotal = payments
     .filter((p) => p.captured_at)
@@ -505,8 +565,6 @@ export default function OrderDetailPage({
           body: 'Confirm the customer has actually received this order.',
         },
   }
-
-  /* ───────────── render ───────────── */
 
   return (
     <div className='-m-4 lg:m-0 bg-[#F6F6F7] lg:bg-transparent lg:max-w-6xl lg:mx-auto pb-6 lg:pb-10'>
@@ -568,6 +626,11 @@ export default function OrderDetailPage({
             icon={<IconDots />}
             items={[
               {
+                label: 'Replace an item',
+                hidden: isCanceled || isArchived,
+                onClick: () => setShowSwapModal(true),
+              },
+              {
                 label: 'Return or exchange',
                 hidden: !canReturn,
                 onClick: () => setShowReturnModal(true),
@@ -616,6 +679,78 @@ export default function OrderDetailPage({
               <p className='text-[13px] text-[#2C6ECB] mt-0.5 break-all'>
                 Tracking: {order.metadata.tracking_number}
               </p>
+            )}
+            {!order.metadata?.tracking_number && p2g?.tracking_number && (
+              <p className='text-[13px] text-[#2C6ECB] mt-0.5 break-all'>
+                Tracking: {p2g.tracking_number}
+              </p>
+            )}
+            {p2g && (
+              <div className='mt-3 rounded-xl border border-[#E1E3E5] bg-[#FAFBFB] p-3 text-[13px] text-[#202223]'>
+                <div className='flex items-center justify-between gap-2'>
+                  <p className='font-medium'>Courier tracking</p>
+                  <button
+                    type='button'
+                    onClick={handleRefreshCourier}
+                    disabled={courierLoading}
+                    className='text-[#2C6ECB] disabled:opacity-60'
+                  >
+                    {courierLoading ? 'Checking…' : 'Refresh'}
+                  </button>
+                </div>
+                {p2g.estimated_delivery && !p2g.courier_delivered_at && (
+                  <p className='mt-1'>
+                    Estimated delivery:{' '}
+                    <span className='font-medium'>
+                      {courierDate(p2g.estimated_delivery)}
+                    </span>
+                    {p2g.estimated_delivery_source === 'fallback'
+                      ? ' (approx.)'
+                      : ''}
+                  </p>
+                )}
+                {p2g.courier_status && (
+                  <p className='mt-1'>
+                    Status: {p2g.courier_status}
+                    {p2g.courier_status_at
+                      ? ` · ${courierDateTime(p2g.courier_status_at)}`
+                      : ''}
+                  </p>
+                )}
+                {p2g.courier_collected_at && (
+                  <p className='mt-1'>
+                    Collected by courier:{' '}
+                    {courierDateTime(p2g.courier_collected_at)}
+                  </p>
+                )}
+                {p2g.courier_delivered_at && (
+                  <p className='mt-1'>
+                    Delivered:{' '}
+                    <span className='font-medium'>
+                      {courierDateTime(p2g.courier_delivered_at)}
+                    </span>
+                  </p>
+                )}
+                {Array.isArray(p2g.courier_events) &&
+                  p2g.courier_events.length > 0 && (
+                    <ul className='mt-2 space-y-1 border-t border-[#E1E3E5] pt-2 text-[12px] text-[#6D7175]'>
+                      {[...p2g.courier_events]
+                        .reverse()
+                        .slice(0, 5)
+                        .map((e: any, i: number) => (
+                          <li key={i}>
+                            {courierDateTime(e.at)} — {e.text}
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                {!p2g.courier_synced_at && (
+                  <p className='mt-1 text-[#6D7175]'>
+                    Not checked yet — tap Refresh, or it updates automatically
+                    every 30 minutes once dispatched.
+                  </p>
+                )}
+              </div>
             )}
 
             <div className='mt-2 divide-y divide-[#F6F6F7]'>
@@ -922,6 +1057,14 @@ export default function OrderDetailPage({
           remainingQty={remainingReturnQty}
           onSubmit={handleProcessReturn}
           onClose={() => setShowReturnModal(false)}
+        />
+      )}
+
+      {showSwapModal && (
+        <SwapItemModal
+          order={order}
+          onSubmit={handleSwapItem}
+          onClose={() => setShowSwapModal(false)}
         />
       )}
 

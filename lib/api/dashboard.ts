@@ -181,6 +181,35 @@ export async function updateOrderStatus(id: string, action: string) {
     action,
   })
 }
+export async function swapOrderItem(
+  id: string,
+  payload: {
+    item_id: string
+    variant_id: string
+    quantity?: number
+    keep_price?: boolean
+    notify_customer?: boolean
+  },
+): Promise<{
+  swapped: boolean
+  difference: number
+  invoice: { invoiceNumber?: string; url?: string } | null
+  order: any
+}> {
+  return mutate(`/api/admin/orders/${id}/swap-item`, 'POST', payload)
+}
+export async function refreshCourierTracking(id: string): Promise<{
+  tracking: {
+    events: { at: string; text: string }[]
+    status: string | null
+    collectedAt: string | null
+    deliveredAt: string | null
+    estimatedDelivery: string | null
+    markedDelivered: boolean
+  }
+}> {
+  return mutate(`/api/admin/orders/${id}/courier-tracking`, 'POST')
+}
 export async function getShippingLabel(id: string): Promise<{
   label_url: string
   tracking_number: string | null

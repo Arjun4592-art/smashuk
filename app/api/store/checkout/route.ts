@@ -38,6 +38,23 @@ export async function POST(req: NextRequest) {
         )
         break
       }
+      case 'set-destination': {
+        const code =
+          process.env.CHANNEL_ISLANDS_VAT_PROMO_CODE ?? 'CI-VAT-RELIEF'
+        const cc = String(rest.country_code ?? '').toLowerCase()
+        const isCI = cc === 'je' || cc === 'gg'
+        res = await fetch(`${MEDUSA_URL}/store/carts/${cartId}/promotions`, {
+          method: isCI ? 'POST' : 'DELETE',
+          headers: h,
+          body: JSON.stringify({ promo_codes: [code] }),
+        })
+        if (!isCI && !res.ok) {
+          res = await fetch(`${MEDUSA_URL}/store/carts/${cartId}`, {
+            headers: h,
+          })
+        }
+        break
+      }
       case 'add-shipping': {
         res = await fetch(
           `${MEDUSA_URL}/store/carts/${cartId}/shipping-methods`,
