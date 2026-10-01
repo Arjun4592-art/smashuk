@@ -1,0 +1,3155 @@
+'use client'
+
+import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import {
+  updateProduct,
+  upsertOptionValues,
+  linkOptionsToProduct,
+  deleteProductVariant,
+  upsertProductTags,
+} from '@/lib/api/dashboard'
+import { inferSellingChannel } from '@/lib/api/selling-channels-client'
+import { toast } from 'sonner'
+import RichTextEditor from '@/components/dashboard/Richtexteditor'
+import ImageCropModal from '@/components/dashboard/ImageCropModal'
+import { compressImageForUpload } from '@/lib/image-compress'
+import StringingCategoryHint from '@/components/dashboard/StringingCategoryHint'
+import { isStringingCategoryHandle } from '@/lib/stringing'
+import type { EditorData } from '@/lib/api/admin-products-server'
+interface VariantOptionEntry {
+  id: string
+  name: string
+  value: string
+}
+interface Variant {
+  id: string
+  medusaId?: string
+  options: VariantOptionEntry[]
+  colorCode: string
+  sku: string
+  ean: string
+  price: string
+  stock: string
+  imageUrls: string[]
+}
+interface TierPricingRow {
+  minQty: number
+  maxQty?: number
+  discountPct: number
+}
+interface CrossSellItem {
+  id: string
+  productId: string
+  productTitle: string
+  discountPct: number
+}
+interface MedusaCategory {
+  id: string
+  name: string
+  handle: string
+  // "Badminton › Stringing" — three sports each have a category literally
+  // named "Stringing", so the bare name can't tell them apart.
+  label: string
+}
+interface UploadedImage {
+  file?: File
+  preview: string
+  url?: string
+  uploading: boolean
+  error?: string
+  existing?: boolean
+}
+export default function EditProductClient({
+  id,
+  initial,
+}: {
+  id: string
+  // Everything the form needs, prefetched on the server in page.tsx.
+  initial: EditorData
+}) {
+  const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+  const [status, setStatus] = useState<'published' | 'draft'>('draft')
+  const [activeTab, setActiveTab] = useState('general')
+  const [sellingChannel, setSellingChannel] = useState<
+    'both' | 'website' | 'store'
+  >('both')
+  const [brandOptions, setBrandOptions] = useState<string[]>(initial.brands)
+  const [sportOptions, setSportOptions] = useState<string[]>(initial.sports)
+  const [addingBrand, setAddingBrand] = useState(false)
+  const [addingSport, setAddingSport] = useState(false)
+  const [categories] = useState<MedusaCategory[]>(initial.categories)
+  const [extraCategoryIds, setExtraCategoryIds] = useState<string[]>([])
+  const [categoriesLoading] = useState(false)
+  const [globalOptions] = useState<
+    {
+      id: string
+      title: string
+      values: string[]
+    }[]
+  >(initial.globalOptions)
+  const [customValueRows, setCustomValueRows] = useState<Set<string>>(new Set())
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    brand: '',
+    sport: '',
+    category: '',
+    categoryName: '',
+    sku: '',
+    barcode: '',
+    ean: '',
+    price: '',
+    comparePrice: '',
+    costPrice: '',
+    taxable: true,
+    trackInventory: true,
+    stock: '',
+    lowStockAlert: '5',
+    weight: '',
+    tags: '',
+    badge: '',
+    stringUpgrade: false,
+    stringUpgradeType: 'free' as 'free' | 'paid',
+    stringingType: 'service' as 'service' | 'reel',
+    metaTitle: '',
+    metaDescription: '',
+    metaKeywords: '',
+  })
+  const [tierPricing, setTierPricing] = useState<
+    {
+      minQty: number
+      maxQty?: number
+      discountPct: number
+    }[]
+  >([])
+  const [crossSells, setCrossSells] = useState<CrossSellItem[]>([])
+  const [crossSellSearch, setCrossSellSearch] = useState('')
+  const [crossSellResults, setCrossSeachResults] = useState<
+    {
+      id: string
+      title: string
+    }[]
+  >([])
+  const [crossSellLoading, setCrossSellLoading] = useState(false)
+  const [variants, setVariants] = useState<Variant[]>([
+    {
+      id: '1',
+      options: [
+        {
+          id: 'o1',
+          name: '',
+          value: '',
+        },
+      ],
+      colorCode: '',
+      sku: '',
+      ean: '',
+      price: '',
+      stock: '',
+      imageUrls: [],
+    },
+  ])
+  const [defaultVariantId, setDefaultVariantId] = useState<string>('')
+  const [defaultOption, setDefaultOption] = useState<{
+    title: string
+    value: string
+  } | null>(null)
+  const [existingOptions, setExistingOptions] = useState<
+    {
+      id: string
+      title: string
+      values: string[]
+    }[]
+  >([])
+  const optionValueCasingRef = useRef<Map<string, string>>(new Map())
+  const deletedDefaultVariantRef = useRef(false)
+  // Variant the user clicked "Delete variant" on, waiting for confirmation
+  // in the modal.
+  const [variantToDelete, setVariantToDelete] = useState<{
+    id: string
+    label: string
+  } | null>(null)
+  useEffect(() => {
+    if (!variantToDelete) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setVariantToDelete(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [variantToDelete])
+  // Set when the single existing variant had to be deleted so its old
+  // option(s) could be unlinked (Medusa refuses to unassign an option that a
+  // variant still uses). buildPayload then creates a fresh Default variant
+  // instead of updating the deleted one.
+  const deletedBaseVariantIdRef = useRef<string | null>(null)
+  const staleOptionIdsRef = useRef<string[]>([])
+  const isSavingRef = useRef(false)
+  // Stock value as loaded from the server. Only when the Stock field differs
+  // from this do we tell the API to write it, so a stale form never overwrites
+  // a quantity that was changed elsewhere (Inventory page, POS, Medusa admin).
+  const initialStockRef = useRef<string>('')
+  const variantsToDeleteRef = useRef<string[]>([])
+  const [specs, setSpecs] = useState<
+    {
+      label: string
+      value: string
+    }[]
+  >([])
+  const [images, setImages] = useState<UploadedImage[]>([])
+  const [dragOver, setDragOver] = useState(false)
+  // Files waiting to go through the resize/crop modal, one at a time.
+  const [cropQueue, setCropQueue] = useState<{ file: File; src: string }[]>([])
+  const [cropTotal, setCropTotal] = useState(0)
+  useEffect(() => {
+    if (cropQueue.length === 0 && cropTotal !== 0) setCropTotal(0)
+  }, [cropQueue.length, cropTotal])
+  useEffect(() => {
+    async function loadProduct() {
+      try {
+        const p = initial.product
+        if (!p) throw new Error('Product not found')
+        const firstVariant = p.variants?.[0]
+        const firstPrice = firstVariant?.prices?.[0]?.amount
+        initialStockRef.current = String(firstVariant?.inventory_quantity ?? '')
+        setStatus(p.status === 'published' ? 'published' : 'draft')
+        setSellingChannel(inferSellingChannel(p.sales_channels))
+        setExtraCategoryIds((p.categories ?? []).slice(1).map((c: any) => c.id))
+        setForm({
+          name: p.title ?? '',
+          description: p.description ?? '',
+          brand: p.metadata?.brand ?? '',
+          sport: p.metadata?.sport ?? '',
+          badge: p.metadata?.badge ?? '',
+          stringUpgrade: p.metadata?.string_upgrade_available === true,
+          stringUpgradeType:
+            p.metadata?.string_upgrade_type === 'paid' ? 'paid' : 'free',
+          // Untagged products follow the same rule as the backfill script:
+          // "Service" in the title means service, otherwise reel.
+          stringingType:
+            p.metadata?.stringing_type === 'reel' ||
+            (p.metadata?.stringing_type !== 'service' &&
+              !/\bservice\b/i.test(p.title ?? ''))
+              ? 'reel'
+              : 'service',
+          category: p.categories?.[0]?.id ?? '',
+          categoryName: p.categories?.[0]?.name ?? '',
+          sku: firstVariant?.sku ?? '',
+          barcode: firstVariant?.barcode ?? '',
+          ean: firstVariant?.ean ?? '',
+          price: firstPrice ? String(firstPrice) : '',
+          comparePrice: p.metadata?.compare_at_price
+            ? String(p.metadata.compare_at_price)
+            : '',
+          costPrice: p.metadata?.cost_price
+            ? String(p.metadata.cost_price)
+            : '',
+          taxable: p.metadata?.taxable !== false,
+          trackInventory: firstVariant?.manage_inventory ?? true,
+          stock: String(firstVariant?.inventory_quantity ?? ''),
+          lowStockAlert: String(p.metadata?.low_stock_alert ?? '5'),
+          weight: firstVariant?.weight ? String(firstVariant.weight) : '',
+          tags:
+            Array.isArray(p.tags) && p.tags.length > 0
+              ? p.tags.map((t: any) => t.value).join(', ')
+              : (p.metadata?.tags ?? ''),
+          metaTitle: p.metadata?.metaTitle ?? '',
+          metaDescription: p.metadata?.metaDescription ?? '',
+          metaKeywords: p.metadata?.metaKeywords ?? '',
+        })
+        const KNOWN_KEYS = new Set([
+          'brand',
+          'sport',
+          'badge',
+          'tags',
+          'specs',
+          'specifications',
+          'sale_price',
+          'regular_price',
+          'compare_at_price',
+          'cost_price',
+          'low_stock_alert',
+          'taxable',
+          'tier_pricing',
+          'cross_sells',
+          'string_upgrade_available',
+          'string_upgrade_type',
+          'originalPrice',
+          'rating',
+          'reviewCount',
+          'metaTitle',
+          'metaDescription',
+          'metaKeywords',
+          'ogImage',
+          'service_type',
+          'service_sport',
+        ])
+        if (Array.isArray(p.metadata?.cross_sells)) {
+          setCrossSells(
+            p.metadata.cross_sells.map((c: any, i: number) => ({
+              id: String(i),
+              productId: c.productId ?? '',
+              productTitle: c.productTitle ?? c.productId ?? '',
+              discountPct: c.discountPct ?? 10,
+            })),
+          )
+        }
+        if (Array.isArray(p.metadata?.tier_pricing)) {
+          setTierPricing(p.metadata.tier_pricing)
+        }
+        if (Array.isArray(p.metadata?.specs) && p.metadata.specs.length > 0) {
+          setSpecs(p.metadata.specs)
+        } else if (p.metadata) {
+          const legacy = Object.entries(p.metadata)
+            .filter(
+              ([k, v]) =>
+                !KNOWN_KEYS.has(k) && v !== undefined && v !== null && v !== '',
+            )
+            .map(([k, v]) => ({
+              label: k
+                .replace(/_/g, ' ')
+                .replace(/([a-z])([A-Z])/g, '$1 $2')
+                .replace(/\b\w/g, (c) => c.toUpperCase()),
+              value: typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v),
+            }))
+          if (legacy.length > 0) setSpecs(legacy)
+        }
+        if (p.variants && p.variants.length > 1) {
+          setVariants(
+            p.variants.map((v: any) => ({
+              id: v.id,
+              medusaId: v.id,
+              options:
+                (v.options ?? [])
+                  .map((o: any, i: number) => ({
+                    id: `${v.id}-${i}`,
+                    name: o.option?.title ?? '',
+                    value: o.value ?? '',
+                  }))
+                  .filter((o: any) => o.name) ?? [],
+              colorCode: v.metadata?.color_code ?? '',
+              sku: v.sku ?? '',
+              ean: v.ean ?? '',
+              price: v.prices?.[0]?.amount ? String(v.prices[0].amount) : '',
+              stock: String(v.inventory_quantity ?? ''),
+              imageUrls: Array.isArray(v.metadata?.variant_images)
+                ? v.metadata.variant_images
+                : [],
+            })),
+          )
+        } else if (p.variants && p.variants.length === 1) {
+          const v = p.variants[0]
+          setDefaultVariantId(v.id)
+          const allOpts = (v.options ?? []).filter(
+            (o: any) => o?.option?.title && o?.value,
+          )
+          // Only collapse to the legacy "single default option" shortcut when
+          // there's truly just one option on this variant. If there are two
+          // or more, load every one of them as its own row — previously only
+          // options[0] was read here, so a variant with e.g. Type + Colour
+          // silently lost Colour on load, and re-saving then sent Medusa only
+          // 1 option value for a product that expects 2 (the "Product has N
+          // option values but there were M provided" error).
+          if (allOpts.length === 1) {
+            setDefaultOption({
+              title: allOpts[0].option.title,
+              value: allOpts[0].value,
+            })
+          }
+          setVariants([
+            {
+              id: '1',
+              medusaId: v.id,
+              options:
+                allOpts.length > 0
+                  ? allOpts.map((o: any, i: number) => ({
+                      id: `o${i + 1}`,
+                      name: o.option?.title ?? '',
+                      value: o.value ?? '',
+                    }))
+                  : [
+                      {
+                        id: 'o1',
+                        name: '',
+                        value: '',
+                      },
+                    ],
+              colorCode: v.metadata?.color_code ?? '',
+              sku: v.sku ?? '',
+              ean: v.ean ?? '',
+              price: v.prices?.[0]?.amount ? String(v.prices[0].amount) : '',
+              stock: String(v.inventory_quantity ?? ''),
+              imageUrls: Array.isArray(v.metadata?.variant_images)
+                ? v.metadata.variant_images
+                : [],
+            },
+          ])
+        }
+        if (Array.isArray(p.options)) {
+          const rawOptions = p.options.map((o: any) => {
+            const full = initial.productOptionValues[o.id]
+            return {
+              id: o.id,
+              title: o.title,
+              values:
+                full && full.length > 0
+                  ? full
+                  : (o.values ?? []).map((v: any) => v.value),
+            }
+          })
+          setExistingOptions(rawOptions)
+        }
+        if (p.images && p.images.length > 0) {
+          setImages(
+            p.images.map((img: any) => ({
+              preview: img.url,
+              url: img.url,
+              uploading: false,
+              existing: true,
+            })),
+          )
+        }
+      } catch (err: any) {
+        setSaveError(err.message ?? 'Failed to load product')
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadProduct()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+  const updateForm = (key: string, value: string | boolean) =>
+    setForm((prev) => ({
+      ...prev,
+      [key]: value,
+    }))
+  const addVariant = () =>
+    setVariants((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        options: [
+          {
+            id: `o${Date.now()}`,
+            name: '',
+            value: '',
+          },
+        ],
+        colorCode: '',
+        sku: '',
+        ean: '',
+        price: '',
+        stock: '',
+        imageUrls: [],
+      },
+    ])
+  const removeVariant = (vid: string) =>
+    setVariants((prev) => {
+      const target = prev.find((v) => v.id === vid)
+      if (target?.medusaId) {
+        variantsToDeleteRef.current = [
+          ...variantsToDeleteRef.current,
+          target.medusaId,
+        ]
+      }
+      return prev.filter((v) => v.id !== vid)
+    })
+  const updateVariant = (
+    vid: string,
+    key: Exclude<keyof Variant, 'options' | 'imageUrls'>,
+    value: string,
+  ) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === vid
+          ? {
+              ...v,
+              [key]: value,
+            }
+          : v,
+      ),
+    )
+  const addOptionRow = (variantId: string) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === variantId
+          ? {
+              ...v,
+              options: [
+                ...v.options,
+                {
+                  id: `o${Date.now()}`,
+                  name: '',
+                  value: '',
+                },
+              ],
+            }
+          : v,
+      ),
+    )
+  const removeOptionRow = (variantId: string, optionId: string) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === variantId
+          ? {
+              ...v,
+              options: v.options.filter((o) => o.id !== optionId),
+            }
+          : v,
+      ),
+    )
+  const updateOptionRow = (
+    variantId: string,
+    optionId: string,
+    key: 'name' | 'value',
+    value: string,
+  ) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === variantId
+          ? {
+              ...v,
+              options: v.options.map((o) =>
+                o.id === optionId
+                  ? {
+                      ...o,
+                      [key]: value,
+                    }
+                  : o,
+              ),
+            }
+          : v,
+      ),
+    )
+  const toggleVariantImage = (vid: string, url: string) =>
+    setVariants((prev) =>
+      prev.map((v) =>
+        v.id === vid
+          ? {
+              ...v,
+              imageUrls: v.imageUrls.includes(url)
+                ? v.imageUrls.filter((u) => u !== url)
+                : [...v.imageUrls, url],
+            }
+          : v,
+      ),
+    )
+  const searchCrossSellProducts = async (q: string) => {
+    if (!q.trim()) {
+      setCrossSeachResults([])
+      return
+    }
+    setCrossSellLoading(true)
+    try {
+      const res = await fetch(
+        `/api/admin/products?q=${encodeURIComponent(q)}&limit=8`,
+      )
+      const data = await res.json()
+      setCrossSeachResults(
+        (data.products ?? [])
+          .filter((p: any) => p.id !== id)
+          .map((p: any) => ({
+            id: p.id,
+            title: p.title,
+          })),
+      )
+    } catch {
+      setCrossSeachResults([])
+    } finally {
+      setCrossSellLoading(false)
+    }
+  }
+  const addCrossSell = (product: { id: string; title: string }) => {
+    if (crossSells.some((c) => c.productId === product.id)) return
+    setCrossSells((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        productId: product.id,
+        productTitle: product.title,
+        discountPct: 10,
+      },
+    ])
+    setCrossSellSearch('')
+    setCrossSeachResults([])
+  }
+  const addImages = (files: FileList | File[]) => {
+    const list = Array.from(files).filter((f) => f.type.startsWith('image/'))
+    if (!list.length) return
+    const queued = list.map((file) => ({
+      file,
+      src: URL.createObjectURL(file),
+    }))
+    setCropTotal((prev) => prev + queued.length)
+    setCropQueue((prev) => [...prev, ...queued])
+  }
+  // Called once the resize/crop modal confirms a file: adds it to the grid,
+  // starts the upload and moves on to the next queued file.
+  const handleCropConfirm = (croppedFile: File) => {
+    const newImage: UploadedImage = {
+      file: croppedFile,
+      preview: URL.createObjectURL(croppedFile),
+      uploading: true,
+    }
+    setImages((prev) => [...prev, newImage])
+    uploadImage(newImage)
+    setCropQueue((prev) => prev.slice(1))
+  }
+  const handleCropCancel = () => {
+    setCropQueue((prev) => prev.slice(1))
+  }
+  const uploadImage = async (img: UploadedImage) => {
+    if (!img.file) return
+    try {
+      const compressed = await compressImageForUpload(img.file)
+      const formData = new FormData()
+      formData.append('files', compressed)
+      const res = await fetch('/api/admin/uploads', {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error ?? 'Upload failed')
+      }
+      const data = await res.json()
+      const uploadedUrl: string =
+        data.files?.[0]?.url ?? data.uploads?.[0]?.url ?? ''
+      setImages((prev) =>
+        prev.map((i) =>
+          i.preview === img.preview
+            ? {
+                ...i,
+                uploading: false,
+                url: uploadedUrl,
+              }
+            : i,
+        ),
+      )
+    } catch (err: any) {
+      setImages((prev) =>
+        prev.map((i) =>
+          i.preview === img.preview
+            ? {
+                ...i,
+                uploading: false,
+                error: err.message,
+              }
+            : i,
+        ),
+      )
+    }
+  }
+  const removeImage = (preview: string) => {
+    setImages((prev) => {
+      const img = prev.find((i) => i.preview === preview)
+      if (img && !img.existing) URL.revokeObjectURL(img.preview)
+      return prev.filter((i) => i.preview !== preview)
+    })
+  }
+  const filledOptions = (v: Variant) =>
+    v.options.filter((o) => o.name.trim() && o.value.trim())
+  // Each variant's option rows are added independently in the UI ("+ Add
+  // Option"), so their array order can differ per variant — one variant
+  // might have Size added before Color, another Color before Size. Medusa
+  // has no opinion on option *value* order (options is a name→value map),
+  // but the variant *title* here is a plain string built by joining
+  // `filled` in whatever order it happens to be in, so without sorting to a
+  // shared order first, the Admin's Variants list ends up with titles like
+  // "3.0 / White" next to "White / 3.5" for the same product. Sort every
+  // variant's filled options into the product's existing option order (or,
+  // for options not yet saved to the product, the order they were first
+  // seen across variants) before joining.
+  const canonicalOptionTitles =
+    existingOptions.length > 0
+      ? existingOptions.map((o) => o.title.trim())
+      : Array.from(
+          new Set(
+            variants.flatMap((v) => filledOptions(v).map((o) => o.name.trim())),
+          ),
+        )
+  const sortedFilled = (v: Variant) =>
+    [...filledOptions(v)].sort(
+      (a, b) =>
+        canonicalOptionTitles.indexOf(a.name.trim()) -
+        canonicalOptionTitles.indexOf(b.name.trim()),
+    )
+  const buildPayload = (saveStatus: 'published' | 'draft') => {
+    const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
+    const baseVariant = {
+      id: deletedBaseVariantIdRef.current
+        ? undefined
+        : defaultVariantId || undefined,
+      title: 'Default',
+      sku: form.sku || undefined,
+      barcode: form.barcode || undefined,
+      ean: form.ean || undefined,
+      manage_inventory: form.trackInventory,
+      prices: form.price
+        ? [
+            {
+              amount: Math.round(parseFloat(form.price) * 100) / 100,
+              currency_code: 'gbp',
+            },
+          ]
+        : [],
+      weight: form.weight ? Number(form.weight) : undefined,
+      // baseVariant is only ever used below when hasExtraVariants is false,
+      // i.e. every variant row is genuinely blank. In that state the product
+      // should just be a plain single-option product — always "Default", not
+      // a stale defaultOption the user may have already cleared in the UI.
+      options: {
+        Default: 'Default',
+      },
+    }
+    const canonicalValue = (title: string, typed: string) =>
+      optionValueCasingRef.current.get(
+        `${title.toLowerCase()}::${typed.toLowerCase()}`,
+      ) ?? typed
+    const extraVariants = variants
+      .filter((v) => filledOptions(v).length > 0)
+      .map((v) => {
+        const filled = sortedFilled(v)
+        return {
+          id: v.medusaId || undefined,
+          title: filled.map((o) => o.value.trim()).join(' / '),
+          sku: v.sku || undefined,
+          ean: v.ean || undefined,
+          manage_inventory: form.trackInventory,
+          prices: v.price
+            ? [
+                {
+                  amount: Math.round(parseFloat(v.price) * 100) / 100,
+                  currency_code: 'gbp',
+                },
+              ]
+            : baseVariant.prices,
+          options: Object.fromEntries(
+            filled.map((o) => [
+              o.name.trim(),
+              canonicalValue(o.name.trim(), o.value.trim()),
+            ]),
+          ),
+          metadata: v.colorCode
+            ? {
+                color_code: v.colorCode,
+              }
+            : undefined,
+          images:
+            v.imageUrls.length > 0
+              ? v.imageUrls.map((url) => ({
+                  url,
+                }))
+              : undefined,
+        }
+      })
+    const allVariants = hasExtraVariants ? extraVariants : [baseVariant]
+    const uploadedImages = images
+      .filter((i) => i.url)
+      .map((i, idx) => ({
+        url: i.url!,
+        rank: idx,
+      }))
+    const productPayload = {
+      title: form.name,
+      description: form.description || undefined,
+      status: saveStatus,
+      selling_channel: sellingChannel,
+      thumbnail: uploadedImages[0]?.url ?? undefined,
+      images: uploadedImages.length > 0 ? uploadedImages : undefined,
+      categories: [
+        ...(form.category
+          ? [
+              {
+                id: form.category,
+              },
+            ]
+          : []),
+        ...extraCategoryIds
+          .filter((id) => id !== form.category)
+          .map((id) => ({
+            id,
+          })),
+      ],
+      tags: undefined as
+        | {
+            id: string
+          }[]
+        | undefined,
+      variants: allVariants,
+      metadata: {
+        brand: form.brand || undefined,
+        sport: form.sport || undefined,
+        badge: form.badge || undefined,
+        // Only meaningful for products in a "Stringing" category. "service"
+        // products are the ones offered in the racket page's stringing
+        // dropdown; "reel" products are sold on their own.
+        stringing_type: isStringingCategoryHandle(
+          categories.find((c) => c.id === form.category)?.handle,
+        )
+          ? form.stringingType
+          : undefined,
+        string_upgrade_available: form.stringUpgrade,
+        string_upgrade_type: form.stringUpgrade
+          ? form.stringUpgradeType
+          : undefined,
+        specs: specs.filter((s) => s.label.trim() && s.value.trim()),
+        compare_at_price: form.comparePrice
+          ? parseFloat(form.comparePrice)
+          : undefined,
+        cost_price: form.costPrice ? parseFloat(form.costPrice) : undefined,
+        low_stock_alert: form.lowStockAlert ? Number(form.lowStockAlert) : 5,
+        taxable: form.taxable,
+        tier_pricing: tierPricing.length > 0 ? tierPricing : undefined,
+        cross_sells:
+          crossSells.length > 0
+            ? crossSells.map((c) => ({
+                productId: c.productId,
+                productTitle: c.productTitle,
+                discountPct: c.discountPct,
+              }))
+            : undefined,
+      },
+      _stock: form.stock ? Number(form.stock) : 0,
+      _stockDirty: form.stock !== initialStockRef.current,
+      _variantStocks: hasExtraVariants
+        ? Object.fromEntries(
+            variants
+              .filter((v) => v.stock && filledOptions(v).length > 0)
+              .map((v) => [
+                sortedFilled(v)
+                  .map((o) => o.value.trim())
+                  .join(' / '),
+                Number(v.stock),
+              ]),
+          )
+        : undefined,
+    }
+    return productPayload
+  }
+  const syncOptionsForVariants = async () => {
+    const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
+    if (!hasExtraVariants) {
+      // Every variant row is blank (or the user removed them all), so this
+      // product is about to become a plain single "Default" variant. If the
+      // product's options are already just "Default", the existing variant
+      // is reused as-is (buildPayload sends its id), so it must NOT also be
+      // in the delete queue — otherwise the post-save cleanup deletes it
+      // right after it was saved and the product ends up with no variants.
+      // (When old options have to be removed first, see step 1 below.)
+      if (defaultVariantId) {
+        variantsToDeleteRef.current = variantsToDeleteRef.current.filter(
+          (vid) => vid !== defaultVariantId,
+        )
+      }
+      const isAlreadyPlainDefault =
+        existingOptions.length === 1 &&
+        existingOptions[0].title.toLowerCase() === 'default' &&
+        existingOptions[0].values.length === 1 &&
+        existingOptions[0].values[0].toLowerCase() === 'default'
+      if (isAlreadyPlainDefault) return
+      const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
+        'Default',
+        ['Default'],
+      )
+      const alreadyLinked = new Set(existingOptions.map((o) => o.id))
+      // Medusa requires every variant to provide a value for EVERY option on
+      // the product. The plain Default variant only ever provides
+      // { Default: 'Default' }, so any other option still linked to the
+      // product (e.g. Size/Colour from when it had real variants) makes the
+      // save fail with "Product has 2 option values but there were 1
+      // provided". These options therefore have to be gone BEFORE the
+      // product update runs — not after it, which can never succeed.
+      const staleIds = existingOptions
+        .filter((o) => o.id !== optionId)
+        .map((o) => o.id)
+      if (staleIds.length > 0) {
+        // 1) Medusa refuses to unassign an option from a product while any
+        //    variant still has a value for it ("Cannot unassign product
+        //    option from product which has variants for that option"). So
+        //    every variant that carries the old options has to go first:
+        //    the ones the user removed, any old row that isn't reused, and
+        //    the single existing variant too. A fresh Default variant is
+        //    created by the product update below from the form's
+        //    SKU/price/stock, so nothing the form shows is lost.
+        const alreadyGone = deletedBaseVariantIdRef.current
+        const orphanIds = variants
+          .map((v) => v.medusaId)
+          .filter((m): m is string => !!m && m !== defaultVariantId)
+        const deleteNow = Array.from(
+          new Set([
+            ...variantsToDeleteRef.current,
+            ...orphanIds,
+            ...(defaultVariantId ? [defaultVariantId] : []),
+          ]),
+        ).filter((vid) => vid !== alreadyGone)
+        const failedDeletes: string[] = []
+        for (const variantId of deleteNow) {
+          try {
+            await deleteProductVariant(id, variantId)
+            if (variantId === defaultVariantId) {
+              deletedBaseVariantIdRef.current = variantId
+              setDefaultVariantId('')
+            }
+          } catch (deleteErr) {
+            console.error('[delete variant]', deleteErr)
+            failedDeletes.push(variantId)
+          }
+        }
+        variantsToDeleteRef.current = failedDeletes
+        if (failedDeletes.length > 0) {
+          throw new Error(
+            'Could not delete the old variant(s) of this product, so its old options can’t be removed. Please try again.',
+          )
+        }
+      }
+      // 2) Link the Default option and unlink the old ones in one call.
+      await linkOptionsToProduct(
+        id,
+        [
+          {
+            id: optionId,
+            value_ids: valueIds,
+          },
+        ],
+        alreadyLinked,
+        staleIds,
+      )
+      staleOptionIdsRef.current = []
+      setDefaultOption({
+        title: 'Default',
+        value: canonicalValues[0] ?? 'Default',
+      })
+      setExistingOptions([
+        {
+          id: optionId,
+          title: 'Default',
+          values: canonicalValues,
+        },
+      ])
+      return
+    }
+    const neededByTitle = new Map<string, Set<string>>()
+    variants.forEach((v) => {
+      filledOptions(v).forEach((o) => {
+        const title = o.name.trim()
+        if (!neededByTitle.has(title)) neededByTitle.set(title, new Set())
+        neededByTitle.get(title)!.add(o.value.trim())
+      })
+    })
+    if (neededByTitle.size === 0) return
+    const linkTargets: {
+      id: string
+      title: string
+      value_ids: string[]
+    }[] = []
+    for (const [title, valueSet] of neededByTitle) {
+      const requested = Array.from(valueSet)
+      const existingOption = existingOptions.find(
+        (o) => o.title.toLowerCase() === title.toLowerCase(),
+      )
+      const union = Array.from(
+        new Set([...(existingOption?.values ?? []), ...requested]),
+      )
+      const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
+        title,
+        union,
+        existingOption?.id,
+      )
+      linkTargets.push({
+        id: optionId,
+        title,
+        value_ids: valueIds,
+      })
+      requested.forEach((typed) => {
+        const idx = union.findIndex(
+          (v) => v.toLowerCase() === typed.toLowerCase(),
+        )
+        const canonical = idx >= 0 ? canonicalValues[idx] : undefined
+        if (canonical) {
+          optionValueCasingRef.current.set(
+            `${title.toLowerCase()}::${typed.toLowerCase()}`,
+            canonical,
+          )
+        }
+      })
+      setExistingOptions((prev) => {
+        const others = prev.filter(
+          (o) =>
+            o.id !== optionId && o.title.toLowerCase() !== title.toLowerCase(),
+        )
+        return [
+          ...others,
+          {
+            id: optionId,
+            title,
+            values: canonicalValues,
+          },
+        ]
+      })
+    }
+    const alreadyLinked = new Set(existingOptions.map((o) => o.id))
+    const neededTitles = new Set(neededByTitle.keys())
+    const removeOptionIds = existingOptions
+      .filter((o) => !neededTitles.has(o.title))
+      .map((o) => o.id)
+    let removeNowIds: string[] | null = null
+    const defaultVariantSurvives = variants.some(
+      (v) => v.medusaId === defaultVariantId && filledOptions(v).length > 0,
+    )
+    if (removeOptionIds.length > 0 && defaultVariantId) {
+      if (!defaultVariantSurvives) {
+        await deleteProductVariant(id, defaultVariantId)
+        deletedDefaultVariantRef.current = true
+        setDefaultVariantId('')
+      } else {
+        // The default variant survives, so the product update still has to
+        // run with it. Medusa rejects that update ("Product has N option
+        // values but there were M provided") while the product still has an
+        // option this variant doesn't give a value for — so every stale
+        // option that NO variant actually uses must be unlinked BEFORE the
+        // update, in the same call that links the new ones. Only options a
+        // surviving variant still holds a value for (Medusa refuses to
+        // unassign those) are left for the post-save cleanup.
+        //
+        // Variants the user removed are deleted first, since they may be
+        // what holds on to a stale option.
+        const queuedFailed: string[] = []
+        for (const variantId of variantsToDeleteRef.current) {
+          try {
+            await deleteProductVariant(id, variantId)
+          } catch (deleteErr) {
+            console.error('[delete removed variant]', deleteErr)
+            queuedFailed.push(variantId)
+          }
+        }
+        variantsToDeleteRef.current = queuedFailed
+        let inUse: Set<string> | null = null
+        try {
+          const r = await fetch(`/api/admin/products/${id}`)
+          const d = await r.json()
+          const used = new Set<string>()
+          ;(d?.product?.variants ?? []).forEach((v: any) => {
+            ;(v.options ?? []).forEach((o: any) => {
+              const oid = o?.option_id ?? o?.option?.id
+              if (oid) used.add(oid)
+            })
+          })
+          inUse = used
+        } catch (fetchErr) {
+          console.error('[check option usage]', fetchErr)
+        }
+        // If usage can't be determined, fall back to the old behaviour and
+        // leave every stale option for the post-save cleanup.
+        const usedIds = inUse
+        staleOptionIdsRef.current = removeOptionIds.filter(
+          (oid) => !usedIds || usedIds.has(oid),
+        )
+        removeNowIds = removeOptionIds.filter(
+          (oid) => !!usedIds && !usedIds.has(oid),
+        )
+      }
+    }
+    const removeNow =
+      removeNowIds ?? (staleOptionIdsRef.current.length ? [] : removeOptionIds)
+    try {
+      await linkOptionsToProduct(id, linkTargets, alreadyLinked, removeNow)
+    } catch (err) {
+      throw err
+    }
+    if (removeNow.length > 0) {
+      setExistingOptions((prev) =>
+        prev.filter((o) => !removeNow.includes(o.id)),
+      )
+    }
+  }
+  const restoreDeletedDefaultVariant = async () => {
+    try {
+      const result = await updateProduct(id, {
+        variants: [
+          {
+            title: 'Default',
+            sku: form.sku || undefined,
+            barcode: form.barcode || undefined,
+            ean: form.ean || undefined,
+            manage_inventory: form.trackInventory,
+            prices: form.price
+              ? [
+                  {
+                    amount: Math.round(parseFloat(form.price) * 100) / 100,
+                    currency_code: 'gbp',
+                  },
+                ]
+              : [],
+            options: defaultOption
+              ? {
+                  [defaultOption.title]: defaultOption.value,
+                }
+              : {
+                  Default: 'Default',
+                },
+          },
+        ],
+      })
+      const restoredId = result?.product?.variants?.[0]?.id
+      if (restoredId) {
+        setDefaultVariantId(restoredId)
+        setVariants((prev) =>
+          prev.map((v, i) =>
+            i === 0 && filledOptions(v).length === 0
+              ? {
+                  ...v,
+                  medusaId: restoredId,
+                }
+              : v,
+          ),
+        )
+      }
+      toast.error(
+        'Save failed — your original SKU/price/stock have been restored. Please try adding the variant again.',
+      )
+    } catch (restoreErr) {
+      console.error('[restore deleted default variant]', restoreErr)
+      toast.error(
+        'Save failed and the original variant could not be restored automatically — please refresh and check this product before saving again.',
+      )
+    } finally {
+      deletedDefaultVariantRef.current = false
+    }
+  }
+  const handleSave = async (saveStatus: 'published' | 'draft') => {
+    if (isSavingRef.current) return
+    isSavingRef.current = true
+    try {
+      await handleSaveInner(saveStatus)
+    } finally {
+      isSavingRef.current = false
+    }
+  }
+  const handleSaveInner = async (saveStatus: 'published' | 'draft') => {
+    if (!form.name.trim()) {
+      setActiveTab('general')
+      setSaveError('Product name is required.')
+      return
+    }
+    if (!form.price) {
+      setActiveTab('pricing')
+      setSaveError('Price is required.')
+      return
+    }
+    if (images.some((i) => i.uploading)) {
+      setSaveError('Images are still uploading, please wait...')
+      return
+    }
+    // Every variant that has at least one option filled in must provide a
+    // value for EVERY option title used across all variants. Medusa treats
+    // the union of option titles as the product's option set, and rejects a
+    // variant update whose option-value count doesn't match that set (this
+    // is the "Product has N option values but there were M provided..."
+    // error). Catch it here with an actionable message instead of letting
+    // the raw backend error surface.
+    const variantsWithOptions = variants.filter(
+      (v) => filledOptions(v).length > 0,
+    )
+    if (variantsWithOptions.length > 0) {
+      const allOptionTitles = new Set<string>()
+      variantsWithOptions.forEach((v) =>
+        filledOptions(v).forEach((o) => allOptionTitles.add(o.name.trim())),
+      )
+      for (const v of variantsWithOptions) {
+        const filled = filledOptions(v)
+        const titlesOnVariant = new Set(filled.map((o) => o.name.trim()))
+        const missing = Array.from(allOptionTitles).filter(
+          (t) => !titlesOnVariant.has(t),
+        )
+        if (missing.length > 0) {
+          setActiveTab('variants')
+          const label =
+            filled.map((o) => o.value.trim()).join(' / ') || 'variant'
+          setSaveError(
+            `Variant "${label}" is missing a value for: ${missing.join(
+              ', ',
+            )}. Every variant needs a value for every option used on this product — add the missing option${
+              missing.length > 1 ? 's' : ''
+            } (or remove ${missing.length > 1 ? 'them' : 'it'} from the other variants).`,
+          )
+          return
+        }
+      }
+    }
+    setSaving(true)
+    setSaveError(null)
+    setSaveSuccess(false)
+    setStatus(saveStatus)
+    try {
+      const hadExtraVariants = variants.some((v) => filledOptions(v).length > 0)
+      await syncOptionsForVariants()
+      const tagIds = form.tags
+        ? await upsertProductTags(form.tags.split(','))
+        : []
+      const payload = buildPayload(saveStatus)
+      payload.tags = tagIds.length > 0 ? tagIds : []
+      const updateResult = await updateProduct(id, payload)
+      if (hadExtraVariants) {
+        setDefaultOption(null)
+      }
+      if (deletedBaseVariantIdRef.current) {
+        // The old single variant was replaced by a new Default variant —
+        // remember its id so the next Save updates it instead of creating
+        // yet another one.
+        const oldId = deletedBaseVariantIdRef.current
+        let newVariants: any[] = updateResult?.product?.variants ?? []
+        if (newVariants.length !== 1) {
+          try {
+            const r = await fetch(`/api/admin/products/${id}`)
+            const d = await r.json()
+            newVariants = d?.product?.variants ?? []
+          } catch {
+            newVariants = []
+          }
+        }
+        const newId: string | undefined =
+          newVariants.length === 1 ? newVariants[0]?.id : undefined
+        if (newId) {
+          setDefaultVariantId(newId)
+          setVariants((prev) =>
+            prev.map((v) =>
+              v.medusaId === oldId
+                ? {
+                    ...v,
+                    medusaId: newId,
+                  }
+                : v,
+            ),
+          )
+          deletedBaseVariantIdRef.current = null
+        }
+      }
+      if (variantsToDeleteRef.current.length > 0) {
+        const toDelete = variantsToDeleteRef.current
+        variantsToDeleteRef.current = []
+        for (const variantId of toDelete) {
+          try {
+            await deleteProductVariant(id, variantId)
+          } catch (deleteErr) {
+            console.error('[delete removed variant]', deleteErr)
+            variantsToDeleteRef.current.push(variantId)
+          }
+        }
+      }
+      if (staleOptionIdsRef.current.length > 0) {
+        const toRemove = staleOptionIdsRef.current
+        try {
+          await linkOptionsToProduct(
+            id,
+            [],
+            new Set(existingOptions.map((o) => o.id)),
+            toRemove,
+          )
+          staleOptionIdsRef.current = []
+          setExistingOptions((prev) => {
+            const removedSet = new Set(toRemove)
+            return prev.filter((o) => !removedSet.has(o.id))
+          })
+        } catch (cleanupErr) {
+          console.error('[cleanup stale product option]', cleanupErr)
+        }
+      }
+      setSaveSuccess(true)
+      toast.success('Product updated successfully!')
+      setTimeout(() => setSaveSuccess(false), 3000)
+      const inventoryDebug: string[] = updateResult?._inventoryDebug ?? []
+      if (inventoryDebug.length > 0) {
+        const hasFailure = inventoryDebug.some((line) =>
+          /FAILED|SKIPPED|THREW|No stock location|still NOT FOUND/.test(line),
+        )
+        if (hasFailure) {
+          setSaveError('Inventory debug:\n' + inventoryDebug.join('\n'))
+          toast.error('Inventory setup had issues — see details below Save.')
+        }
+      }
+    } catch (err: any) {
+      if (deletedDefaultVariantRef.current) {
+        await restoreDeletedDefaultVariant()
+      }
+      const msg = err.message ?? 'Failed to save product.'
+      setSaveError(msg)
+      toast.error(msg)
+    } finally {
+      setSaving(false)
+    }
+  }
+  // Cost is entered ex-VAT, so add 20% VAT to get the real cost before
+  // calculating profit and margin (e.g. 139.99 - (5 x 1.2)).
+  const COST_VAT_RATE = 0.2
+  const priceNum = parseFloat(form.price)
+  const costNum = parseFloat(form.costPrice)
+  const costIncVat = costNum * (1 + COST_VAT_RATE)
+  const hasMargin =
+    !!form.price && !!form.costPrice && !isNaN(priceNum) && !isNaN(costNum)
+  const profit = hasMargin ? (priceNum - costIncVat).toFixed(2) : null
+  const margin =
+    hasMargin && priceNum > 0
+      ? (((priceNum - costIncVat) / priceNum) * 100).toFixed(1)
+      : null
+  const TABS = [
+    {
+      id: 'general',
+      label: 'General',
+    },
+    {
+      id: 'pricing',
+      label: 'Pricing',
+    },
+    {
+      id: 'inventory',
+      label: 'Inventory',
+    },
+    {
+      id: 'variants',
+      label: 'Variants',
+    },
+    {
+      id: 'cross-sell',
+      label: 'Cross-sell',
+    },
+    {
+      id: 'seo',
+      label: 'SEO',
+    },
+  ]
+  if (loading) {
+    return (
+      <div className='flex items-center justify-center h-64'>
+        <div className='flex items-center gap-3 text-[#6D7175]'>
+          <svg className='animate-spin w-5 h-5' viewBox='0 0 24 24' fill='none'>
+            <circle
+              className='opacity-25'
+              cx='12'
+              cy='12'
+              r='10'
+              stroke='currentColor'
+              strokeWidth='4'
+            />
+            <path
+              className='opacity-75'
+              fill='currentColor'
+              d='M4 12a8 8 0 018-8v8H4z'
+            />
+          </svg>
+          <span className='text-[13px]'>Loading product...</span>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className='max-w-275 mx-auto space-y-5'>
+      {variantToDelete && (
+        <div
+          className='fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4'
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setVariantToDelete(null)
+          }}
+          role='dialog'
+          aria-modal='true'
+          aria-labelledby='delete-variant-title'
+        >
+          <div className='bg-white w-full max-w-sm rounded-2xl shadow-xl p-6'>
+            <div className='w-11 h-11 rounded-full bg-[#FFF4F4] flex items-center justify-center mb-4'>
+              <svg
+                width='20'
+                height='20'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='#D82C0D'
+                strokeWidth='2'
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              >
+                <polyline points='3 6 5 6 21 6' />
+                <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6' />
+                <path d='M10 11v6M14 11v6' />
+                <path d='M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2' />
+              </svg>
+            </div>
+            <h3
+              id='delete-variant-title'
+              className='text-[16px] font-semibold text-[#202223] m-0'
+            >
+              Delete this variant?
+            </h3>
+            <p className='text-[13px] text-[#6D7175] mt-2 mb-0 leading-relaxed'>
+              <span className='font-medium text-[#202223]'>
+                {variantToDelete.label}
+              </span>{' '}
+              will be removed from this product when you click{' '}
+              <span className='font-medium text-[#202223]'>Save Changes</span>.
+              Until then you can still leave the page to keep it.
+            </p>
+            <div className='flex justify-end gap-2 mt-6'>
+              <button
+                type='button'
+                autoFocus
+                onClick={() => setVariantToDelete(null)}
+                className='px-4 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors cursor-pointer'
+              >
+                Cancel
+              </button>
+              <button
+                type='button'
+                onClick={() => {
+                  removeVariant(variantToDelete.id)
+                  setVariantToDelete(null)
+                }}
+                className='px-4 py-2 bg-[#D82C0D] hover:bg-[#B82409] text-white text-[13px] font-semibold rounded-lg transition-colors cursor-pointer border-none'
+              >
+                Delete variant
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {cropQueue.length > 0 && (
+        <ImageCropModal
+          key={cropQueue[0].src}
+          imageSrc={cropQueue[0].src}
+          fileName={cropQueue[0].file.name}
+          fileType={cropQueue[0].file.type}
+          progressLabel={
+            cropTotal > 1
+              ? `${cropTotal - cropQueue.length + 1} of ${cropTotal}`
+              : undefined
+          }
+          onCancel={() => {
+            URL.revokeObjectURL(cropQueue[0].src)
+            handleCropCancel()
+          }}
+          onConfirm={(croppedFile) => {
+            URL.revokeObjectURL(cropQueue[0].src)
+            handleCropConfirm(croppedFile)
+          }}
+        />
+      )}
+      <div className='flex items-center justify-between'>
+        <div className='flex items-center gap-3'>
+          <Link
+            href='/dashboard/products'
+            className='w-8 h-8 flex items-center justify-center border border-[#E1E3E5] rounded-lg text-[#6D7175] hover:text-[#202223] hover:bg-white no-underline transition-all bg-white'
+          >
+            <svg
+              width='16'
+              height='16'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2'
+            >
+              <polyline points='15 18 9 12 15 6' />
+            </svg>
+          </Link>
+          <div>
+            <h1 className='font-sora text-[20px] font-semibold text-[#202223]'>
+              Edit Product
+            </h1>
+            <p className='text-[12.5px] text-[#6D7175] mt-0.5 truncate max-w-64'>
+              {form.name || 'Loading...'}
+            </p>
+          </div>
+        </div>
+        <div className='flex items-center gap-2'>
+          <button
+            onClick={() => handleSave('draft')}
+            disabled={saving}
+            className='px-4 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors disabled:opacity-50 cursor-pointer'
+          >
+            Save as Draft
+          </button>
+          <button
+            onClick={() => handleSave(status)}
+            disabled={saving}
+            className='px-4 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-2'
+          >
+            {saving ? (
+              <>
+                <svg
+                  className='animate-spin w-3.5 h-3.5'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                >
+                  <circle
+                    className='opacity-25'
+                    cx='12'
+                    cy='12'
+                    r='10'
+                    stroke='currentColor'
+                    strokeWidth='4'
+                  />
+                  <path
+                    className='opacity-75'
+                    fill='currentColor'
+                    d='M4 12a8 8 0 018-8v8H4z'
+                  />
+                </svg>
+                Saving...
+              </>
+            ) : (
+              'Save Changes'
+            )}
+          </button>
+        </div>
+      </div>
+
+      {}
+      {saveSuccess && (
+        <div className='flex items-center gap-3 px-4 py-3 bg-[#F2F7F5] border border-[#008060]/20 rounded-xl text-[13px] text-[#008060]'>
+          <svg
+            width='16'
+            height='16'
+            viewBox='0 0 24 24'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth='2'
+          >
+            <path d='M22 11.08V12a10 10 0 11-5.93-9.14' />
+            <polyline points='22 4 12 14.01 9 11.01' />
+          </svg>
+          Product updated successfully!
+        </div>
+      )}
+
+      {}
+      {saveError && (
+        <div className='flex items-start gap-3 px-4 py-3 bg-[#FFF4F4] border border-[#D82C0D]/20 rounded-xl text-[13px] text-[#D82C0D]'>
+          <svg
+            width='16'
+            height='16'
+            viewBox='0 0 24 24'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth='2'
+            className='mt-0.5 shrink-0'
+          >
+            <circle cx='12' cy='12' r='10' />
+            <line x1='12' y1='8' x2='12' y2='12' />
+            <line x1='12' y1='16' x2='12.01' y2='16' />
+          </svg>
+          <span className='whitespace-pre-wrap break-words'>{saveError}</span>
+          <button
+            onClick={() => setSaveError(null)}
+            className='ml-auto bg-transparent border-none cursor-pointer text-[#D82C0D]'
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      <div className='grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-5'>
+        {}
+        <div className='space-y-5'>
+          {}
+          <div className='bg-white border border-[#E1E3E5] rounded-xl overflow-hidden'>
+            <div className='flex border-b border-[#E1E3E5] overflow-x-auto scrollbar-none'>
+              {TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-5 py-3 text-[13px] font-medium whitespace-nowrap border-b-2 transition-all bg-transparent border-l-0 border-r-0 border-t-0 cursor-pointer ${activeTab === tab.id ? 'border-b-[#008060] text-[#008060]' : 'border-b-transparent text-[#6D7175] hover:text-[#202223]'}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className='p-6'>
+              {}
+              {activeTab === 'general' && (
+                <div className='space-y-5'>
+                  <div>
+                    <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                      Product Name <span className='text-[#D82C0D]'>*</span>
+                    </label>
+                    <input
+                      type='text'
+                      value={form.name}
+                      onChange={(e) => updateForm('name', e.target.value)}
+                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                    />
+                  </div>
+
+                  <div>
+                    <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                      Sell on
+                    </label>
+                    <div className='grid grid-cols-3 gap-2'>
+                      {(
+                        [
+                          {
+                            value: 'website',
+                            label: 'Website',
+                          },
+                          {
+                            value: 'store',
+                            label: 'Store',
+                          },
+                          {
+                            value: 'both',
+                            label: 'Both',
+                          },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type='button'
+                          onClick={() => setSellingChannel(opt.value)}
+                          className={`px-3.5 py-2.5 rounded-lg text-[13px] font-medium border transition-all ${sellingChannel === opt.value ? 'border-[#008060] bg-[#008060]/8 text-[#008060]' : 'border-[#E1E3E5] text-[#202223] hover:border-[#C9CCCF]'}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className='mt-1.5 text-[11.5px] text-[#8C9196]'>
+                      Website = smashuk.co only · Store = POS (in-store) only ·
+                      Both = shows everywhere
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                      Description
+                    </label>
+                    <RichTextEditor
+                      value={form.description}
+                      onChange={(html) => updateForm('description', html)}
+                      placeholder='Describe your product in detail...'
+                    />
+                  </div>
+
+                  <div className='grid grid-cols-2 gap-4'>
+                    <div>
+                      <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                        Brand
+                      </label>
+                      {addingBrand ? (
+                        <input
+                          autoFocus
+                          type='text'
+                          placeholder='Type new brand, press Enter'
+                          className='w-full px-3.5 py-2.5 border border-[#008060] rounded-lg text-[13px] text-[#202223] outline-none focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                          onKeyDown={(e) => {
+                            const val = (
+                              e.target as HTMLInputElement
+                            ).value.trim()
+                            if (e.key === 'Enter' && val) {
+                              updateForm('brand', val)
+                              setBrandOptions((prev) =>
+                                prev.includes(val)
+                                  ? prev
+                                  : [...prev, val].sort(),
+                              )
+                              setAddingBrand(false)
+                            } else if (e.key === 'Escape') {
+                              setAddingBrand(false)
+                            }
+                          }}
+                          onBlur={() => setAddingBrand(false)}
+                        />
+                      ) : (
+                        <select
+                          value={form.brand}
+                          onChange={(e) => {
+                            if (e.target.value === '__add_new__') {
+                              setAddingBrand(true)
+                            } else {
+                              updateForm('brand', e.target.value)
+                            }
+                          }}
+                          className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all bg-white cursor-pointer'
+                        >
+                          <option value=''>Select brand</option>
+                          {}
+                          {(form.brand && !brandOptions.includes(form.brand)
+                            ? [form.brand, ...brandOptions]
+                            : brandOptions
+                          ).map((b) => (
+                            <option key={b} value={b}>
+                              {b}
+                            </option>
+                          ))}
+                          <option value='__add_new__'>+ Add new brand…</option>
+                        </select>
+                      )}
+                    </div>
+                    <div>
+                      <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                        Sport
+                      </label>
+                      {addingSport ? (
+                        <input
+                          autoFocus
+                          type='text'
+                          placeholder='Type new sport, press Enter'
+                          className='w-full px-3.5 py-2.5 border border-[#008060] rounded-lg text-[13px] text-[#202223] outline-none focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                          onKeyDown={(e) => {
+                            const val = (
+                              e.target as HTMLInputElement
+                            ).value.trim()
+                            if (e.key === 'Enter' && val) {
+                              updateForm('sport', val)
+                              setSportOptions((prev) =>
+                                prev.includes(val)
+                                  ? prev
+                                  : [...prev, val].sort(),
+                              )
+                              setAddingSport(false)
+                            } else if (e.key === 'Escape') {
+                              setAddingSport(false)
+                            }
+                          }}
+                          onBlur={() => setAddingSport(false)}
+                        />
+                      ) : (
+                        <select
+                          value={form.sport}
+                          onChange={(e) => {
+                            if (e.target.value === '__add_new__') {
+                              setAddingSport(true)
+                            } else {
+                              updateForm('sport', e.target.value)
+                            }
+                          }}
+                          className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all bg-white cursor-pointer'
+                        >
+                          <option value=''>Select sport</option>
+                          {(form.sport && !sportOptions.includes(form.sport)
+                            ? [form.sport, ...sportOptions]
+                            : sportOptions
+                          ).map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                          <option value='__add_new__'>+ Add new sport…</option>
+                        </select>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                      Category
+                    </label>
+                    <select
+                      value={form.category}
+                      onChange={(e) => {
+                        const selected = categories.find(
+                          (c) => c.id === e.target.value,
+                        )
+                        updateForm('category', e.target.value)
+                        updateForm('categoryName', selected?.name ?? '')
+                      }}
+                      disabled={categoriesLoading}
+                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all bg-white cursor-pointer disabled:opacity-50'
+                    >
+                      <option value=''>
+                        {categoriesLoading ? 'Loading...' : 'Select category'}
+                      </option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <StringingCategoryHint
+                    title={form.name}
+                    sport={form.sport}
+                    categories={categories}
+                    categoryId={form.category}
+                    stringingType={form.stringingType}
+                    onSelectCategory={(id) => {
+                      const c = categories.find((x) => x.id === id)
+                      updateForm('category', id)
+                      updateForm('categoryName', c?.name ?? '')
+                    }}
+                    onChangeSport={(s) => updateForm('sport', s)}
+                    onChangeType={(t) => updateForm('stringingType', t)}
+                  />
+
+                  <div className='grid grid-cols-1 sm:grid-cols-3 gap-4'>
+                    <div>
+                      <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                        SKU
+                      </label>
+                      <input
+                        type='text'
+                        value={form.sku}
+                        onChange={(e) => updateForm('sku', e.target.value)}
+                        className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                      />
+                    </div>
+                    <div>
+                      <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                        EAN
+                      </label>
+                      <input
+                        type='text'
+                        inputMode='numeric'
+                        maxLength={14}
+                        value={form.ean}
+                        onChange={(e) =>
+                          updateForm('ean', e.target.value.replace(/\D/g, ''))
+                        }
+                        placeholder='EAN-13 e.g. 8435214012345'
+                        className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                      />
+                    </div>
+                    <div>
+                      <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                        Barcode
+                      </label>
+                      <input
+                        type='text'
+                        value={form.barcode}
+                        onChange={(e) => updateForm('barcode', e.target.value)}
+                        className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                      Tags{' '}
+                      <span className='ml-1 text-[11px] text-[#8C9196] font-normal'>
+                        (comma separated)
+                      </span>
+                    </label>
+                    <input
+                      type='text'
+                      value={form.tags}
+                      onChange={(e) => updateForm('tags', e.target.value)}
+                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                    />
+                    {form.tags && (
+                      <div className='flex flex-wrap gap-1.5 mt-2'>
+                        {form.tags
+                          .split(',')
+                          .map((tag) => tag.trim())
+                          .filter(Boolean)
+                          .map((tag) => (
+                            <span
+                              key={tag}
+                              className='px-2.5 py-1 bg-[#F6F6F7] border border-[#E1E3E5] rounded-full text-[11.5px] text-[#6D7175]'
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                      Badge{' '}
+                      <span className='ml-1 text-[11px] text-[#8C9196] font-normal'>
+                        (shows on the storefront card + "Sale"/"New Arrivals"
+                        nav links)
+                      </span>
+                    </label>
+                    <select
+                      value={form.badge}
+                      onChange={(e) => updateForm('badge', e.target.value)}
+                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                    >
+                      <option value=''>None</option>
+                      <option value='NEW'>New</option>
+                      <option value='SALE'>Sale</option>
+                      <option value='BESTSELLER'>Bestseller</option>
+                      <option value='LIMITED'>Limited</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className='flex items-center justify-between mb-1.5'>
+                      <label className='block text-[12.5px] font-medium text-[#202223]'>
+                        Specifications{' '}
+                        <span className='ml-1 text-[11px] text-[#8C9196] font-normal'>
+                          (shown in the "Specifications" tab on the product
+                          page)
+                        </span>
+                      </label>
+                      <button
+                        type='button'
+                        onClick={() =>
+                          setSpecs((prev) => [
+                            ...prev,
+                            {
+                              label: '',
+                              value: '',
+                            },
+                          ])
+                        }
+                        className='text-[12px] font-medium text-[#008060] hover:underline'
+                      >
+                        + Add spec
+                      </button>
+                    </div>
+
+                    {specs.length === 0 ? (
+                      <p className='text-[12px] text-[#8C9196] py-2'>
+                        No specifications added yet — e.g. "Weight: 85g",
+                        "Balance: Head-Heavy", "Material: Carbon".
+                      </p>
+                    ) : (
+                      <div className='space-y-2'>
+                        {specs.map((s, i) => (
+                          <div key={i} className='flex gap-2'>
+                            <input
+                              value={s.label}
+                              onChange={(e) =>
+                                setSpecs((prev) =>
+                                  prev.map((row, idx) =>
+                                    idx === i
+                                      ? {
+                                          ...row,
+                                          label: e.target.value,
+                                        }
+                                      : row,
+                                  ),
+                                )
+                              }
+                              placeholder='Label (e.g. Weight)'
+                              className='flex-1 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060]'
+                            />
+                            <input
+                              value={s.value}
+                              onChange={(e) =>
+                                setSpecs((prev) =>
+                                  prev.map((row, idx) =>
+                                    idx === i
+                                      ? {
+                                          ...row,
+                                          value: e.target.value,
+                                        }
+                                      : row,
+                                  ),
+                                )
+                              }
+                              placeholder='Value (e.g. 85g)'
+                              className='flex-1 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060]'
+                            />
+                            <button
+                              type='button'
+                              onClick={() =>
+                                setSpecs((prev) =>
+                                  prev.filter((_, idx) => idx !== i),
+                                )
+                              }
+                              className='w-9 h-9 shrink-0 flex items-center justify-center text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg'
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <label className='flex items-start gap-2.5 p-3 border border-[#E1E3E5] rounded-lg cursor-pointer'>
+                    <input
+                      type='checkbox'
+                      checked={form.stringUpgrade}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          stringUpgrade: e.target.checked,
+                        })
+                      }
+                      className='mt-0.5 accent-[#008060]'
+                    />
+                    <span>
+                      <span className='block text-[13px] font-medium text-[#202223]'>
+                        Offer "String Upgrade" option
+                      </span>
+                      <span className='block text-[11.5px] text-[#8C9196] mt-0.5'>
+                        Shows a required Yes/No choice on the product page (adds
+                        +1 day processing) — for racket products only, matches
+                        smashuk.co.
+                      </span>
+                    </span>
+                  </label>
+
+                  {form.stringUpgrade && (
+                    <div className='ml-1 pl-3 border-l-2 border-[#E1E3E5] flex gap-4'>
+                      <label className='flex items-center gap-2 text-[13px] text-[#202223] cursor-pointer'>
+                        <input
+                          type='radio'
+                          name='stringUpgradeType'
+                          checked={form.stringUpgradeType === 'free'}
+                          onChange={() =>
+                            setForm({
+                              ...form,
+                              stringUpgradeType: 'free',
+                            })
+                          }
+                          className='accent-[#008060]'
+                        />
+                        Free
+                      </label>
+                      <label className='flex items-center gap-2 text-[13px] text-[#202223] cursor-pointer'>
+                        <input
+                          type='radio'
+                          name='stringUpgradeType'
+                          checked={form.stringUpgradeType === 'paid'}
+                          onChange={() =>
+                            setForm({
+                              ...form,
+                              stringUpgradeType: 'paid',
+                            })
+                          }
+                          className='accent-[#008060]'
+                        />
+                        Paid
+                        <span className='text-[11.5px] text-[#8C9196]'>
+                          (uses each string's own product price)
+                        </span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {}
+              {activeTab === 'pricing' && (
+                <div className='space-y-5'>
+                  <div className='grid grid-cols-2 gap-4'>
+                    <div>
+                      <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                        Price <span className='text-[#D82C0D]'>*</span>
+                      </label>
+                      <div className='relative'>
+                        <span className='absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6D7175] text-[13px]'>
+                          £
+                        </span>
+                        <input
+                          type='number'
+                          value={form.price}
+                          onChange={(e) => updateForm('price', e.target.value)}
+                          placeholder='0.00'
+                          className='w-full pl-8 pr-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                        Compare-at Price{' '}
+                        <span className='ml-1 text-[11px] text-[#8C9196] font-normal'>
+                          (original)
+                        </span>
+                      </label>
+                      <div className='relative'>
+                        <span className='absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6D7175] text-[13px]'>
+                          £
+                        </span>
+                        <input
+                          type='number'
+                          value={form.comparePrice}
+                          onChange={(e) =>
+                            updateForm('comparePrice', e.target.value)
+                          }
+                          placeholder='0.00'
+                          className='w-full pl-8 pr-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className='grid grid-cols-2 gap-4'>
+                    <div>
+                      <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                        Cost per Item{' '}
+                        <span className='ml-1 text-[11px] text-[#8C9196] font-normal'>
+                          (before VAT, for margin calc)
+                        </span>
+                      </label>
+                      <div className='relative'>
+                        <span className='absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6D7175] text-[13px]'>
+                          £
+                        </span>
+                        <input
+                          type='number'
+                          value={form.costPrice}
+                          onChange={(e) =>
+                            updateForm('costPrice', e.target.value)
+                          }
+                          placeholder='0.00'
+                          className='w-full pl-8 pr-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                        />
+                      </div>
+                    </div>
+                    <div className='flex flex-col justify-end pb-0.5'>
+                      {profit && margin ? (
+                        <div className='p-3 bg-[#F2F7F5] border border-[#008060]/20 rounded-lg'>
+                          <p className='text-[11.5px] text-[#6D7175]'>
+                            Profit per item
+                          </p>
+                          <p className='text-[16px] font-bold text-[#008060]'>
+                            £{profit}
+                          </p>
+                          <p className='text-[11.5px] text-[#6D7175] mt-0.5'>
+                            Margin: {margin}%
+                          </p>
+                          <p className='text-[10.5px] text-[#8C9196] mt-0.5'>
+                            Cost incl. 20% VAT: £{costIncVat.toFixed(2)}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className='p-3 bg-[#F6F6F7] border border-[#E1E3E5] rounded-lg'>
+                          <p className='text-[11.5px] text-[#8C9196]'>
+                            Enter price & cost to see margin
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className='flex items-center justify-between p-4 border border-[#E1E3E5] rounded-lg'>
+                    <div>
+                      <p className='text-[13px] font-medium text-[#202223]'>
+                        Charge taxes on this product
+                      </p>
+                      <p className='text-[12px] text-[#6D7175] mt-0.5'>
+                        VAT (20%) will be applied at checkout
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => updateForm('taxable', !form.taxable)}
+                      className={`relative w-10 h-6 rounded-full transition-colors border-none cursor-pointer ${form.taxable ? 'bg-[#008060]' : 'bg-[#8C9196]'}`}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.taxable ? 'right-0.5' : 'left-0.5'}`}
+                      />
+                    </button>
+                  </div>
+
+                  {}
+                  <div className='border border-[#E1E3E5] rounded-lg overflow-hidden'>
+                    <div className='flex items-center justify-between px-4 py-3 bg-[#F6F6F7] border-b border-[#E1E3E5]'>
+                      <div>
+                        <p className='text-[13px] font-medium text-[#202223]'>
+                          Volume / Tier Pricing
+                        </p>
+                        <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
+                          e.g. Buy 2–9 = 12% off, Buy 10+ = 20% off
+                        </p>
+                      </div>
+                      <button
+                        onClick={() =>
+                          setTierPricing((prev) => [
+                            ...prev,
+                            {
+                              minQty: (prev[prev.length - 1]?.maxQty ?? 1) + 1,
+                              maxQty: undefined,
+                              discountPct: 10,
+                            },
+                          ])
+                        }
+                        className='flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-[#008060] border border-[#008060]/30 rounded-lg hover:bg-[#008060]/5 transition-colors bg-white'
+                      >
+                        + Add tier
+                      </button>
+                    </div>
+
+                    {tierPricing.length === 0 ? (
+                      <div className='px-4 py-6 text-center'>
+                        <p className='text-[12.5px] text-[#8C9196]'>
+                          No tiers yet. Click "Add tier" to set volume
+                          discounts.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className='divide-y divide-[#F1F1F1]'>
+                        {}
+                        <div className='grid grid-cols-[1fr_1fr_1fr_auto] gap-3 px-4 py-2 bg-[#FAFAFA]'>
+                          <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                            Min Qty
+                          </span>
+                          <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                            Max Qty
+                          </span>
+                          <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                            Discount %
+                          </span>
+                          <span className='w-8' />
+                        </div>
+                        {tierPricing.map((tier, i) => (
+                          <div
+                            key={i}
+                            className='grid grid-cols-[1fr_1fr_1fr_auto] gap-3 items-center px-4 py-3'
+                          >
+                            <input
+                              type='number'
+                              min='1'
+                              value={tier.minQty}
+                              onChange={(e) => {
+                                const updated = [...tierPricing]
+                                updated[i] = {
+                                  ...updated[i],
+                                  minQty: Number(e.target.value),
+                                }
+                                setTierPricing(updated)
+                              }}
+                              className='w-full px-2.5 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                              placeholder='2'
+                            />
+                            <input
+                              type='number'
+                              min='1'
+                              value={tier.maxQty ?? ''}
+                              onChange={(e) => {
+                                const updated = [...tierPricing]
+                                updated[i] = {
+                                  ...updated[i],
+                                  maxQty: e.target.value
+                                    ? Number(e.target.value)
+                                    : undefined,
+                                }
+                                setTierPricing(updated)
+                              }}
+                              className='w-full px-2.5 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                              placeholder='∞ (no limit)'
+                            />
+                            <div className='relative'>
+                              <input
+                                type='number'
+                                min='1'
+                                max='99'
+                                value={tier.discountPct}
+                                onChange={(e) => {
+                                  const updated = [...tierPricing]
+                                  updated[i] = {
+                                    ...updated[i],
+                                    discountPct: Number(e.target.value),
+                                  }
+                                  setTierPricing(updated)
+                                }}
+                                className='w-full pl-2.5 pr-6 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                                placeholder='10'
+                              />
+                              <span className='absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#8C9196]'>
+                                %
+                              </span>
+                            </div>
+                            <button
+                              onClick={() =>
+                                setTierPricing((prev) =>
+                                  prev.filter((_, j) => j !== i),
+                                )
+                              }
+                              className='w-8 h-8 flex items-center justify-center text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg bg-transparent border-none cursor-pointer text-base'
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        {}
+                        {form.price && (
+                          <div className='px-4 py-3 bg-[#F9F9F9] border-t border-[#E1E3E5]'>
+                            <p className='text-[11.5px] font-semibold text-[#6D7175] mb-2'>
+                              Preview (base price £{form.price})
+                            </p>
+                            <div className='space-y-1'>
+                              <p className='text-[11.5px] text-[#8C9196]'>
+                                Buy 1 →{' '}
+                                <strong className='text-[#202223]'>
+                                  £{parseFloat(form.price).toFixed(2)}
+                                </strong>{' '}
+                                each
+                              </p>
+                              {tierPricing.map((t, i) => {
+                                const discounted = (
+                                  parseFloat(form.price) *
+                                  (1 - t.discountPct / 100)
+                                ).toFixed(2)
+                                const label = t.maxQty
+                                  ? `${t.minQty}–${t.maxQty}`
+                                  : `${t.minQty}+`
+                                return (
+                                  <p
+                                    key={i}
+                                    className='text-[11.5px] text-[#8C9196]'
+                                  >
+                                    Buy {label} →{' '}
+                                    <strong className='text-[#008060]'>
+                                      £{discounted}
+                                    </strong>{' '}
+                                    each ({t.discountPct}% off)
+                                  </p>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {}
+              {activeTab === 'inventory' && (
+                <div className='space-y-5'>
+                  <div className='flex items-center justify-between p-4 border border-[#E1E3E5] rounded-lg'>
+                    <div>
+                      <p className='text-[13px] font-medium text-[#202223]'>
+                        Track inventory
+                      </p>
+                      <p className='text-[12px] text-[#6D7175] mt-0.5'>
+                        Monitor stock levels for this product
+                      </p>
+                    </div>
+                    <button
+                      onClick={() =>
+                        updateForm('trackInventory', !form.trackInventory)
+                      }
+                      className={`relative w-10 h-6 rounded-full transition-colors border-none cursor-pointer ${form.trackInventory ? 'bg-[#008060]' : 'bg-[#8C9196]'}`}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.trackInventory ? 'right-0.5' : 'left-0.5'}`}
+                      />
+                    </button>
+                  </div>
+
+                  {form.trackInventory && (
+                    <>
+                      <div className='grid grid-cols-2 gap-4'>
+                        <div>
+                          <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                            Stock Quantity
+                          </label>
+                          <input
+                            type='number'
+                            value={form.stock}
+                            onChange={(e) =>
+                              updateForm('stock', e.target.value)
+                            }
+                            placeholder='0'
+                            className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                          />
+                        </div>
+                        <div>
+                          <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                            Low Stock Alert
+                          </label>
+                          <input
+                            type='number'
+                            value={form.lowStockAlert}
+                            onChange={(e) =>
+                              updateForm('lowStockAlert', e.target.value)
+                            }
+                            placeholder='5'
+                            className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                          Weight (grams)
+                        </label>
+                        <input
+                          type='number'
+                          value={form.weight}
+                          onChange={(e) => updateForm('weight', e.target.value)}
+                          placeholder='e.g. 500'
+                          className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {}
+              {activeTab === 'variants' && (
+                <div className='space-y-4'>
+                  <div className='flex items-center justify-between'>
+                    <div>
+                      <p className='text-[13px] font-medium text-[#202223]'>
+                        Product Variants
+                      </p>
+                      <p className='text-[12px] text-[#6D7175] mt-0.5'>
+                        Add different sizes, colors or options
+                      </p>
+                    </div>
+                    <button
+                      onClick={addVariant}
+                      className='px-3 py-1.5 border border-[#008060] text-[#008060] text-[12.5px] font-medium rounded-lg hover:bg-[#F2F7F5] transition-colors bg-transparent cursor-pointer'
+                    >
+                      + Add Variant
+                    </button>
+                  </div>
+                  <div className='space-y-3'>
+                    {variants.map((variant, index) => (
+                      <div
+                        key={variant.id}
+                        className='p-4 border border-[#E1E3E5] rounded-lg space-y-3'
+                      >
+                        <div className='flex items-center justify-between'>
+                          <span className='text-[12.5px] font-semibold text-[#202223]'>
+                            Variant {index + 1}
+                          </span>
+                          <button
+                            type='button'
+                            onClick={() =>
+                              setVariantToDelete({
+                                id: variant.id,
+                                label:
+                                  variant.options
+                                    .filter((o) => o.value.trim())
+                                    .map((o) => o.value.trim())
+                                    .join(' / ') || `Variant ${index + 1}`,
+                              })
+                            }
+                            className='px-2.5 py-1 border border-[#D82C0D] text-[#D82C0D] text-[12px] font-medium rounded-lg hover:bg-[#FFF4F4] transition-colors bg-transparent cursor-pointer'
+                          >
+                            Delete variant
+                          </button>
+                        </div>
+                        {}
+                        <div className='space-y-2'>
+                          <div className='flex items-center justify-between'>
+                            <label className='block text-[11.5px] text-[#6D7175]'>
+                              Options
+                            </label>
+                            <button
+                              type='button'
+                              onClick={() => addOptionRow(variant.id)}
+                              className='text-[11.5px] text-[#008060] font-medium hover:underline bg-transparent border-none cursor-pointer'
+                            >
+                              + Add Option
+                            </button>
+                          </div>
+                          {variant.options.map((opt) => {
+                            const selectedGlobalOption = globalOptions.find(
+                              (g) => g.title === opt.name,
+                            )
+                            const isCustomValue = customValueRows.has(opt.id)
+                            return (
+                              <div
+                                key={opt.id}
+                                className='flex items-center gap-1.5'
+                              >
+                                <select
+                                  value={opt.name}
+                                  onChange={(e) => {
+                                    updateOptionRow(
+                                      variant.id,
+                                      opt.id,
+                                      'name',
+                                      e.target.value,
+                                    )
+                                    updateOptionRow(
+                                      variant.id,
+                                      opt.id,
+                                      'value',
+                                      '',
+                                    )
+                                    setCustomValueRows((prev) => {
+                                      const next = new Set(prev)
+                                      next.delete(opt.id)
+                                      return next
+                                    })
+                                  }}
+                                  className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all bg-white'
+                                >
+                                  <option value=''>Select option...</option>
+                                  {globalOptions.map((g) => (
+                                    <option key={g.id} value={g.title}>
+                                      {g.title}
+                                    </option>
+                                  ))}
+                                </select>
+                                {isCustomValue ? (
+                                  <input
+                                    type='text'
+                                    autoFocus
+                                    value={opt.value}
+                                    onChange={(e) =>
+                                      updateOptionRow(
+                                        variant.id,
+                                        opt.id,
+                                        'value',
+                                        e.target.value,
+                                      )
+                                    }
+                                    onBlur={() => {
+                                      if (!opt.value.trim()) {
+                                        setCustomValueRows((prev) => {
+                                          const next = new Set(prev)
+                                          next.delete(opt.id)
+                                          return next
+                                        })
+                                      }
+                                    }}
+                                    placeholder='New value (e.g. 12, Navy)'
+                                    className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] transition-all'
+                                  />
+                                ) : (
+                                  <select
+                                    value={opt.value}
+                                    disabled={!selectedGlobalOption}
+                                    onChange={(e) => {
+                                      if (e.target.value === '__custom__') {
+                                        updateOptionRow(
+                                          variant.id,
+                                          opt.id,
+                                          'value',
+                                          '',
+                                        )
+                                        setCustomValueRows((prev) =>
+                                          new Set(prev).add(opt.id),
+                                        )
+                                      } else {
+                                        updateOptionRow(
+                                          variant.id,
+                                          opt.id,
+                                          'value',
+                                          e.target.value,
+                                        )
+                                      }
+                                    }}
+                                    className='flex-1 min-w-0 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all bg-white disabled:bg-[#F6F6F7] disabled:text-[#8C9196]'
+                                  >
+                                    <option value=''>
+                                      {selectedGlobalOption
+                                        ? 'Select value...'
+                                        : 'Pick an option first'}
+                                    </option>
+                                    {selectedGlobalOption?.values.map((v) => (
+                                      <option key={v} value={v}>
+                                        {v}
+                                      </option>
+                                    ))}
+                                    {selectedGlobalOption && (
+                                      <option value='__custom__'>
+                                        + Add new value...
+                                      </option>
+                                    )}
+                                  </select>
+                                )}
+                                {variant.options.length > 1 && (
+                                  <button
+                                    type='button'
+                                    onClick={() =>
+                                      removeOptionRow(variant.id, opt.id)
+                                    }
+                                    title='Remove option'
+                                    className='px-2 py-2 text-[#D82C0D] text-[12px] hover:underline bg-transparent border-none cursor-pointer shrink-0'
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })}
+                          {}
+                          <div className='flex items-center gap-2 pt-1'>
+                            <label className='text-[11.5px] text-[#6D7175] shrink-0'>
+                              Swatch colour (optional)
+                            </label>
+                            <input
+                              type='color'
+                              title='Swatch colour shown on the storefront'
+                              value={variant.colorCode || '#ffffff'}
+                              onChange={(e) =>
+                                updateVariant(
+                                  variant.id,
+                                  'colorCode',
+                                  e.target.value,
+                                )
+                              }
+                              className='w-10 h-8 p-1 border border-[#E1E3E5] rounded-lg cursor-pointer bg-white shrink-0'
+                            />
+                          </div>
+                        </div>
+
+                        <div className='grid grid-cols-2 gap-3'>
+                          {(['sku', 'ean', 'price', 'stock'] as const).map(
+                            (field) => (
+                              <div key={field}>
+                                <label className='block text-[11.5px] text-[#6D7175] mb-1 capitalize'>
+                                  {field === 'price'
+                                    ? 'Price (£)'
+                                    : field === 'ean'
+                                      ? 'EAN'
+                                      : field}
+                                </label>
+                                <input
+                                  type={
+                                    ['price', 'stock'].includes(field)
+                                      ? 'number'
+                                      : 'text'
+                                  }
+                                  value={variant[field]}
+                                  onChange={(e) =>
+                                    updateVariant(
+                                      variant.id,
+                                      field,
+                                      field === 'ean'
+                                        ? e.target.value
+                                            .replace(/\D/g, '')
+                                            .slice(0, 14)
+                                        : e.target.value,
+                                    )
+                                  }
+                                  placeholder={
+                                    field === 'price'
+                                      ? form.price
+                                        ? `${form.price} (product price)`
+                                        : '0.00'
+                                      : field === 'ean'
+                                        ? 'EAN-13'
+                                        : undefined
+                                  }
+                                  className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[12.5px] text-[#202223] outline-none focus:border-[#008060] transition-all'
+                                />
+                                {field === 'price' && (
+                                  <p className='text-[10.5px] text-[#8C9196] mt-1'>
+                                    {variant.price
+                                      ? 'Overrides the product price for this variant.'
+                                      : form.price
+                                        ? `Blank = uses product price (£${form.price}). Enter a value to set a different price for this variant.`
+                                        : 'Blank = uses the product price above.'}
+                                  </p>
+                                )}
+                              </div>
+                            ),
+                          )}
+                        </div>
+
+                        {}
+                        <div>
+                          <label className='block text-[11.5px] text-[#6D7175] mb-1'>
+                            Variant Media
+                          </label>
+                          {images.filter((i) => i.url).length === 0 ? (
+                            <p className='text-[11.5px] text-[#8C9196] italic'>
+                              Upload product images in the Images tab first,
+                              then come back here to pick which ones belong to
+                              this variant.
+                            </p>
+                          ) : (
+                            <div className='flex flex-wrap gap-2'>
+                              {images
+                                .filter((i) => i.url)
+                                .map((img) => {
+                                  const picked = variant.imageUrls.includes(
+                                    img.url!,
+                                  )
+                                  return (
+                                    <button
+                                      key={img.url}
+                                      type='button'
+                                      onClick={() =>
+                                        toggleVariantImage(variant.id, img.url!)
+                                      }
+                                      title={
+                                        picked
+                                          ? 'Remove from this variant'
+                                          : 'Add to this variant'
+                                      }
+                                      className={`relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-all cursor-pointer bg-transparent p-0 ${picked ? 'border-[#008060] ring-2 ring-[#008060]/30' : 'border-[#E1E3E5] hover:border-[#8C9196]'}`}
+                                    >
+                                      <img
+                                        src={img.url}
+                                        alt=''
+                                        className='w-full h-full object-cover'
+                                      />
+                                      {picked && (
+                                        <span className='absolute inset-0 flex items-center justify-center bg-[#008060]/40 text-white text-[16px] font-bold'>
+                                          ✓
+                                        </span>
+                                      )}
+                                    </button>
+                                  )
+                                })}
+                            </div>
+                          )}
+                          {variant.imageUrls.length === 0 && (
+                            <p className='text-[11px] text-[#8C9196] mt-1'>
+                              No images picked — this variant will show the
+                              product's default images on the storefront.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {}
+              {activeTab === 'cross-sell' && (
+                <div className='space-y-5'>
+                  <div>
+                    <p className='text-[13px] font-medium text-[#202223]'>
+                      Cross-sell Products
+                    </p>
+                    <p className='text-[12px] text-[#6D7175] mt-0.5'>
+                      When a customer buys this product, a related product will
+                      be offered with a discount (e.g. 10% off Socks with
+                      Shoes).
+                    </p>
+                  </div>
+                  <div className='relative'>
+                    <input
+                      type='text'
+                      value={crossSellSearch}
+                      onChange={(e) => {
+                        setCrossSellSearch(e.target.value)
+                        searchCrossSellProducts(e.target.value)
+                      }}
+                      placeholder='Search for a product (e.g. Socks, Grip, Shuttle)...'
+                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                    />
+                    {crossSellLoading && (
+                      <div className='absolute right-3 top-1/2 -translate-y-1/2'>
+                        <svg
+                          className='animate-spin w-4 h-4 text-[#8C9196]'
+                          viewBox='0 0 24 24'
+                          fill='none'
+                        >
+                          <circle
+                            className='opacity-25'
+                            cx='12'
+                            cy='12'
+                            r='10'
+                            stroke='currentColor'
+                            strokeWidth='4'
+                          />
+                          <path
+                            className='opacity-75'
+                            fill='currentColor'
+                            d='M4 12a8 8 0 018-8v8H4z'
+                          />
+                        </svg>
+                      </div>
+                    )}
+                    {crossSellResults.length > 0 && (
+                      <div className='absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#E1E3E5] rounded-lg shadow-lg overflow-hidden'>
+                        {crossSellResults.map((p) => (
+                          <button
+                            key={p.id}
+                            type='button'
+                            onClick={() => addCrossSell(p)}
+                            disabled={crossSells.some(
+                              (c) => c.productId === p.id,
+                            )}
+                            className='w-full text-left px-4 py-2.5 text-[13px] text-[#202223] hover:bg-[#F6F6F7] border-none bg-transparent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                          >
+                            {p.title}
+                            {crossSells.some((c) => c.productId === p.id) && (
+                              <span className='ml-2 text-[11px] text-[#8C9196]'>
+                                (already added)
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {crossSells.length === 0 ? (
+                    <div className='py-8 text-center border border-dashed border-[#E1E3E5] rounded-lg'>
+                      <p className='text-[12.5px] text-[#8C9196]'>
+                        No cross-sell products added yet.
+                      </p>
+                      <p className='text-[12px] text-[#8C9196] mt-1'>
+                        Search above and add a product.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className='border border-[#E1E3E5] rounded-lg overflow-hidden'>
+                      <div className='grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 bg-[#FAFAFA] border-b border-[#E1E3E5]'>
+                        <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                          Product
+                        </span>
+                        <span className='text-[11px] font-semibold text-[#6D7175] uppercase tracking-wider'>
+                          Discount %
+                        </span>
+                        <span className='w-8' />
+                      </div>
+                      <div className='divide-y divide-[#F1F1F1]'>
+                        {crossSells.map((cs) => (
+                          <div
+                            key={cs.id}
+                            className='grid grid-cols-[1fr_auto_auto] gap-3 items-center px-4 py-3'
+                          >
+                            <div>
+                              <p className='text-[13px] font-medium text-[#202223] truncate'>
+                                {cs.productTitle}
+                              </p>
+                              <p className='text-[11px] text-[#8C9196] mt-0.5'>
+                                ID: {cs.productId.slice(0, 16)}…
+                              </p>
+                            </div>
+                            <div className='relative w-24'>
+                              <input
+                                type='number'
+                                min='1'
+                                max='99'
+                                value={cs.discountPct}
+                                onChange={(e) =>
+                                  setCrossSells((prev) =>
+                                    prev.map((c) =>
+                                      c.id === cs.id
+                                        ? {
+                                            ...c,
+                                            discountPct: Number(e.target.value),
+                                          }
+                                        : c,
+                                    ),
+                                  )
+                                }
+                                className='w-full pl-2.5 pr-6 py-1.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+                              />
+                              <span className='absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#8C9196]'>
+                                %
+                              </span>
+                            </div>
+                            <button
+                              type='button'
+                              onClick={() =>
+                                setCrossSells((prev) =>
+                                  prev.filter((c) => c.id !== cs.id),
+                                )
+                              }
+                              className='w-8 h-8 flex items-center justify-center text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg bg-transparent border-none cursor-pointer text-base'
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {crossSells.length > 0 && (
+                    <div className='p-3 bg-[#F2F7F5] border border-[#008060]/20 rounded-lg'>
+                      <p className='text-[12px] text-[#6D7175]'>
+                        <strong className='text-[#008060]'>ℹ️</strong> When a
+                        customer adds this product to their cart, these
+                        cross-sell products will be suggested on the product or
+                        cart page — with the discount defined above.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {}
+              {activeTab === 'seo' && (
+                <div className='space-y-5'>
+                  <div className='p-4 bg-[#F6F6F7] border border-[#E1E3E5] rounded-lg'>
+                    <p className='text-[12.5px] font-medium text-[#202223] mb-1'>
+                      Search Engine Preview
+                    </p>
+                    <div className='mt-3 space-y-1'>
+                      <p className='text-[#2C6ECB] text-[15px] truncate'>
+                        {form.metaTitle || form.name || 'Product Title'}
+                      </p>
+                      <p className='text-[#008060] text-[12px]'>
+                        smashuk.co.uk/shop/
+                        {form.name
+                          ? form.name.toLowerCase().replace(/\s+/g, '-')
+                          : 'product-slug'}
+                      </p>
+                      <p className='text-[#6D7175] text-[12.5px] leading-relaxed line-clamp-2'>
+                        {form.metaDescription ||
+                          form.description ||
+                          'Product description will appear here...'}
+                      </p>
+                    </div>
+                  </div>
+                  <div>
+                    <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                      Meta Title{' '}
+                      <span className='ml-2 text-[11px] text-[#8C9196] font-normal'>
+                        {form.metaTitle.length}/60
+                      </span>
+                    </label>
+                    <input
+                      type='text'
+                      value={form.metaTitle}
+                      onChange={(e) => updateForm('metaTitle', e.target.value)}
+                      maxLength={60}
+                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
+                    />
+                  </div>
+                  <div>
+                    <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+                      Meta Description{' '}
+                      <span className='ml-2 text-[11px] text-[#8C9196] font-normal'>
+                        {form.metaDescription.length}/160
+                      </span>
+                    </label>
+                    <textarea
+                      value={form.metaDescription}
+                      onChange={(e) =>
+                        updateForm('metaDescription', e.target.value)
+                      }
+                      maxLength={160}
+                      rows={3}
+                      className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all resize-none'
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {}
+          <div className='bg-white border border-[#E1E3E5] rounded-xl p-6'>
+            <h2 className='font-sora text-[15px] font-semibold text-[#202223] mb-4'>
+              Product Images
+            </h2>
+            <div
+              onDragOver={(e) => {
+                e.preventDefault()
+                setDragOver(true)
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragOver(false)
+                if (e.dataTransfer.files.length) addImages(e.dataTransfer.files)
+              }}
+              className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${dragOver ? 'border-[#008060] bg-[#F2F7F5]' : 'border-[#E1E3E5] hover:border-[#8C9196] hover:bg-[#F6F6F7]'}`}
+            >
+              <div className='w-12 h-12 bg-[#F6F6F7] border border-[#E1E3E5] rounded-xl flex items-center justify-center mx-auto mb-3'>
+                <svg
+                  width='20'
+                  height='20'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='#8C9196'
+                  strokeWidth='2'
+                >
+                  <rect x='3' y='3' width='18' height='18' rx='2' />
+                  <circle cx='8.5' cy='8.5' r='1.5' />
+                  <polyline points='21 15 16 10 5 21' />
+                </svg>
+              </div>
+              <p className='text-[13px] font-medium text-[#202223]'>
+                Drag & drop images here
+              </p>
+              <p className='text-[12px] text-[#6D7175] mt-1'>
+                or{' '}
+                <label className='text-[#008060] cursor-pointer hover:underline'>
+                  browse files
+                  <input
+                    type='file'
+                    multiple
+                    accept='image/*'
+                    className='hidden'
+                    onChange={(e) => {
+                      if (e.target.files?.length) addImages(e.target.files)
+                    }}
+                  />
+                </label>
+              </p>
+              <p className='text-[11px] text-[#8C9196] mt-2'>
+                PNG, JPG, WEBP up to 10MB each
+              </p>
+            </div>
+
+            {images.length > 0 && (
+              <div className='grid grid-cols-4 gap-3 mt-4'>
+                {images.map((img, idx) => (
+                  <div
+                    key={img.preview}
+                    className='relative aspect-square rounded-lg overflow-hidden border border-[#E1E3E5] group'
+                  >
+                    {}
+                    <img
+                      src={img.preview}
+                      alt={`Product image ${idx + 1}`}
+                      className='w-full h-full object-cover'
+                    />
+                    {img.uploading && (
+                      <div className='absolute inset-0 bg-black/40 flex items-center justify-center'>
+                        <svg
+                          className='animate-spin w-5 h-5 text-white'
+                          viewBox='0 0 24 24'
+                          fill='none'
+                        >
+                          <circle
+                            className='opacity-25'
+                            cx='12'
+                            cy='12'
+                            r='10'
+                            stroke='currentColor'
+                            strokeWidth='4'
+                          />
+                          <path
+                            className='opacity-75'
+                            fill='currentColor'
+                            d='M4 12a8 8 0 018-8v8H4z'
+                          />
+                        </svg>
+                      </div>
+                    )}
+                    {img.error && (
+                      <div className='absolute inset-0 bg-[#D82C0D]/60 flex items-center justify-center p-2'>
+                        <p className='text-white text-[10px] text-center'>
+                          Upload failed
+                        </p>
+                      </div>
+                    )}
+                    {!img.uploading && !img.error && (
+                      <>
+                        {idx === 0 && (
+                          <div className='absolute top-1 left-1 bg-[#008060] text-white text-[9px] font-semibold px-1.5 py-0.5 rounded'>
+                            MAIN
+                          </div>
+                        )}
+                        <button
+                          onClick={() => removeImage(img.preview)}
+                          className='absolute top-1 right-1 w-5 h-5 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity border-none cursor-pointer text-[10px]'
+                        >
+                          ✕
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {}
+        <div className='space-y-4'>
+          {}
+          <div className='bg-white border border-[#E1E3E5] rounded-xl p-5'>
+            <h3 className='font-sora text-[14px] font-semibold text-[#202223] mb-4'>
+              Product Status
+            </h3>
+            <div className='space-y-2'>
+              {(['published', 'draft'] as const).map((s) => (
+                <label
+                  key={s}
+                  className='relative flex items-center gap-3 p-3 border border-[#E1E3E5] rounded-lg cursor-pointer hover:bg-[#F6F6F7] transition-colors'
+                >
+                  <input
+                    type='radio'
+                    name='status'
+                    value={s}
+                    checked={status === s}
+                    onChange={() => setStatus(s)}
+                    className='accent-[#008060] w-4 h-4'
+                  />
+                  <div>
+                    <p className='text-[13px] font-medium text-[#202223] capitalize'>
+                      {s}
+                    </p>
+                    <p className='text-[11.5px] text-[#6D7175]'>
+                      {s === 'published'
+                        ? 'Visible on storefront'
+                        : 'Hidden from storefront'}
+                    </p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {}
+          <div className='bg-white border border-[#E1E3E5] rounded-xl p-5'>
+            <h3 className='font-sora text-[14px] font-semibold text-[#202223] mb-4'>
+              Summary
+            </h3>
+            <div className='space-y-3'>
+              {[
+                {
+                  label: 'Name',
+                  value: form.name || '—',
+                },
+                {
+                  label: 'Brand',
+                  value: form.brand || '—',
+                },
+                {
+                  label: 'Sport',
+                  value: form.sport || '—',
+                },
+                {
+                  label: 'Category',
+                  value: form.categoryName || '—',
+                },
+                {
+                  label: 'Price',
+                  value: form.price ? `£${form.price}` : '—',
+                },
+                {
+                  label: 'Stock',
+                  value: form.stock || '—',
+                },
+                {
+                  label: 'SKU',
+                  value: form.sku || '—',
+                },
+                {
+                  label: 'Images',
+                  value:
+                    images.filter((i) => i.url).length > 0
+                      ? `${images.filter((i) => i.url).length} images`
+                      : '—',
+                },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className='flex items-center justify-between'
+                >
+                  <span className='text-[12px] text-[#6D7175]'>
+                    {item.label}
+                  </span>
+                  <span className='text-[12.5px] font-medium text-[#202223] truncate max-w-35 text-right'>
+                    {item.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {}
+          <div className='space-y-2'>
+            <button
+              onClick={() => handleSave(status)}
+              disabled={saving}
+              className='w-full py-2.5 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer border-none'
+            >
+              {saving ? 'Saving...' : 'Save Changes'}
+            </button>
+            <button
+              onClick={() => handleSave('draft')}
+              disabled={saving}
+              className='w-full py-2.5 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors disabled:opacity-50 cursor-pointer'
+            >
+              Save as Draft
+            </button>
+            <Link
+              href='/dashboard/products'
+              className='block text-center py-2.5 text-[13px] text-[#6D7175] hover:text-[#202223] no-underline transition-colors'
+            >
+              ← Back to Products
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
