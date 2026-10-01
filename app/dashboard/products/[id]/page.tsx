@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import EditProductClient from './EditProductClient'
+import EditProductClient from '@/app/dashboard/products/[id]/EditProductClient'
 import {
   AdminAuthError,
   getDashboardAuth,
