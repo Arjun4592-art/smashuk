@@ -19,8 +19,15 @@ export const LIST_FIELDS =
 export const LIST_FIELDS_LEGACY =
   'id,title,handle,status,thumbnail,metadata,*images,*categories,*variants,variants.id,variants.title,variants.sku,variants.barcode,variants.ean,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels'
 
-const PRODUCT_DETAIL_FIELDS =
-  '+metadata,*variants,+variants.metadata,*variants.prices,*variants.options,*variants.options.option,*variants.images,*categories,*images'
+// The edit page used to ask Medusa for all of this in ONE request. Joining
+// prices x options x images in a single query makes Medusa's SQL explode and the
+// request hangs (and can run the backend out of heap). Each piece below is fast
+// on its own, so getEditorData loads them separately and merges by variant id.
+const PRODUCT_BASE_FIELDS = '+metadata,*categories,*images'
+const PRODUCT_VARIANT_FIELDS = '*variants,+variants.metadata,*variants.prices'
+const PRODUCT_VARIANT_OPTION_FIELDS =
+  'id,*variants.options,*variants.options.option'
+const PRODUCT_VARIANT_IMAGE_FIELDS = 'id,*variants.images'
 
 const PRODUCT_OPTIONS_FIELDS = 'id,*options,*options.values'
 const PRODUCT_CHANNELS_FIELDS = 'id,*sales_channels'
@@ -578,11 +585,6 @@ export async function getEditorData(
   authorization: string,
   productId: string,
 ): Promise<EditorData> {
-  const productRes = await medusaGet(
-    `/admin/products/${productId}?fields=${PRODUCT_DETAIL_FIELDS}`,
-    authorization,
-  )
-
   const productPart = async (label: string, fields: string) => {
     try {
       return await medusaGet(
@@ -594,6 +596,19 @@ export async function getEditorData(
       throw new Error(`Loading product ${label} failed: ${err?.message}`)
     }
   }
+  const baseProductPromise = medusaGet(
+    `/admin/products/${productId}?fields=${encodeURIComponent(PRODUCT_BASE_FIELDS)}`,
+    authorization,
+  )
+  const variantsPromise = productPart('variants', PRODUCT_VARIANT_FIELDS)
+  const variantOptionsPromise = productPart(
+    'variant options',
+    PRODUCT_VARIANT_OPTION_FIELDS,
+  )
+  const variantImagesPromise = productPart(
+    'variant images',
+    PRODUCT_VARIANT_IMAGE_FIELDS,
+  )
   const optionsPromise = productPart('options', PRODUCT_OPTIONS_FIELDS)
   const channelsPromise = productPart('sales channels', PRODUCT_CHANNELS_FIELDS)
   const tagsPromise = productPart('tags', PRODUCT_TAGS_FIELDS)
@@ -616,6 +631,10 @@ export async function getEditorData(
     optionsRes,
     channelsRes,
     tagsRes,
+    productRes,
+    variantsRes,
+    variantOptionsRes,
+    variantImagesRes,
   ] = await Promise.all([
     loadCategories(authorization).catch((err) => {
       if (err instanceof AdminAuthError) throw err
@@ -639,10 +658,33 @@ export async function getEditorData(
     optionsPromise,
     channelsPromise,
     tagsPromise,
+    baseProductPromise,
+    variantsPromise,
+    variantOptionsPromise,
+    variantImagesPromise,
   ])
 
   const product = productRes.product
   if (!product) throw new Error('Product not found')
+
+  const optionsByVariant = new Map<string, any[]>(
+    (variantOptionsRes.product?.variants ?? []).map((v: any) => [
+      v.id,
+      v.options ?? [],
+    ]),
+  )
+  const imagesByVariant = new Map<string, any[]>(
+    (variantImagesRes.product?.variants ?? []).map((v: any) => [
+      v.id,
+      v.images ?? [],
+    ]),
+  )
+  product.variants = (variantsRes.product?.variants ?? []).map((v: any) => ({
+    ...v,
+    options: optionsByVariant.get(v.id) ?? [],
+    images: imagesByVariant.get(v.id) ?? [],
+  }))
+
   product.options = optionsRes.product?.options ?? []
   product.sales_channels = channelsRes.product?.sales_channels ?? []
   product.tags = tagsRes.product?.tags ?? []
