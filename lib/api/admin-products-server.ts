@@ -602,10 +602,7 @@ export async function getEditorData(
       if (ms > 1500) console.warn(`[admin-products] ${label} took ${ms}ms`)
     }
   }
-  const baseProductPromise = medusaGet(
-    `/admin/products/${productId}?fields=${encodeURIComponent(PRODUCT_BASE_FIELDS)}`,
-    authorization,
-  )
+  const baseProductPromise = productPart('base', PRODUCT_BASE_FIELDS)
   const variantsPromise = productPart('variants', PRODUCT_VARIANT_FIELDS)
   const variantOptionsPromise = productPart(
     'variant options',
