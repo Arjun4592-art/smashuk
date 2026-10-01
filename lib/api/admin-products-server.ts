@@ -23,8 +23,16 @@ export const LIST_FIELDS_LEGACY =
 // prices x options x images in a single query makes Medusa's SQL explode and the
 // request hangs (and can run the backend out of heap). Each piece below is fast
 // on its own, so getEditorData loads them separately and merges by variant id.
-const PRODUCT_BASE_FIELDS = '+metadata,*categories,*images'
-const PRODUCT_VARIANT_FIELDS = '*variants,+variants.metadata,*variants.prices'
+//
+// IMPORTANT: every field list must START with a plain field (`id,`). A list
+// that begins with `+` or `*` makes Medusa add its DEFAULT product fields
+// (variants, prices, options, tags, images...) on top, which is the heavy query
+// we are avoiding. The form only reads title/description/status/metadata from
+// the product itself, so that is all the base request asks for.
+const PRODUCT_BASE_FIELDS =
+  'id,title,description,status,metadata,*categories,*images'
+const PRODUCT_VARIANT_FIELDS =
+  'id,*variants,+variants.metadata,*variants.prices'
 const PRODUCT_VARIANT_OPTION_FIELDS =
   'id,*variants.options,*variants.options.option'
 const PRODUCT_VARIANT_IMAGE_FIELDS = 'id,*variants.images'
