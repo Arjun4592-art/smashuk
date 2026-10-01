@@ -31,7 +31,9 @@ const PRODUCT_VARIANT_IMAGE_FIELDS = 'id,*variants.images'
 
 const PRODUCT_OPTIONS_FIELDS = 'id,*options,*options.values'
 const PRODUCT_CHANNELS_FIELDS = 'id,*sales_channels'
-const PRODUCT_TAGS_FIELDS = 'id,*tags'
+// The edit form only reads tag.value, so don't pull whole tag rows.
+const PRODUCT_TAGS_FIELDS = 'id,tags.id,tags.value'
+const TAGS_TIMEOUT_MS = 8 * 1000
 
 const PRODUCT_INVENTORY_FIELDS =
   'id,variants.id,variants.inventory_items.inventory.location_levels.stocked_quantity,variants.inventory_items.inventory.location_levels.reserved_quantity'
@@ -586,6 +588,7 @@ export async function getEditorData(
   productId: string,
 ): Promise<EditorData> {
   const productPart = async (label: string, fields: string) => {
+    const startedAt = Date.now()
     try {
       return await medusaGet(
         `/admin/products/${productId}?fields=${encodeURIComponent(fields)}`,
@@ -594,6 +597,9 @@ export async function getEditorData(
     } catch (err: any) {
       if (err instanceof AdminAuthError) throw err
       throw new Error(`Loading product ${label} failed: ${err?.message}`)
+    } finally {
+      const ms = Date.now() - startedAt
+      if (ms > 1500) console.warn(`[admin-products] ${label} took ${ms}ms`)
     }
   }
   const baseProductPromise = medusaGet(
@@ -611,7 +617,24 @@ export async function getEditorData(
   )
   const optionsPromise = productPart('options', PRODUCT_OPTIONS_FIELDS)
   const channelsPromise = productPart('sales channels', PRODUCT_CHANNELS_FIELDS)
-  const tagsPromise = productPart('tags', PRODUCT_TAGS_FIELDS)
+  // Tags are not worth blocking the whole page for: give them a short timeout
+  // and, if they fail, flag it so the form leaves tags untouched on save.
+  const tagsStartedAt = Date.now()
+  const tagsPromise = medusaGet(
+    `/admin/products/${productId}?fields=${encodeURIComponent(PRODUCT_TAGS_FIELDS)}`,
+    authorization,
+    TAGS_TIMEOUT_MS,
+  )
+    .then((res) => {
+      const ms = Date.now() - tagsStartedAt
+      if (ms > 1500) console.warn(`[admin-products] tags took ${ms}ms`)
+      return res
+    })
+    .catch((err) => {
+      if (err instanceof AdminAuthError) throw err
+      console.error('[admin-products] tags failed:', err?.message)
+      return null
+    })
 
   const inventoryPromise = medusaGet(
     `/admin/products/${productId}?fields=${PRODUCT_INVENTORY_FIELDS}`,
@@ -687,7 +710,8 @@ export async function getEditorData(
 
   product.options = optionsRes.product?.options ?? []
   product.sales_channels = channelsRes.product?.sales_channels ?? []
-  product.tags = tagsRes.product?.tags ?? []
+  product.tags = tagsRes?.product?.tags ?? []
+  if (!tagsRes) product.tags_load_failed = true
 
   if (product.variants) {
     const invById = new Map<string, any>(

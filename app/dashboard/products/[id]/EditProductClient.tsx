@@ -74,6 +74,18 @@ export default function EditProductClient({
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  // Set by the server loader when tags timed out. In that case tags are left
+  // untouched on save (unless the user edits the field) instead of being wiped.
+  const tagsLoadFailed = Boolean(initial.product?.tags_load_failed)
+  const [tagsEdited, setTagsEdited] = useState(false)
+  useEffect(() => {
+    if (tagsLoadFailed) {
+      toast.warning(
+        'Tags could not be loaded. They will stay unchanged unless you edit the Tags field.',
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [status, setStatus] = useState<'published' | 'draft'>('draft')
   const [activeTab, setActiveTab] = useState('general')
   const [sellingChannel, setSellingChannel] = useState<
@@ -1189,11 +1201,13 @@ export default function EditProductClient({
     try {
       const hadExtraVariants = variants.some((v) => filledOptions(v).length > 0)
       await syncOptionsForVariants()
-      const tagIds = form.tags
-        ? await upsertProductTags(form.tags.split(','))
-        : []
+      const skipTags = tagsLoadFailed && !tagsEdited
+      const tagIds =
+        !skipTags && form.tags
+          ? await upsertProductTags(form.tags.split(','))
+          : []
       const payload = buildPayload(saveStatus)
-      payload.tags = tagIds.length > 0 ? tagIds : []
+      payload.tags = skipTags ? undefined : tagIds.length > 0 ? tagIds : []
       const updateResult = await updateProduct(id, payload)
       if (hadExtraVariants) {
         setDefaultOption(null)
@@ -1832,7 +1846,10 @@ export default function EditProductClient({
                     <input
                       type='text'
                       value={form.tags}
-                      onChange={(e) => updateForm('tags', e.target.value)}
+                      onChange={(e) => {
+                        setTagsEdited(true)
+                        updateForm('tags', e.target.value)
+                      }}
                       className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
                     />
                     {form.tags && (
