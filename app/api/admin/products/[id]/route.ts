@@ -3,6 +3,10 @@ import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { resolveSalesChannels } from '@/lib/api/selling-channels'
 import { syncVariantInventory } from '@/lib/api/inventory-sync'
 import { invalidateCatalog } from '@/lib/catalog/source'
+import {
+  upsertAdminProduct,
+  removeAdminProduct,
+} from '@/lib/api/admin-products-server'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 async function safeJson(res: Response) {
@@ -182,6 +186,8 @@ export async function PATCH(
       // Product + inventory are written — make the shop rebuild its
       // catalogue snapshot so status / price / stock changes show up now.
       invalidateCatalog()
+      // Dashboard list reflects this edit immediately.
+      await upsertAdminProduct(data.product.id, authorization)
     }
     return NextResponse.json(data, {
       status: res.status,
@@ -228,7 +234,10 @@ export async function DELETE(
       },
     })
     const data = await safeJson(res)
-    if (res.ok) invalidateCatalog()
+    if (res.ok) {
+      invalidateCatalog()
+      removeAdminProduct(id)
+    }
     return NextResponse.json(data, {
       status: res.status,
     })

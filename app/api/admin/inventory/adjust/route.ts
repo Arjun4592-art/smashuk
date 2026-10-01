@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { invalidateCatalog } from '@/lib/catalog/source'
+import { markAdminProductsStale } from '@/lib/api/admin-products-server'
 const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 async function safeJson(res: Response, label: string) {
   const text = await res.text()
@@ -200,6 +201,7 @@ export async function POST(req: NextRequest) {
         )
       }
       invalidateCatalog()
+      markAdminProductsStale()
       return NextResponse.json(createData)
     }
     const locationId = levels[0].location_id
@@ -225,6 +227,7 @@ export async function POST(req: NextRequest) {
       )
     }
     invalidateCatalog()
+    markAdminProductsStale()
     return NextResponse.json(updateData)
   } catch (err: any) {
     console.error('[API] inventory adjust error:', err.message)

@@ -4,6 +4,7 @@ import { resolveSalesChannels } from '@/lib/api/selling-channels'
 import { safeJson } from '@/lib/api/safe-json'
 import { syncVariantInventory } from '@/lib/api/inventory-sync'
 import { invalidateCatalog } from '@/lib/catalog/source'
+import { upsertAdminProduct } from '@/lib/api/admin-products-server'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 export async function GET(req: NextRequest) {
@@ -28,7 +29,11 @@ export async function GET(req: NextRequest) {
     offset,
   })
   if (q) params.set('q', q)
-  if (status) params.set('status', status)
+  // Medusa v2 expects an array for `status` (status[]=a&status[]=b), not a
+  // plain string — a string gives "Expected type: 'array' for field 'status'".
+  if (status)
+    for (const st of status.split(',').filter(Boolean))
+      params.append('status[]', st)
   params.set('order', '-created_at')
   params.set(
     'fields',
@@ -241,6 +246,9 @@ export async function POST(req: NextRequest) {
     // Product + inventory are both written now — tell the shop's catalogue
     // snapshot to rebuild so the new product shows up straight away.
     invalidateCatalog()
+    // Put the new product into the dashboard list snapshot right away.
+    if (data.product?.id)
+      await upsertAdminProduct(data.product.id, authorization)
     return NextResponse.json(data, {
       status: 201,
     })

@@ -313,6 +313,42 @@ export async function getProducts(params?: {
     count: data.count,
   }
 }
+export interface ProductListItem {
+  id: string
+  name: string
+  handle: string
+  sku: string
+  category: string
+  brand: string
+  sport: string
+  price: number
+  stock: number
+  status: string
+  image: string | null
+  badge: string | null
+  specs: { label: string; value: string }[]
+  imageUrls: string[]
+}
+export interface ProductListResult {
+  products: ProductListItem[]
+  count: number
+  counts: Record<'All' | 'Active' | 'Draft' | 'Archived', number>
+}
+// Lean, server-cached list (already mapped on the server) — used by the
+// dashboard Products page. One request returns the page + tab counts.
+export async function getProductList(params?: {
+  limit?: number
+  offset?: number
+  q?: string
+  status?: string[]
+}): Promise<ProductListResult> {
+  return api<ProductListResult>('/api/admin/products/list', {
+    limit: params?.limit,
+    offset: params?.offset,
+    q: params?.q,
+    status: params?.status,
+  })
+}
 export async function createProduct(data: any) {
   return mutate('/api/admin/products', 'POST', data)
 }

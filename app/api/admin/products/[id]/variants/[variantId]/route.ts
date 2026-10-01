@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { invalidateCatalog } from '@/lib/catalog/source'
+import { upsertAdminProduct } from '@/lib/api/admin-products-server'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 async function safeJson(res: Response) {
@@ -48,7 +49,10 @@ export async function DELETE(
       },
     )
     const data = await safeJson(res)
-    if (res.ok) invalidateCatalog()
+    if (res.ok) {
+      invalidateCatalog()
+      await upsertAdminProduct(id, authorization)
+    }
     return NextResponse.json(data, {
       status: res.status,
     })
