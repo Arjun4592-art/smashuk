@@ -201,6 +201,9 @@ export async function syncVariantInventory(
   } = {},
 ): Promise<SyncResult> {
   const result: SyncResult = { updated: 0, failed: 0 }
+  const syncStartedAt = Date.now()
+  let skippedUnchanged = 0
+  let sharedChecks = 0
   const res = await fetch(
     `${MEDUSA_URL}/admin/products/${productId}?fields=*variants,*variants.inventory_items,*variants.inventory_items.inventory.location_levels`,
     { headers: { Authorization: authorization } },
@@ -294,6 +297,22 @@ export async function syncVariantInventory(
       } else if (mustWrite && !options.skipSharedCheck) {
         // Sharing only matters when we are about to WRITE a quantity to the
         // item, so the extra lookup is skipped for untouched variants.
+        //
+        // Speed: the form sends the stock of EVERY variant on every Save, so
+        // `mustWrite` is true for all of them even when nothing changed. The
+        // lookup below is a heavy Medusa call (inventory item + linked
+        // variants) made once per variant — on a 12-variant product that was
+        // ~65-70s per Save. If the level already holds the requested quantity
+        // there is nothing to write, so skip the lookup entirely.
+        if (inlineLevel) {
+          const stockedNow = inlineLevel.stocked_quantity ?? 0
+          const reservedNow = inlineLevel.reserved_quantity ?? 0
+          if (qty + reservedNow === stockedNow) {
+            skippedUnchanged++
+            return
+          }
+        }
+        sharedChecks++
         inventoryItemId = await detachIfShared(
           productId,
           variant,
@@ -385,5 +404,8 @@ export async function syncVariantInventory(
       result.failed++
     }
   })
+  console.log(
+    `[inventory-sync] ${productId}: ${variants.length} variants, ${skippedUnchanged} unchanged (skipped), ${sharedChecks} shared-checks, ${result.updated} written, ${result.failed} failed in ${Date.now() - syncStartedAt}ms`,
+  )
   return result
 }
