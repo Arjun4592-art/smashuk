@@ -24,13 +24,32 @@ function jsonHeaders(): Record<string, string> {
     'Content-Type': 'application/json',
   }
 }
+// Turns a raw gateway/proxy HTML error page (e.g. nginx "504 Gateway Time-out")
+// into a short, readable message instead of dumping the HTML into the UI.
+export function friendlyGatewayError(
+  status: number,
+  text: string,
+): string | null {
+  const looksLikeHtml = /^\s*<(!doctype|html|head|body)/i.test(text)
+  if (status === 504 || /504 Gateway Time-?out/i.test(text)) {
+    return 'The server took too long to respond (504 Gateway Timeout). Your changes may still have been saved in the background — refresh the page and check before saving again.'
+  }
+  if (status === 502 || status === 503 || /50[23] (Bad Gateway|Service)/i.test(text)) {
+    return 'The server is temporarily unavailable (' + status + '). Please wait a moment and try again.'
+  }
+  if (looksLikeHtml) {
+    return 'The server returned an unexpected error (' + status + '). Please try again.'
+  }
+  return null
+}
 async function parseError(res: Response): Promise<string> {
   const text = await res.text()
   try {
     const json = JSON.parse(text)
-    return json.error ?? json.message ?? text ?? res.statusText
+    const msg = json.error ?? json.message ?? text ?? res.statusText
+    return friendlyGatewayError(res.status, String(msg)) ?? msg
   } catch {
-    return text || res.statusText
+    return friendlyGatewayError(res.status, text) ?? (text || res.statusText)
   }
 }
 async function api<T>(path: string, params?: Record<string, any>): Promise<T> {

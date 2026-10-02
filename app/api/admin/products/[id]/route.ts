@@ -156,6 +156,20 @@ export async function PATCH(
       body: JSON.stringify(body),
     })
     const data = await safeJson(res)
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      console.error('[PATCH product] Medusa gateway error', res.status)
+      return NextResponse.json(
+        {
+          error:
+            res.status === 504
+              ? 'The server took too long to respond (504 Gateway Timeout). Your changes may still have been saved in the background — refresh the page and check before saving again.'
+              : 'The server is temporarily unavailable (' +
+                res.status +
+                '). Please try again.',
+        },
+        { status: res.status },
+      )
+    }
     if (res.ok && data.product?.id) {
       try {
         const locationId = await locationPromise
