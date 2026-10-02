@@ -991,6 +991,27 @@ export default function EditProductClient({
       const existingOption = existingOptions.find(
         (o) => o.title.toLowerCase() === title.toLowerCase(),
       )
+      // Fast path: the option is already on this product and already has every
+      // value the variants use — nothing to create or link, so skip the 3-4
+      // round trips (list options, load option, update option, link) per
+      // option that used to run on EVERY save.
+      if (existingOption) {
+        const have = new Map(
+          existingOption.values.map((v) => [v.toLowerCase(), v]),
+        )
+        if (requested.every((v) => have.has(v.toLowerCase()))) {
+          requested.forEach((typed) => {
+            const canonical = have.get(typed.toLowerCase())
+            if (canonical) {
+              optionValueCasingRef.current.set(
+                `${title.toLowerCase()}::${typed.toLowerCase()}`,
+                canonical,
+              )
+            }
+          })
+          continue
+        }
+      }
       const union = Array.from(
         new Set([...(existingOption?.values ?? []), ...requested]),
       )
@@ -1227,7 +1248,9 @@ export default function EditProductClient({
     try {
       const hadExtraVariants = variants.some((v) => filledOptions(v).length > 0)
       await syncOptionsForVariants()
-      const skipTags = tagsLoadFailed && !tagsEdited
+      // Tags the user never touched are left alone — no need to list/create
+      // tags (up to 1000 rows) on every save.
+      const skipTags = !tagsEdited
       const tagIds =
         !skipTags && form.tags
           ? await upsertProductTags(form.tags.split(','))
@@ -1273,14 +1296,16 @@ export default function EditProductClient({
       if (variantsToDeleteRef.current.length > 0) {
         const toDelete = variantsToDeleteRef.current
         variantsToDeleteRef.current = []
-        for (const variantId of toDelete) {
-          try {
-            await deleteProductVariant(id, variantId)
-          } catch (deleteErr) {
-            console.error('[delete removed variant]', deleteErr)
-            variantsToDeleteRef.current.push(variantId)
-          }
-        }
+        await Promise.all(
+          toDelete.map(async (variantId) => {
+            try {
+              await deleteProductVariant(id, variantId)
+            } catch (deleteErr) {
+              console.error('[delete removed variant]', deleteErr)
+              variantsToDeleteRef.current.push(variantId)
+            }
+          }),
+        )
       }
       if (staleOptionIdsRef.current.length > 0) {
         const toRemove = staleOptionIdsRef.current

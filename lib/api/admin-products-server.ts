@@ -15,7 +15,7 @@ const MIN_REBUILD_GAP_MS = 5 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 30 * 1000
 
 export const LIST_FIELDS =
-  'id,title,handle,status,thumbnail,metadata,images.url,categories.name,variants.id,variants.title,variants.sku,variants.barcode,variants.ean,variants.prices.amount,variants.prices.currency_code,variants.inventory_items.inventory.location_levels.stocked_quantity,variants.inventory_items.inventory.location_levels.available_quantity'
+  'id,title,handle,status,thumbnail,metadata,images.url,categories.id,categories.name,variants.id,variants.title,variants.sku,variants.barcode,variants.ean,variants.prices.amount,variants.prices.currency_code,variants.inventory_items.inventory.location_levels.stocked_quantity,variants.inventory_items.inventory.location_levels.available_quantity'
 export const LIST_FIELDS_LEGACY =
   'id,title,handle,status,thumbnail,metadata,*images,*categories,*variants,variants.id,variants.title,variants.sku,variants.barcode,variants.ean,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels'
 
@@ -60,6 +60,8 @@ export interface AdminListItem {
   handle: string
   sku: string
   category: string
+  /** Every category the product is in (the list shows only the first). */
+  categoryIds: string[]
   brand: string
   sport: string
   price: number
@@ -73,11 +75,19 @@ export interface AdminListItem {
   _search?: string
 }
 
+export interface ProductFacets {
+  categories: { id: string; name: string }[]
+  brands: string[]
+  sports: string[]
+}
+
 export interface AdminListResult {
   products: Omit<AdminListItem, '_search'>[]
   count: number
 
   counts: Record<'All' | 'Active' | 'Draft' | 'Archived', number>
+  /** Values for the filter dropdowns (only available from the snapshot). */
+  facets?: ProductFacets
 }
 
 export const STATUS_TABS = {
@@ -162,6 +172,7 @@ export function mapAdminListItem(p: any): AdminListItem {
     handle: p.handle ?? '',
     sku: p.variants?.[0]?.sku ?? '',
     category: p.categories?.[0]?.name ?? '',
+    categoryIds: (p.categories ?? []).map((c: any) => c.id).filter(Boolean),
     brand: p.metadata?.brand ?? '',
     sport: p.metadata?.sport ?? '',
     price,
@@ -330,6 +341,71 @@ export interface ListParams {
   offset?: number
   q?: string
   status?: string[]
+  /** Category ids (a product matches if it is in ANY of them). */
+  categoryIds?: string[]
+  brand?: string
+  sport?: string
+  /** in = stock > 0, low = 1..5, out = stock <= 0 */
+  stock?: 'in' | 'low' | 'out'
+  priceMin?: number
+  priceMax?: number
+}
+
+export const LOW_STOCK_MAX = 5
+
+export function hasAdvancedFilters(p: ListParams) {
+  return Boolean(
+    (p.categoryIds && p.categoryIds.length) ||
+    p.brand ||
+    p.sport ||
+    p.stock ||
+    (p.priceMin !== undefined && !Number.isNaN(p.priceMin)) ||
+    (p.priceMax !== undefined && !Number.isNaN(p.priceMax)),
+  )
+}
+
+function matchesAdvanced(item: AdminListItem, p: ListParams) {
+  if (p.categoryIds?.length) {
+    if (!item.categoryIds.some((id) => p.categoryIds!.includes(id)))
+      return false
+  }
+  if (p.brand && item.brand.trim().toLowerCase() !== p.brand.toLowerCase())
+    return false
+  if (p.sport && item.sport.trim().toLowerCase() !== p.sport.toLowerCase())
+    return false
+  if (p.stock === 'out' && item.stock > 0) return false
+  if (p.stock === 'in' && item.stock <= 0) return false
+  if (p.stock === 'low' && !(item.stock > 0 && item.stock <= LOW_STOCK_MAX))
+    return false
+  if (
+    p.priceMin !== undefined &&
+    !Number.isNaN(p.priceMin) &&
+    item.price < p.priceMin
+  )
+    return false
+  if (
+    p.priceMax !== undefined &&
+    !Number.isNaN(p.priceMax) &&
+    item.price > p.priceMax
+  )
+    return false
+  return true
+}
+
+function buildFacets(items: AdminListItem[]): ProductFacets {
+  const brands = new Set<string>()
+  const sports = new Set<string>()
+  for (const i of items) {
+    if (i.brand.trim()) brands.add(i.brand.trim())
+    if (i.sport.trim()) sports.add(i.sport.trim())
+  }
+  return {
+    // Category names come from the full category list on the client side;
+    // only the brand / sport values need the product snapshot.
+    categories: [],
+    brands: [...brands].sort((a, b) => a.localeCompare(b)),
+    sports: [...sports].sort((a, b) => a.localeCompare(b)),
+  }
 }
 
 function matchesQuery(item: AdminListItem, tokens: string[]) {
@@ -343,9 +419,15 @@ function listFromSnapshot(
   params: ListParams,
 ): AdminListResult {
   const tokens = (params.q ?? '').toLowerCase().split(/\s+/).filter(Boolean)
-  const searched = tokens.length
+  const bySearch = tokens.length
     ? items.filter((i) => matchesQuery(i, tokens))
     : items
+  // Brand / sport / category / stock / price filters. The status tab counts
+  // below are computed AFTER these (like Shopify), so the tabs always show how
+  // many of the filtered products are Active / Draft / Archived.
+  const searched = hasAdvancedFilters(params)
+    ? bySearch.filter((i) => matchesAdvanced(i, params))
+    : bySearch
   const counts = {
     All: searched.length,
     Active: 0,
@@ -367,6 +449,7 @@ function listFromSnapshot(
     products: filtered.slice(offset, offset + limit).map(stripSearch),
     count: filtered.length,
     counts,
+    facets: buildFacets(items),
   }
 }
 
@@ -438,6 +521,16 @@ export async function getAdminProductList(
 ): Promise<AdminListResult> {
   const snap = readSnapshot(authorization)
   if (snap) return listFromSnapshot(snap, params)
+  // Brand / sport / stock / price filters can't be answered by Medusa's own
+  // list endpoint, so when one is active wait for the product index to finish
+  // building (once) and filter that.
+  if (hasAdvancedFilters(params)) {
+    await kickRebuild(authorization)
+    if (state.items) return listFromSnapshot(state.items, params)
+    throw new Error(
+      'Filters need the product index, which could not be built right now. Please try again in a minute.',
+    )
+  }
   return listFromMedusa(authorization, params)
 }
 

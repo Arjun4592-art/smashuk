@@ -6,6 +6,10 @@ import {
 } from '@/lib/api/selling-channels'
 import { invalidateCatalog } from '@/lib/catalog/source'
 import {
+  getDefaultStockLocationId,
+  syncVariantInventory,
+} from '@/lib/api/inventory-sync'
+import {
   markAdminProductsStale,
   removeAdminProduct,
   upsertAdminProduct,
@@ -90,7 +94,7 @@ export async function POST(req: NextRequest) {
         )
       : []
 
-    if (action !== 'delete' && action !== 'update') {
+    if (action !== 'delete' && action !== 'update' && action !== 'stock') {
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
     }
     if (ids.length === 0) {
@@ -126,6 +130,65 @@ export async function POST(req: NextRequest) {
         }
       })
       if (ok.length > 0) invalidateCatalog()
+      return NextResponse.json({ ok, failed })
+    }
+
+    // ----------------------------------------------------------------- stock
+    // Sets the AVAILABLE stock of every variant of every given product to the
+    // same number (0 = reset). Single-variant and multi-variant products are
+    // treated the same: all their variants get the quantity.
+    if (action === 'stock') {
+      const quantity = Number(body?.quantity ?? 0)
+      if (!Number.isInteger(quantity) || quantity < 0 || quantity > 1_000_000) {
+        return NextResponse.json(
+          { error: 'Quantity must be a whole number, 0 or more' },
+          { status: 400 },
+        )
+      }
+      const locationId = await getDefaultStockLocationId(authorization).catch(
+        () => null,
+      )
+      if (!locationId) {
+        return NextResponse.json(
+          {
+            error:
+              'No stock location found. Add one in Medusa → Settings → Stock Locations.',
+          },
+          { status: 502 },
+        )
+      }
+      await runPool(ids, async (id) => {
+        try {
+          const r = await syncVariantInventory(
+            id,
+            authorization,
+            locationId,
+            {},
+            quantity,
+            { applyDefaultToAllVariants: true },
+          )
+          if (r.error) {
+            failed.push({ id, error: r.error })
+          } else if (r.failed > 0) {
+            failed.push({
+              id,
+              error: `${r.failed} variant${r.failed !== 1 ? 's' : ''} could not be updated`,
+            })
+          } else {
+            ok.push(id)
+          }
+        } catch (err: any) {
+          failed.push({ id, error: err?.message ?? 'Stock update failed' })
+        }
+      })
+      if (ok.length > 0) {
+        invalidateCatalog()
+        if (ok.length <= UPSERT_LIMIT) {
+          for (const id of ok) await upsertAdminProduct(id, authorization)
+        } else {
+          markAdminProductsStale()
+        }
+      }
       return NextResponse.json({ ok, failed })
     }
 

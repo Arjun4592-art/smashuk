@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { resolveSalesChannels } from '@/lib/api/selling-channels'
-import { syncVariantInventory } from '@/lib/api/inventory-sync'
+import {
+  syncVariantInventory,
+  getDefaultStockLocationId,
+} from '@/lib/api/inventory-sync'
 import { invalidateCatalog } from '@/lib/catalog/source'
 import {
   upsertAdminProduct,
@@ -139,6 +142,11 @@ export async function PATCH(
         }
       })
     }
+    // Look the stock location up while Medusa is busy saving the product
+    // (it is cached, so this is normally instant) instead of afterwards.
+    const locationPromise = getDefaultStockLocationId(authorization).catch(
+      () => null,
+    )
     const res = await fetch(`${MEDUSA_URL}/admin/products/${id}`, {
       method: 'POST',
       headers: {
@@ -150,14 +158,7 @@ export async function PATCH(
     const data = await safeJson(res)
     if (res.ok && data.product?.id) {
       try {
-        const locRes = await fetch(
-          `${MEDUSA_URL}/admin/stock-locations?limit=1`,
-          {
-            headers: { Authorization: authorization },
-          },
-        )
-        const locData = await safeJson(locRes)
-        const locationId = locData.stock_locations?.[0]?.id
+        const locationId = await locationPromise
         if (!locationId) {
           console.warn(
             '[PATCH product] No stock location found — inventory not set.',

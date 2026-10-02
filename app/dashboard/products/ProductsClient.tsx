@@ -12,6 +12,7 @@ import {
   deleteProduct,
   duplicateProduct,
   getProductList,
+  type ProductListFilters,
   type ProductListResult,
 } from '@/lib/api/dashboard'
 const STATUS_STYLES: Record<string, string> = {
@@ -258,6 +259,83 @@ function BulkDeleteModal({
     </div>
   )
 }
+function BulkStockModal({
+  count,
+  working,
+  onApply,
+  onCancel,
+}: {
+  count: number
+  working: boolean
+  onApply: (quantity: number) => void
+  onCancel: () => void
+}) {
+  const [qty, setQty] = useState('0')
+  const parsed = Number(qty)
+  const valid = qty.trim() !== '' && Number.isInteger(parsed) && parsed >= 0
+  return (
+    <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
+      <div
+        className='absolute inset-0 bg-black/40 backdrop-blur-sm'
+        onClick={() => !working && onCancel()}
+      />
+      <div className='relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6'>
+        <h3 className='font-sora text-[16px] font-semibold text-[#202223]'>
+          Set stock for {count} product{count !== 1 ? 's' : ''}
+        </h3>
+        <p className='text-[12.5px] text-[#6D7175] mt-0.5 mb-4'>
+          The same quantity is applied to every variant of each selected product
+          (single-variant products too).
+        </p>
+        <label className='block text-[12.5px] font-medium text-[#202223] mb-1'>
+          New stock quantity
+        </label>
+        <input
+          type='number'
+          min={0}
+          step={1}
+          value={qty}
+          onChange={(e) => setQty(e.target.value)}
+          autoFocus
+          className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+        />
+        <div className='flex items-center gap-2 mt-2'>
+          <button
+            type='button'
+            onClick={() => setQty('0')}
+            className='px-2.5 py-1 text-[11.5px] rounded-md border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] cursor-pointer text-[#202223]'
+          >
+            Reset to 0
+          </button>
+        </div>
+        <p className='text-[12px] text-[#6D7175] mt-3 mb-5'>
+          Units already reserved by open orders stay reserved. This can’t be
+          undone automatically.
+        </p>
+        <div className='flex items-center gap-3'>
+          <button
+            onClick={onCancel}
+            disabled={working}
+            className='flex-1 py-2.5 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors disabled:opacity-50 cursor-pointer'
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => valid && onApply(parsed)}
+            disabled={working || !valid}
+            className='flex-1 py-2.5 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer border-none'
+          >
+            {working
+              ? 'Updating…'
+              : valid
+                ? `Set to ${parsed} for ${count}`
+                : 'Enter a quantity'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 function BulkEditModal({
   count,
   working,
@@ -480,6 +558,22 @@ export default function ProductsClient({
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [bulkEditOpen, setBulkEditOpen] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkStockOpen, setBulkStockOpen] = useState(false)
+  const [selectingAll, setSelectingAll] = useState(false)
+  // ---- filters (category / brand / sport / stock / price) ----
+  const [filterCategory, setFilterCategory] = useState('')
+  const [filterBrand, setFilterBrand] = useState('')
+  const [filterSport, setFilterSport] = useState('')
+  const [filterStock, setFilterStock] = useState<'' | 'in' | 'low' | 'out'>('')
+  const [filterPriceMin, setFilterPriceMin] = useState('')
+  const [filterPriceMax, setFilterPriceMax] = useState('')
+  const debouncedPriceMin = useDebouncedValue(filterPriceMin, 500)
+  const debouncedPriceMax = useDebouncedValue(filterPriceMax, 500)
+  const [categoryOptions, setCategoryOptions] = useState<
+    { id: string; label: string }[]
+  >([])
+  const [brandOptions, setBrandOptions] = useState<string[]>([])
+  const [sportOptions, setSportOptions] = useState<string[]>([])
   const [saveError, setSaveError] = useState<string | null>(null)
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -501,6 +595,32 @@ export default function ProductsClient({
   // changes hit /api/admin/products/list, which is answered from a
   // server-side cache — one request returns the rows AND the tab counts.
   const statusFilter = STATUS_FILTERS[selectedStatus]
+  const toNum = (v: string) =>
+    v.trim() === '' || Number.isNaN(Number(v)) ? undefined : Number(v)
+  const filters: ProductListFilters = {
+    category: filterCategory ? [filterCategory] : undefined,
+    brand: filterBrand || undefined,
+    sport: filterSport || undefined,
+    stock: filterStock || undefined,
+    priceMin: toNum(debouncedPriceMin),
+    priceMax: toNum(debouncedPriceMax),
+  }
+  const activeFilterCount = [
+    filterCategory,
+    filterBrand,
+    filterSport,
+    filterStock,
+    filterPriceMin.trim(),
+    filterPriceMax.trim(),
+  ].filter(Boolean).length
+  const clearFilters = () => {
+    setFilterCategory('')
+    setFilterBrand('')
+    setFilterSport('')
+    setFilterStock('')
+    setFilterPriceMin('')
+    setFilterPriceMax('')
+  }
   const [data, setData] = useState<ProductListResult | null>(initialData)
   const [loading, setLoading] = useState(initialData === null)
   const [fetching, setFetching] = useState(false)
@@ -521,6 +641,7 @@ export default function ProductsClient({
       offset: (page - 1) * pageSize,
       q: debouncedSearch || undefined,
       status: statusFilter,
+      filters,
     })
       .then((r) => {
         if (myId === requestId.current) setData(r)
@@ -535,7 +656,67 @@ export default function ProductsClient({
         setLoading(false)
         setFetching(false)
       })
-  }, [page, debouncedSearch, selectedStatus, reloadKey])
+  }, [
+    page,
+    debouncedSearch,
+    selectedStatus,
+    reloadKey,
+    filterCategory,
+    filterBrand,
+    filterSport,
+    filterStock,
+    debouncedPriceMin,
+    debouncedPriceMax,
+  ])
+  // Any filter change starts again from page 1 and drops the selection.
+  const filtersKey = [
+    filterCategory,
+    filterBrand,
+    filterSport,
+    filterStock,
+    debouncedPriceMin,
+    debouncedPriceMax,
+  ].join('|')
+  const firstFilterRun = useRef(true)
+  useEffect(() => {
+    if (firstFilterRun.current) {
+      firstFilterRun.current = false
+      return
+    }
+    setPage(1)
+    setSelectedIds([])
+  }, [filtersKey])
+  // Dropdown values for the filter bar (loaded once).
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      fetch('/api/admin/categories?limit=200', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch('/api/admin/products/field-options', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]).then(([cats, fields]) => {
+      if (cancelled) return
+      const list: any[] = cats?.categories ?? cats?.product_categories ?? []
+      const nameById = new Map(list.map((c) => [String(c.id), String(c.name)]))
+      setCategoryOptions(
+        list
+          .map((c) => ({
+            id: String(c.id),
+            label: c.parent_category_id
+              ? `${nameById.get(String(c.parent_category_id)) ?? ''} › ${c.name}`
+              : String(c.name),
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label)),
+      )
+      setBrandOptions(fields?.brands ?? [])
+      setSportOptions(fields?.sports ?? [])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const [exporting, setExporting] = useState(false)
   const refetch = async () => {
     setReloadKey((v) => v + 1)
@@ -553,12 +734,43 @@ export default function ProductsClient({
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     )
+  const pageAllSelected =
+    paginated.length > 0 &&
+    paginated.every((p: (typeof products)[0]) => selectedIds.includes(p.id))
   const toggleAll = () =>
     setSelectedIds(
-      selectedIds.length === paginated.length
-        ? []
-        : paginated.map((p: (typeof products)[0]) => p.id),
+      pageAllSelected ? [] : paginated.map((p: (typeof products)[0]) => p.id),
     )
+  // Selects every product that matches the current search / tab / filters —
+  // not just the 20 on screen — so e.g. a whole category can be reset at once.
+  const selectAllMatching = async () => {
+    if (selectingAll) return
+    setSelectingAll(true)
+    try {
+      const ids: string[] = []
+      const chunk = 500
+      let offset = 0
+      let total = Infinity
+      while (offset < total) {
+        const res = await getProductList({
+          limit: chunk,
+          offset,
+          q: debouncedSearch || undefined,
+          status: statusFilter,
+          filters,
+        })
+        total = res.count ?? 0
+        ids.push(...res.products.map((p: (typeof products)[0]) => p.id))
+        if (res.products.length === 0) break
+        offset += chunk
+      }
+      setSelectedIds(ids)
+    } catch (err: any) {
+      toast.error('Could not select all: ' + (err?.message ?? 'unknown error'))
+    } finally {
+      setSelectingAll(false)
+    }
+  }
   const handleExportCsv = async () => {
     if (exporting) return
     setExporting(true)
@@ -576,6 +788,7 @@ export default function ProductsClient({
           offset,
           q: debouncedSearch || undefined,
           status: STATUS_FILTERS[selectedStatus],
+          filters,
         })
         total = res.count ?? 0
         all.push(...res.products)
@@ -857,13 +1070,19 @@ export default function ProductsClient({
   // Runs a bulk delete / update in chunks (the API takes 25 ids at a time) and
   // reports how many worked. Rows that failed stay selected so they can be retried.
   const runBulk = async (
-    action: 'delete' | 'update',
+    action: 'delete' | 'update' | 'stock',
     ids: string[],
     changes?: BulkProductChanges,
+    quantity?: number,
   ) => {
     if (bulkBusy || ids.length === 0) return
     setBulkBusy(true)
-    const verb = action === 'delete' ? 'Deleting' : 'Updating'
+    const verb =
+      action === 'delete'
+        ? 'Deleting'
+        : action === 'stock'
+          ? 'Updating stock'
+          : 'Updating'
     const toastId = toast.loading(`${verb}… 0 / ${ids.length}`)
     const okIds: string[] = []
     const failed: { id: string; error: string }[] = []
@@ -872,7 +1091,12 @@ export default function ProductsClient({
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK)
         try {
-          const res = await bulkProducts({ action, ids: chunk, changes })
+          const res = await bulkProducts({
+            action,
+            ids: chunk,
+            changes,
+            quantity,
+          })
           okIds.push(...(res.ok ?? []))
           failed.push(...(res.failed ?? []))
         } catch (err: any) {
@@ -888,7 +1112,9 @@ export default function ProductsClient({
       const noun = `product${okIds.length !== 1 ? 's' : ''}`
       if (failed.length === 0) {
         toast.success(
-          `${action === 'delete' ? 'Deleted' : 'Updated'} ${okIds.length} ${noun}`,
+          action === 'stock'
+            ? `Stock set to ${quantity} for ${okIds.length} ${noun}`
+            : `${action === 'delete' ? 'Deleted' : 'Updated'} ${okIds.length} ${noun}`,
           { id: toastId },
         )
       } else {
@@ -899,6 +1125,7 @@ export default function ProductsClient({
       }
       setBulkDeleteOpen(false)
       setBulkEditOpen(false)
+      setBulkStockOpen(false)
       setSelectedIds(failed.map((f) => f.id))
       if (action === 'delete' && page > 1 && okIds.length >= products.length) {
         setPage(page - 1)
@@ -959,6 +1186,14 @@ export default function ProductsClient({
           working={bulkBusy}
           onConfirm={() => runBulk('delete', selectedIds)}
           onCancel={() => setBulkDeleteOpen(false)}
+        />
+      )}
+      {bulkStockOpen && (
+        <BulkStockModal
+          count={selectedIds.length}
+          working={bulkBusy}
+          onApply={(q) => runBulk('stock', selectedIds, undefined, q)}
+          onCancel={() => setBulkStockOpen(false)}
         />
       )}
       {bulkEditOpen && (
@@ -1130,6 +1365,13 @@ export default function ProductsClient({
               Edit
             </button>
             <button
+              onClick={() => setBulkStockOpen(true)}
+              disabled={bulkBusy}
+              className='px-3 py-1.5 text-[12px] font-medium rounded-lg border border-[#008060]/30 text-[#008060] hover:bg-white bg-transparent cursor-pointer transition-colors disabled:opacity-50'
+            >
+              Set stock
+            </button>
+            <button
               onClick={handleBulkArchive}
               disabled={bulkBusy}
               className='px-3 py-1.5 text-[12px] font-medium rounded-lg border border-[#E1E3E5] text-[#202223] hover:bg-white bg-transparent cursor-pointer transition-colors disabled:opacity-50'
@@ -1149,6 +1391,23 @@ export default function ProductsClient({
             onClick={() => setSelectedIds([])}
           >
             ✕
+          </button>
+        </div>
+      )}
+
+      {pageAllSelected && totalCount > selectedIds.length && (
+        <div className='flex items-center gap-2 px-4 py-2 bg-[#F6F6F7] border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223]'>
+          <span>
+            All {paginated.length} products on this page are selected.
+          </span>
+          <button
+            onClick={selectAllMatching}
+            disabled={selectingAll}
+            className='text-[#008060] font-medium underline bg-transparent border-none cursor-pointer disabled:opacity-50'
+          >
+            {selectingAll
+              ? 'Selecting…'
+              : `Select all ${totalCount} matching products`}
           </button>
         </div>
       )}
@@ -1219,6 +1478,96 @@ export default function ProductsClient({
         </div>
 
         {}
+        <div className='flex items-center gap-2 px-4 py-3 border-b border-[#E1E3E5] flex-wrap'>
+          {(() => {
+            const sel =
+              'px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none cursor-pointer hover:border-[#8C9196] transition-colors max-w-[220px]'
+            const num =
+              'w-24 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none focus:border-[#008060]'
+            return (
+              <>
+                <select
+                  value={filterCategory}
+                  onChange={(e) => setFilterCategory(e.target.value)}
+                  className={sel}
+                >
+                  <option value=''>All categories</option>
+                  {categoryOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={filterBrand}
+                  onChange={(e) => setFilterBrand(e.target.value)}
+                  className={sel}
+                >
+                  <option value=''>All brands</option>
+                  {brandOptions.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={filterSport}
+                  onChange={(e) => setFilterSport(e.target.value)}
+                  className={sel}
+                >
+                  <option value=''>All sports</option>
+                  {sportOptions.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={filterStock}
+                  onChange={(e) =>
+                    setFilterStock(e.target.value as '' | 'in' | 'low' | 'out')
+                  }
+                  className={sel}
+                >
+                  <option value=''>Any stock</option>
+                  <option value='in'>In stock</option>
+                  <option value='low'>Low stock (1–5)</option>
+                  <option value='out'>Out of stock</option>
+                </select>
+                <div className='flex items-center gap-1.5'>
+                  <span className='text-[12.5px] text-[#6D7175]'>£</span>
+                  <input
+                    type='number'
+                    min={0}
+                    placeholder='Min'
+                    value={filterPriceMin}
+                    onChange={(e) => setFilterPriceMin(e.target.value)}
+                    className={num}
+                  />
+                  <span className='text-[12.5px] text-[#6D7175]'>–</span>
+                  <input
+                    type='number'
+                    min={0}
+                    placeholder='Max'
+                    value={filterPriceMax}
+                    onChange={(e) => setFilterPriceMax(e.target.value)}
+                    className={num}
+                  />
+                </div>
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={clearFilters}
+                    className='text-[12.5px] text-[#008060] font-medium underline bg-transparent border-none cursor-pointer'
+                  >
+                    Clear filters ({activeFilterCount})
+                  </button>
+                )}
+              </>
+            )
+          })()}
+        </div>
+
+        {}
         <div className='flex items-center gap-0 border-b border-[#E1E3E5] overflow-x-auto scrollbar-none px-4'>
           {STATUSES.map((s) => (
             <button
@@ -1248,10 +1597,7 @@ export default function ProductsClient({
                   <th className='w-10 px-4 py-3'>
                     <input
                       type='checkbox'
-                      checked={
-                        selectedIds.length === paginated.length &&
-                        paginated.length > 0
-                      }
+                      checked={pageAllSelected}
                       onChange={toggleAll}
                       className='w-4 h-4 rounded accent-[#008060] cursor-pointer'
                     />
@@ -1316,6 +1662,11 @@ export default function ProductsClient({
                       <p className='text-[14px] font-medium text-[#202223] mt-2'>
                         No products found
                       </p>
+                      {(activeFilterCount > 0 || search) && (
+                        <p className='text-[12.5px] text-[#6D7175] mt-1'>
+                          Try changing or clearing the search / filters.
+                        </p>
+                      )}
                       <Link
                         href='/dashboard/products/new'
                         className='inline-block mt-3 px-4 py-2 bg-[#008060] text-white text-[13px] font-medium rounded-lg no-underline hover:bg-[#006e52] transition-colors'

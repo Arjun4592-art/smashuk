@@ -319,6 +319,7 @@ export interface ProductListItem {
   handle: string
   sku: string
   category: string
+  categoryIds?: string[]
   brand: string
   sport: string
   price: number
@@ -333,6 +334,19 @@ export interface ProductListResult {
   products: ProductListItem[]
   count: number
   counts: Record<'All' | 'Active' | 'Draft' | 'Archived', number>
+  facets?: {
+    brands: string[]
+    sports: string[]
+  }
+}
+export interface ProductListFilters {
+  /** Category ids — a product matches if it is in any of them. */
+  category?: string[]
+  brand?: string
+  sport?: string
+  stock?: 'in' | 'low' | 'out'
+  priceMin?: number
+  priceMax?: number
 }
 // Lean, server-cached list (already mapped on the server) — used by the
 // dashboard Products page. One request returns the page + tab counts.
@@ -341,12 +355,20 @@ export async function getProductList(params?: {
   offset?: number
   q?: string
   status?: string[]
+  filters?: ProductListFilters
 }): Promise<ProductListResult> {
+  const f = params?.filters
   return api<ProductListResult>('/api/admin/products/list', {
     limit: params?.limit,
     offset: params?.offset,
     q: params?.q,
     status: params?.status,
+    category: f?.category,
+    brand: f?.brand,
+    sport: f?.sport,
+    stock: f?.stock,
+    priceMin: f?.priceMin,
+    priceMax: f?.priceMax,
   })
 }
 export async function createProduct(data: any) {
@@ -648,9 +670,11 @@ export interface BulkProductsResult {
   failed: { id: string; error: string }[]
 }
 export async function bulkProducts(body: {
-  action: 'delete' | 'update'
+  action: 'delete' | 'update' | 'stock'
   ids: string[]
   changes?: BulkProductChanges
+  /** For action 'stock': the available quantity to set on every variant. */
+  quantity?: number
 }): Promise<BulkProductsResult> {
   return mutate('/api/admin/products/bulk', 'POST', body)
 }
@@ -906,4 +930,3 @@ export async function getProfitReport(params?: {
     productId: params?.productId,
   })
 }
-  
