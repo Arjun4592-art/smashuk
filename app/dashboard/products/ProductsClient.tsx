@@ -1087,22 +1087,40 @@ export default function ProductsClient({
     const okIds: string[] = []
     const failed: { id: string; error: string }[] = []
     try {
-      const CHUNK = 25
+      // Stock changes touch every variant (many Medusa calls per product), so
+      // they go in small chunks — one big request outlives the server /
+      // proxy timeout and the browser just reports "Failed to fetch".
+      const CHUNK = action === 'stock' ? 3 : 25
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK)
-        try {
-          const res = await bulkProducts({
-            action,
-            ids: chunk,
-            changes,
-            quantity,
-          })
-          okIds.push(...(res.ok ?? []))
-          failed.push(...(res.failed ?? []))
-        } catch (err: any) {
-          chunk.forEach((id) =>
-            failed.push({ id, error: err?.message ?? 'Request failed' }),
-          )
+        // Setting a quantity / status is idempotent, so a dropped connection
+        // is simply retried (once for delete, twice for the rest).
+        const attempts = action === 'delete' ? 1 : 3
+        let lastErr: any = null
+        let done = false
+        for (let a = 0; a < attempts && !done; a++) {
+          try {
+            const res = await bulkProducts({
+              action,
+              ids: chunk,
+              changes,
+              quantity,
+            })
+            okIds.push(...(res.ok ?? []))
+            failed.push(...(res.failed ?? []))
+            done = true
+          } catch (err: any) {
+            lastErr = err
+            if (a < attempts - 1)
+              await new Promise((r) => setTimeout(r, 1500 * (a + 1)))
+          }
+        }
+        if (!done) {
+          const raw = String(lastErr?.message ?? 'Request failed')
+          const msg = /failed to fetch|networkerror|load failed/i.test(raw)
+            ? 'Connection to the server dropped (timeout). Try again.'
+            : raw
+          chunk.forEach((id) => failed.push({ id, error: msg }))
         }
         toast.loading(
           `${verb}… ${Math.min(i + CHUNK, ids.length)} / ${ids.length}`,

@@ -192,6 +192,12 @@ export async function syncVariantInventory(
      * (single-variant or multi-variant) — used by the bulk "Set stock" action.
      */
     applyDefaultToAllVariants?: boolean
+    /**
+     * Skip the per-variant "is this inventory item shared with another
+     * product?" lookup. The bulk stock action uses it: it only changes a
+     * quantity, and that lookup is one extra Medusa call per variant.
+     */
+    skipSharedCheck?: boolean
   } = {},
 ): Promise<SyncResult> {
   const result: SyncResult = { updated: 0, failed: 0 }
@@ -285,7 +291,7 @@ export async function syncVariantInventory(
           result.failed++
           return
         }
-      } else if (mustWrite) {
+      } else if (mustWrite && !options.skipSharedCheck) {
         // Sharing only matters when we are about to WRITE a quantity to the
         // item, so the extra lookup is skipped for untouched variants.
         inventoryItemId = await detachIfShared(

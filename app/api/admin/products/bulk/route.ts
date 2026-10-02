@@ -18,6 +18,9 @@ import {
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 
+// Give the hosting platform room to finish a chunk (ignored where unsupported).
+export const maxDuration = 60
+
 // The dashboard sends products in small chunks (and shows progress), so a
 // single request never has to touch more than this many.
 const MAX_IDS_PER_REQUEST = 25
@@ -165,7 +168,7 @@ export async function POST(req: NextRequest) {
             locationId,
             {},
             quantity,
-            { applyDefaultToAllVariants: true },
+            { applyDefaultToAllVariants: true, skipSharedCheck: true },
           )
           if (r.error) {
             failed.push({ id, error: r.error })
