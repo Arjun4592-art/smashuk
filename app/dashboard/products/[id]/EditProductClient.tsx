@@ -1219,7 +1219,7 @@ export default function EditProductClient({
       })
     })
     if (neededByTitle.size === 0) return
-    const sameTitle = (list: { title: string }[], title: string) =>
+    const sameTitle = <T extends { title: string }>(list: T[], title: string) =>
       list.filter((o) => o.title.trim().toLowerCase() === title.toLowerCase())
     const linkedNow = await fetchProductOptionLinks(id)
     const targets: { id: string; title: string; value_ids: string[] }[] = []
