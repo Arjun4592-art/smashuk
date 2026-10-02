@@ -7,6 +7,8 @@ import { toast } from 'sonner'
 import { useDebouncedValue } from '@/hooks/useDebounce'
 import { useRouter } from 'next/navigation'
 import {
+  bulkProducts,
+  type BulkProductChanges,
   deleteProduct,
   duplicateProduct,
   getProductList,
@@ -198,6 +200,262 @@ function Pagination({
     </div>
   )
 }
+function BulkDeleteModal({
+  count,
+  names,
+  working,
+  onConfirm,
+  onCancel,
+}: {
+  count: number
+  names: string[]
+  working: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const extra = count - names.length
+  return (
+    <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
+      <div
+        className='absolute inset-0 bg-black/40 backdrop-blur-sm'
+        onClick={() => !working && onCancel()}
+      />
+      <div className='relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6'>
+        <h3 className='font-sora text-[16px] font-semibold text-[#202223]'>
+          Delete {count} product{count !== 1 ? 's' : ''}?
+        </h3>
+        <p className='text-[12.5px] text-[#6D7175] mt-0.5 mb-4'>
+          This action cannot be undone
+        </p>
+        <ul className='text-[13px] text-[#202223] mb-4 space-y-1 list-disc pl-5'>
+          {names.map((n, i) => (
+            <li key={i} className='truncate'>
+              {n}
+            </li>
+          ))}
+          {extra > 0 && <li className='text-[#6D7175]'>and {extra} more…</li>}
+        </ul>
+        <p className='text-[12.5px] text-[#6D7175] mb-6'>
+          The products and all their variants will be permanently removed.
+        </p>
+        <div className='flex items-center gap-3'>
+          <button
+            onClick={onCancel}
+            disabled={working}
+            className='flex-1 py-2.5 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors disabled:opacity-50 cursor-pointer'
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={working}
+            className='flex-1 py-2.5 bg-[#D82C0D] hover:bg-[#C02009] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer border-none'
+          >
+            {working ? 'Deleting…' : `Delete ${count}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+function BulkEditModal({
+  count,
+  working,
+  onApply,
+  onCancel,
+}: {
+  count: number
+  working: boolean
+  onApply: (changes: BulkProductChanges) => void
+  onCancel: () => void
+}) {
+  // '' means "don't change" for every field (badge uses NONE to clear it).
+  const [status, setStatus] = useState('')
+  const [categoryId, setCategoryId] = useState('')
+  const [brand, setBrand] = useState('')
+  const [sport, setSport] = useState('')
+  const [badge, setBadge] = useState('')
+  const [channel, setChannel] = useState('')
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>(
+    [],
+  )
+  const [brands, setBrands] = useState<string[]>([])
+  const [sports, setSports] = useState<string[]>([])
+  const [optionsLoading, setOptionsLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      fetch('/api/admin/categories?limit=200', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch('/api/admin/products/field-options', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]).then(([cats, fields]) => {
+      if (cancelled) return
+      const list = cats?.categories ?? cats?.product_categories ?? []
+      setCategories(
+        list
+          .map((c: any) => ({ id: String(c.id), name: String(c.name) }))
+          .sort((a: any, b: any) => a.name.localeCompare(b.name)),
+      )
+      setBrands(fields?.brands ?? [])
+      setSports(fields?.sports ?? [])
+      setOptionsLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const changes: BulkProductChanges = {}
+  if (status) changes.status = status as BulkProductChanges['status']
+  if (categoryId) changes.categoryId = categoryId
+  if (brand.trim()) changes.brand = brand.trim()
+  if (sport.trim()) changes.sport = sport.trim()
+  if (badge) changes.badge = badge === 'NONE' ? '' : badge
+  if (channel) {
+    changes.sellingChannel = channel as BulkProductChanges['sellingChannel']
+  }
+  const hasChanges = Object.keys(changes).length > 0
+
+  const fieldCls =
+    'w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
+  const labelCls = 'block text-[12.5px] font-medium text-[#202223] mb-1'
+
+  return (
+    <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
+      <div
+        className='absolute inset-0 bg-black/40 backdrop-blur-sm'
+        onClick={() => !working && onCancel()}
+      />
+      <div className='relative bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6'>
+        <h3 className='font-sora text-[16px] font-semibold text-[#202223]'>
+          Edit {count} product{count !== 1 ? 's' : ''}
+        </h3>
+        <p className='text-[12.5px] text-[#6D7175] mt-0.5 mb-5'>
+          Only the fields you change are applied. Everything left on “Don’t
+          change” stays as it is.
+        </p>
+
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
+          <div>
+            <label className={labelCls}>Status</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className={fieldCls}
+            >
+              <option value=''>Don’t change</option>
+              <option value='published'>Published</option>
+              <option value='draft'>Draft</option>
+              <option value='rejected'>Archived</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Selling channel</label>
+            <select
+              value={channel}
+              onChange={(e) => setChannel(e.target.value)}
+              className={fieldCls}
+            >
+              <option value=''>Don’t change</option>
+              <option value='both'>Website + Store</option>
+              <option value='website'>Website only</option>
+              <option value='store'>Store only</option>
+            </select>
+          </div>
+          <div className='sm:col-span-2'>
+            <label className={labelCls}>
+              Category{' '}
+              <span className='text-[11px] text-[#8C9196] font-normal'>
+                (replaces the current categories)
+              </span>
+            </label>
+            <select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              className={fieldCls}
+              disabled={optionsLoading}
+            >
+              <option value=''>
+                {optionsLoading ? 'Loading categories…' : 'Don’t change'}
+              </option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Brand</label>
+            <input
+              list='bulk-brand-options'
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              placeholder='Don’t change'
+              className={fieldCls}
+            />
+            <datalist id='bulk-brand-options'>
+              {brands.map((b) => (
+                <option key={b} value={b} />
+              ))}
+            </datalist>
+          </div>
+          <div>
+            <label className={labelCls}>Sport</label>
+            <input
+              list='bulk-sport-options'
+              value={sport}
+              onChange={(e) => setSport(e.target.value)}
+              placeholder='Don’t change'
+              className={fieldCls}
+            />
+            <datalist id='bulk-sport-options'>
+              {sports.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          </div>
+          <div className='sm:col-span-2'>
+            <label className={labelCls}>Badge</label>
+            <select
+              value={badge}
+              onChange={(e) => setBadge(e.target.value)}
+              className={fieldCls}
+            >
+              <option value=''>Don’t change</option>
+              <option value='NONE'>Remove badge</option>
+              <option value='NEW'>New</option>
+              <option value='SALE'>Sale</option>
+              <option value='BESTSELLER'>Bestseller</option>
+              <option value='LIMITED'>Limited</option>
+            </select>
+          </div>
+        </div>
+
+        <div className='flex items-center gap-3 mt-6'>
+          <button
+            onClick={onCancel}
+            disabled={working}
+            className='flex-1 py-2.5 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors disabled:opacity-50 cursor-pointer'
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onApply(changes)}
+            disabled={working || !hasChanges}
+            className='flex-1 py-2.5 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer border-none'
+          >
+            {working ? 'Applying…' : `Apply to ${count}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 export default function ProductsClient({
   initialData,
   initialError,
@@ -219,6 +477,9 @@ export default function ProductsClient({
   } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkEditOpen, setBulkEditOpen] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -590,6 +851,73 @@ export default function ProductsClient({
       setDeleting(false)
     }
   }
+  const selectedProducts = products.filter((p: (typeof products)[0]) =>
+    selectedIds.includes(p.id),
+  )
+  // Runs a bulk delete / update in chunks (the API takes 25 ids at a time) and
+  // reports how many worked. Rows that failed stay selected so they can be retried.
+  const runBulk = async (
+    action: 'delete' | 'update',
+    ids: string[],
+    changes?: BulkProductChanges,
+  ) => {
+    if (bulkBusy || ids.length === 0) return
+    setBulkBusy(true)
+    const verb = action === 'delete' ? 'Deleting' : 'Updating'
+    const toastId = toast.loading(`${verb}… 0 / ${ids.length}`)
+    const okIds: string[] = []
+    const failed: { id: string; error: string }[] = []
+    try {
+      const CHUNK = 25
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK)
+        try {
+          const res = await bulkProducts({ action, ids: chunk, changes })
+          okIds.push(...(res.ok ?? []))
+          failed.push(...(res.failed ?? []))
+        } catch (err: any) {
+          chunk.forEach((id) =>
+            failed.push({ id, error: err?.message ?? 'Request failed' }),
+          )
+        }
+        toast.loading(
+          `${verb}… ${Math.min(i + CHUNK, ids.length)} / ${ids.length}`,
+          { id: toastId },
+        )
+      }
+      const noun = `product${okIds.length !== 1 ? 's' : ''}`
+      if (failed.length === 0) {
+        toast.success(
+          `${action === 'delete' ? 'Deleted' : 'Updated'} ${okIds.length} ${noun}`,
+          { id: toastId },
+        )
+      } else {
+        toast.error(
+          `${okIds.length} done, ${failed.length} failed: ${failed[0].error}`,
+          { id: toastId, duration: 8000 },
+        )
+      }
+      setBulkDeleteOpen(false)
+      setBulkEditOpen(false)
+      setSelectedIds(failed.map((f) => f.id))
+      if (action === 'delete' && page > 1 && okIds.length >= products.length) {
+        setPage(page - 1)
+      } else {
+        await refetch()
+      }
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+  const handleBulkArchive = () => {
+    if (
+      !window.confirm(
+        `Archive ${selectedIds.length} product${selectedIds.length !== 1 ? 's' : ''}? They will be hidden from the shop.`,
+      )
+    )
+      return
+    runBulk('update', selectedIds, { status: 'rejected' })
+  }
   const handleDuplicate = async (product: { id: string; name: string }) => {
     if (duplicatingId) return
     setDuplicatingId(product.id)
@@ -622,6 +950,23 @@ export default function ProductsClient({
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteTarget(null)}
           deleting={deleting}
+        />
+      )}
+      {bulkDeleteOpen && (
+        <BulkDeleteModal
+          count={selectedIds.length}
+          names={selectedProducts.slice(0, 5).map((p: any) => p.name)}
+          working={bulkBusy}
+          onConfirm={() => runBulk('delete', selectedIds)}
+          onCancel={() => setBulkDeleteOpen(false)}
+        />
+      )}
+      {bulkEditOpen && (
+        <BulkEditModal
+          count={selectedIds.length}
+          working={bulkBusy}
+          onApply={(changes) => runBulk('update', selectedIds, changes)}
+          onCancel={() => setBulkEditOpen(false)}
         />
       )}
 
@@ -777,21 +1122,24 @@ export default function ProductsClient({
             {selectedIds.length} selected
           </span>
           <div className='flex items-center gap-2 ml-2'>
-            <button className='px-3 py-1.5 text-[12px] font-medium rounded-lg border border-[#E1E3E5] text-[#202223] hover:bg-white bg-transparent cursor-pointer transition-colors'>
+            <button
+              onClick={() => setBulkEditOpen(true)}
+              disabled={bulkBusy}
+              className='px-3 py-1.5 text-[12px] font-medium rounded-lg border border-[#008060]/30 text-[#008060] hover:bg-white bg-transparent cursor-pointer transition-colors disabled:opacity-50'
+            >
+              Edit
+            </button>
+            <button
+              onClick={handleBulkArchive}
+              disabled={bulkBusy}
+              className='px-3 py-1.5 text-[12px] font-medium rounded-lg border border-[#E1E3E5] text-[#202223] hover:bg-white bg-transparent cursor-pointer transition-colors disabled:opacity-50'
+            >
               Archive
             </button>
             <button
-              onClick={() => {
-                const first = products.find((p: any) =>
-                  selectedIds.includes(p.id),
-                )
-                if (first)
-                  setDeleteTarget({
-                    id: selectedIds[0],
-                    name: first.name,
-                  })
-              }}
-              className='px-3 py-1.5 text-[12px] font-medium rounded-lg border border-[#D82C0D]/30 text-[#D82C0D] hover:bg-[#D82C0D]/5 bg-transparent cursor-pointer transition-colors'
+              onClick={() => setBulkDeleteOpen(true)}
+              disabled={bulkBusy}
+              className='px-3 py-1.5 text-[12px] font-medium rounded-lg border border-[#D82C0D]/30 text-[#D82C0D] hover:bg-[#D82C0D]/5 bg-transparent cursor-pointer transition-colors disabled:opacity-50'
             >
               Delete
             </button>

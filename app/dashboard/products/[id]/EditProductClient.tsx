@@ -228,6 +228,32 @@ export default function EditProductClient({
         if (!p) throw new Error('Product not found')
         const firstVariant = p.variants?.[0]
         const firstPrice = firstVariant?.prices?.[0]?.amount
+        // The product-level Price is the price most variants share. Variants on
+        // that price are loaded with a blank price field (= "follows the
+        // product price"), so changing Price updates all of them; only variants
+        // with a different price keep their own value as an override.
+        const variantAmounts: number[] = (p.variants ?? [])
+          .map((v: any) => v.prices?.[0]?.amount)
+          .filter((a: any) => typeof a === 'number' && a > 0)
+        let productAmount: number | undefined = firstPrice
+        if (variantAmounts.length > 1) {
+          const counts = new Map<number, number>()
+          for (const a of variantAmounts)
+            counts.set(a, (counts.get(a) ?? 0) + 1)
+          let best = variantAmounts[0]
+          let bestCount = counts.get(best) ?? 0
+          for (const [a, n] of counts) {
+            if (n > bestCount) {
+              best = a
+              bestCount = n
+            }
+          }
+          productAmount = best
+        }
+        const variantPriceField = (v: any) => {
+          const a = v.prices?.[0]?.amount
+          return a && a !== productAmount ? String(a) : ''
+        }
         initialStockRef.current = String(firstVariant?.inventory_quantity ?? '')
         setStatus(p.status === 'published' ? 'published' : 'draft')
         setSellingChannel(inferSellingChannel(p.sales_channels))
@@ -254,7 +280,7 @@ export default function EditProductClient({
           sku: firstVariant?.sku ?? '',
           barcode: firstVariant?.barcode ?? '',
           ean: firstVariant?.ean ?? '',
-          price: firstPrice ? String(firstPrice) : '',
+          price: productAmount ? String(productAmount) : '',
           comparePrice: p.metadata?.compare_at_price
             ? String(p.metadata.compare_at_price)
             : '',
@@ -347,7 +373,7 @@ export default function EditProductClient({
               colorCode: v.metadata?.color_code ?? '',
               sku: v.sku ?? '',
               ean: v.ean ?? '',
-              price: v.prices?.[0]?.amount ? String(v.prices[0].amount) : '',
+              price: variantPriceField(v),
               stock: String(v.inventory_quantity ?? ''),
               imageUrls: Array.isArray(v.metadata?.variant_images)
                 ? v.metadata.variant_images
@@ -394,7 +420,7 @@ export default function EditProductClient({
               colorCode: v.metadata?.color_code ?? '',
               sku: v.sku ?? '',
               ean: v.ean ?? '',
-              price: v.prices?.[0]?.amount ? String(v.prices[0].amount) : '',
+              price: variantPriceField(v),
               stock: String(v.inventory_quantity ?? ''),
               imageUrls: Array.isArray(v.metadata?.variant_images)
                 ? v.metadata.variant_images
@@ -2061,6 +2087,45 @@ export default function EditProductClient({
                           className='w-full pl-8 pr-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
                         />
                       </div>
+                      {(() => {
+                        const pricedVariants = variants.filter(
+                          (v) => filledOptions(v).length > 0,
+                        )
+                        if (pricedVariants.length < 2) return null
+                        const own = pricedVariants.filter(
+                          (v) => v.price.trim() !== '',
+                        )
+                        return (
+                          <div className='mt-1.5 space-y-1'>
+                            <p className='text-[11px] text-[#6D7175]'>
+                              This price is used for all{' '}
+                              {pricedVariants.length - own.length} variant
+                              {pricedVariants.length - own.length !== 1
+                                ? 's'
+                                : ''}{' '}
+                              without their own price.
+                            </p>
+                            {own.length > 0 && (
+                              <p className='text-[11px] text-[#8C9196]'>
+                                {own.length} variant
+                                {own.length !== 1 ? 's have' : ' has'} a
+                                different price (set in the Variants tab).{' '}
+                                <button
+                                  type='button'
+                                  onClick={() =>
+                                    setVariants((prev) =>
+                                      prev.map((v) => ({ ...v, price: '' })),
+                                    )
+                                  }
+                                  className='text-[#008060] font-medium underline bg-transparent border-none p-0 cursor-pointer'
+                                >
+                                  Use this price for all variants
+                                </button>
+                              </p>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </div>
                     <div>
                       <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>

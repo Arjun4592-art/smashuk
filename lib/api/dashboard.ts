@@ -634,6 +634,26 @@ export async function upsertProductOption(
 export async function deleteProduct(id: string) {
   return mutate(`/api/admin/products/${id}`, 'DELETE')
 }
+export interface BulkProductChanges {
+  status?: 'published' | 'draft' | 'rejected'
+  categoryId?: string
+  brand?: string
+  sport?: string
+  /** '' removes the badge */
+  badge?: string
+  sellingChannel?: 'both' | 'website' | 'store'
+}
+export interface BulkProductsResult {
+  ok: string[]
+  failed: { id: string; error: string }[]
+}
+export async function bulkProducts(body: {
+  action: 'delete' | 'update'
+  ids: string[]
+  changes?: BulkProductChanges
+}): Promise<BulkProductsResult> {
+  return mutate('/api/admin/products/bulk', 'POST', body)
+}
 export async function duplicateProduct(id: string) {
   return mutate(`/api/admin/products/${id}/duplicate`, 'POST')
 }
@@ -886,3 +906,4 @@ export async function getProfitReport(params?: {
     productId: params?.productId,
   })
 }
+  

@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation'
+import { redirect } from 'next/navigation'
 import {
   getProduct,
   getProducts,
@@ -71,7 +71,10 @@ export default async function ProductPage({ params }: Props) {
     productPromise,
     relatedPromise,
   ])
-  if (!raw) notFound()
+  // Deleted / renamed / mistyped product link: send the visitor to the sale
+  // page instead of a dead-end 404. (getProduct only returns null when Medusa
+  // answered with no match; backend errors throw and never end up here.)
+  if (!raw) redirect('/shop?badge=SALE')
   const product = normalizeProduct(raw)
   const related = relatedRaw
     .map(normalizeProduct)
