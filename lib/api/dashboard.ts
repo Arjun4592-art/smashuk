@@ -539,6 +539,30 @@ export async function linkOptionsToProduct(
     update,
   })
 }
+// Authoritative view of what is ACTUALLY linked to this product right now
+// (option ids + the values linked to each). Medusa validates variant option
+// values against exactly this, so the "Option value X does not exist for
+// option Y" recovery must compare against it instead of the store-wide
+// option values or the (possibly stale) form state.
+export async function fetchProductOptionLinks(productId: string): Promise<
+  {
+    id: string
+    title: string
+    values: string[]
+  }[]
+> {
+  const res = await fetch(`/api/admin/products/${productId}`, {
+    credentials: 'include',
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = await res.json()
+  return (data?.product?.options ?? []).map((o: any) => ({
+    id: o.id as string,
+    title: String(o.title ?? ''),
+    values: (o.values ?? []).map((v: any) => String(v.value)),
+  }))
+}
 export async function upsertProductTags(values: string[]): Promise<
   {
     id: string

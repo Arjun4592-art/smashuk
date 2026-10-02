@@ -9,6 +9,7 @@ import {
   linkOptionsToProduct,
   deleteProductVariant,
   upsertProductTags,
+  fetchProductOptionLinks,
 } from '@/lib/api/dashboard'
 import { inferSellingChannel } from '@/lib/api/selling-channels-client'
 import { toast } from 'sonner'
@@ -1197,9 +1198,17 @@ export default function EditProductClient({
     }
   }
   // Recovery for Medusa's "Option value X does not exist for option Y": the
-  // value exists store-wide but isn't linked to THIS product. Re-link every
-  // option the variants use with all values (existing + the ones typed), so
-  // the update can be retried.
+  // value exists store-wide but isn't linked to THIS product's option.
+  //
+  // This works from the product's REAL linked options (fetched fresh from the
+  // server), not from the form state, because:
+  //  - the form's `existingOptions` is a stale closure after the sync step, and
+  //  - a product can carry more than one option with the same title (e.g. two
+  //    "Speed" options). Medusa resolves a variant's `{ Speed: "77" }` against
+  //    one of them, so the value must be linked to EVERY option with that
+  //    title or the update keeps failing no matter how often it is retried.
+  // After linking, the server state is re-read and verified, so a failure now
+  // names the exact option/value instead of looping on the raw Medusa error.
   const relinkOptionsForVariants = async () => {
     const neededByTitle = new Map<string, Set<string>>()
     variants.forEach((v) => {
@@ -1209,30 +1218,88 @@ export default function EditProductClient({
         neededByTitle.get(title)!.add(o.value.trim())
       })
     })
+    if (neededByTitle.size === 0) return
+    const sameTitle = (list: { title: string }[], title: string) =>
+      list.filter((o) => o.title.trim().toLowerCase() === title.toLowerCase())
+    const linkedNow = await fetchProductOptionLinks(id)
     const targets: { id: string; title: string; value_ids: string[] }[] = []
     for (const [title, valueSet] of neededByTitle) {
-      const existingOption = existingOptions.find(
-        (o) => o.title.toLowerCase() === title.toLowerCase(),
+      const requested = Array.from(valueSet)
+      const matching = sameTitle(linkedNow, title)
+      const storeOption = existingOptions.find(
+        (o) => o.title.trim().toLowerCase() === title.toLowerCase(),
       )
-      const union = Array.from(
-        new Set([...(existingOption?.values ?? []), ...Array.from(valueSet)]),
+      // Keep everything already linked to any same-titled option, plus what
+      // the variants need.
+      const wanted = Array.from(
+        new Set([
+          ...matching.flatMap((o) => o.values),
+          ...(storeOption?.values ?? []),
+          ...requested,
+        ]),
       )
-      const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
-        title,
-        union,
-        existingOption?.id,
-      )
-      targets.push({ id: optionId, title, value_ids: valueIds })
-      linkedValuesRef.current.set(
-        optionId,
-        new Set(canonicalValues.map((v) => v.toLowerCase())),
-      )
+      const optionIds: (string | undefined)[] =
+        matching.length > 0 ? matching.map((o) => o.id) : [storeOption?.id]
+      for (const preferredId of Array.from(new Set(optionIds))) {
+        const { optionId, valueIds, canonicalValues } =
+          await upsertOptionValues(title, wanted, preferredId)
+        targets.push({ id: optionId, title, value_ids: valueIds })
+        linkedValuesRef.current.set(
+          optionId,
+          new Set(canonicalValues.map((v) => v.toLowerCase())),
+        )
+        requested.forEach((typed) => {
+          const idx = wanted.findIndex(
+            (v) => v.toLowerCase() === typed.toLowerCase(),
+          )
+          const canonical = idx >= 0 ? canonicalValues[idx] : undefined
+          if (canonical) {
+            optionValueCasingRef.current.set(
+              `${title.toLowerCase()}::${typed.toLowerCase()}`,
+              canonical,
+            )
+          }
+        })
+      }
     }
     await linkOptionsToProduct(
       id,
       targets,
-      new Set(existingOptions.map((o) => o.id)),
+      new Set(linkedNow.map((o) => o.id)),
       [],
+    )
+    // Verify against the server instead of assuming the link worked.
+    const linkedAfter = await fetchProductOptionLinks(id)
+    const missing: string[] = []
+    for (const [title, valueSet] of neededByTitle) {
+      const matching = sameTitle(linkedAfter, title)
+      for (const value of valueSet) {
+        const ok =
+          matching.length > 0 &&
+          matching.every((o) =>
+            o.values.some((v) => v.toLowerCase() === value.toLowerCase()),
+          )
+        if (!ok) missing.push(`${title} → ${value}`)
+      }
+    }
+    if (missing.length > 0) {
+      setActiveTab('variants')
+      throw new Error(
+        `Could not link these option values to the product: ${missing.join(
+          ', ',
+        )}. Open Products → Options, remove duplicate / wrongly-named values for that option (e.g. "3 (77)", "77 (Speed 3)"), then pick the value again and save.`,
+      )
+    }
+    setExistingOptions((prev) =>
+      prev.map((o) => {
+        const fresh = linkedAfter.find((f) => f.id === o.id)
+        return fresh
+          ? {
+              ...o,
+              values: Array.from(new Set([...o.values, ...fresh.values])),
+            }
+          : o
+      }),
     )
   }
   const restoreDeletedDefaultVariant = async () => {
