@@ -34,11 +34,23 @@ export function friendlyGatewayError(
   if (status === 504 || /504 Gateway Time-?out/i.test(text)) {
     return 'The server took too long to respond (504 Gateway Timeout). Your changes may still have been saved in the background — refresh the page and check before saving again.'
   }
-  if (status === 502 || status === 503 || /50[23] (Bad Gateway|Service)/i.test(text)) {
-    return 'The server is temporarily unavailable (' + status + '). Please wait a moment and try again.'
+  if (
+    status === 502 ||
+    status === 503 ||
+    /50[23] (Bad Gateway|Service)/i.test(text)
+  ) {
+    return (
+      'The server is temporarily unavailable (' +
+      status +
+      '). Please wait a moment and try again.'
+    )
   }
   if (looksLikeHtml) {
-    return 'The server returned an unexpected error (' + status + '). Please try again.'
+    return (
+      'The server returned an unexpected error (' +
+      status +
+      '). Please try again.'
+    )
   }
   return null
 }

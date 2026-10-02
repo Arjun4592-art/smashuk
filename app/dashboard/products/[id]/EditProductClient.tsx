@@ -180,6 +180,13 @@ export default function EditProductClient({
     }[]
   >([])
   const optionValueCasingRef = useRef<Map<string, string>>(new Map())
+  // Values (lower-cased) that are actually LINKED to this product, per option
+  // id. `existingOptions[].values` holds the option's values store-wide, and a
+  // value can exist there without being linked to this product (e.g. "77" was
+  // added to "Speed" by another product). Medusa only accepts variant option
+  // values that are linked to the product, so the "already has every value"
+  // shortcut must be checked against this, not against the store-wide list.
+  const linkedValuesRef = useRef<Map<string, Set<string>>>(new Map())
   const deletedDefaultVariantRef = useRef(false)
   // Variant the user clicked "Delete variant" on, waiting for confirmation
   // in the modal.
@@ -441,6 +448,18 @@ export default function EditProductClient({
             }
           })
           setExistingOptions(rawOptions)
+          linkedValuesRef.current = new Map(
+            p.options
+              .filter(
+                (o: any) => Array.isArray(o.values) && o.values.length > 0,
+              )
+              .map((o: any) => [
+                o.id,
+                new Set<string>(
+                  o.values.map((v: any) => String(v.value).toLowerCase()),
+                ),
+              ]),
+          )
         }
         if (p.images && p.images.length > 0) {
           setImages(
@@ -717,6 +736,34 @@ export default function EditProductClient({
         canonicalOptionTitles.indexOf(a.name.trim()) -
         canonicalOptionTitles.indexOf(b.name.trim()),
     )
+  // Medusa re-processes EVERY variant (prices, options, images, inventory
+  // links) whenever the update request carries a `variants` array, even if
+  // nothing about them changed. For a product with many variants that is the
+  // slow part of Save. This signature covers everything that goes into the
+  // variants payload (stock is excluded: it is sent separately as
+  // _variantStocks), so when it hasn't changed since load / the last
+  // successful save, the `variants` array is simply left out of the request.
+  const variantsSignature = () =>
+    JSON.stringify({
+      v: variants.map(({ stock: _stock, ...rest }) => rest),
+      f: [
+        form.sku,
+        form.barcode,
+        form.ean,
+        form.price,
+        form.weight,
+        form.trackInventory,
+      ],
+      o: existingOptions.map((o) => `${o.id}:${o.values.join('|')}`),
+      d: defaultVariantId,
+    })
+  const variantsBaselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && variantsBaselineRef.current === null) {
+      variantsBaselineRef.current = variantsSignature()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading])
   const buildPayload = (saveStatus: 'published' | 'draft') => {
     const hasExtraVariants = variants.some((v) => filledOptions(v).length > 0)
     const baseVariant = {
@@ -787,6 +834,13 @@ export default function EditProductClient({
         }
       })
     const allVariants = hasExtraVariants ? extraVariants : [baseVariant]
+    const variantsUnchanged =
+      variantsBaselineRef.current !== null &&
+      variantsBaselineRef.current === variantsSignature() &&
+      variantsToDeleteRef.current.length === 0 &&
+      !deletedBaseVariantIdRef.current &&
+      !deletedDefaultVariantRef.current &&
+      allVariants.every((v: any) => !!v.id)
     const uploadedImages = images
       .filter((i) => i.url)
       .map((i, idx) => ({
@@ -819,7 +873,7 @@ export default function EditProductClient({
             id: string
           }[]
         | undefined,
-      variants: allVariants,
+      variants: variantsUnchanged ? undefined : allVariants,
       metadata: {
         brand: form.brand || undefined,
         sport: form.sport || undefined,
@@ -986,6 +1040,7 @@ export default function EditProductClient({
       title: string
       value_ids: string[]
     }[] = []
+    const linkedAfterSave = new Map<string, Set<string>>()
     for (const [title, valueSet] of neededByTitle) {
       const requested = Array.from(valueSet)
       const existingOption = existingOptions.find(
@@ -999,7 +1054,14 @@ export default function EditProductClient({
         const have = new Map(
           existingOption.values.map((v) => [v.toLowerCase(), v]),
         )
-        if (requested.every((v) => have.has(v.toLowerCase()))) {
+        const linkedHere = linkedValuesRef.current.get(existingOption.id)
+        if (
+          requested.every(
+            (v) =>
+              have.has(v.toLowerCase()) &&
+              (!linkedHere || linkedHere.has(v.toLowerCase())),
+          )
+        ) {
           requested.forEach((typed) => {
             const canonical = have.get(typed.toLowerCase())
             if (canonical) {
@@ -1025,6 +1087,10 @@ export default function EditProductClient({
         title,
         value_ids: valueIds,
       })
+      linkedAfterSave.set(
+        optionId,
+        new Set(canonicalValues.map((v) => v.toLowerCase())),
+      )
       requested.forEach((typed) => {
         const idx = union.findIndex(
           (v) => v.toLowerCase() === typed.toLowerCase(),
@@ -1121,11 +1187,53 @@ export default function EditProductClient({
     } catch (err) {
       throw err
     }
+    linkedAfterSave.forEach((vals, optId) =>
+      linkedValuesRef.current.set(optId, vals),
+    )
     if (removeNow.length > 0) {
       setExistingOptions((prev) =>
         prev.filter((o) => !removeNow.includes(o.id)),
       )
     }
+  }
+  // Recovery for Medusa's "Option value X does not exist for option Y": the
+  // value exists store-wide but isn't linked to THIS product. Re-link every
+  // option the variants use with all values (existing + the ones typed), so
+  // the update can be retried.
+  const relinkOptionsForVariants = async () => {
+    const neededByTitle = new Map<string, Set<string>>()
+    variants.forEach((v) => {
+      filledOptions(v).forEach((o) => {
+        const title = o.name.trim()
+        if (!neededByTitle.has(title)) neededByTitle.set(title, new Set())
+        neededByTitle.get(title)!.add(o.value.trim())
+      })
+    })
+    const targets: { id: string; title: string; value_ids: string[] }[] = []
+    for (const [title, valueSet] of neededByTitle) {
+      const existingOption = existingOptions.find(
+        (o) => o.title.toLowerCase() === title.toLowerCase(),
+      )
+      const union = Array.from(
+        new Set([...(existingOption?.values ?? []), ...Array.from(valueSet)]),
+      )
+      const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
+        title,
+        union,
+        existingOption?.id,
+      )
+      targets.push({ id: optionId, title, value_ids: valueIds })
+      linkedValuesRef.current.set(
+        optionId,
+        new Set(canonicalValues.map((v) => v.toLowerCase())),
+      )
+    }
+    await linkOptionsToProduct(
+      id,
+      targets,
+      new Set(existingOptions.map((o) => o.id)),
+      [],
+    )
   }
   const restoreDeletedDefaultVariant = async () => {
     try {
@@ -1257,7 +1365,20 @@ export default function EditProductClient({
           : []
       const payload = buildPayload(saveStatus)
       payload.tags = skipTags ? undefined : tagIds.length > 0 ? tagIds : []
-      const updateResult = await updateProduct(id, payload)
+      let updateResult: any
+      try {
+        updateResult = await updateProduct(id, payload)
+      } catch (updErr: any) {
+        if (
+          !/Option value .+ does not exist for option/i.test(
+            updErr?.message ?? '',
+          )
+        )
+          throw updErr
+        await relinkOptionsForVariants()
+        updateResult = await updateProduct(id, payload)
+      }
+      variantsBaselineRef.current = variantsSignature()
       if (hadExtraVariants) {
         setDefaultOption(null)
       }

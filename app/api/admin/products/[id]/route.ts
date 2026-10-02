@@ -98,7 +98,13 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
+    const t0 = Date.now()
+    const lap = (label: string) =>
+      console.log(`[PATCH product ${id}] ${label} +${Date.now() - t0}ms`)
     const body = await req.json()
+    lap(
+      `start (variants: ${Array.isArray(body.variants) ? body.variants.length : 0}, images: ${Array.isArray(body.images) ? body.images.length : 0})`,
+    )
     const authorization = (await getAdminAuthHeader(req)) ?? ''
     if (!authorization) {
       return NextResponse.json(
@@ -147,14 +153,47 @@ export async function PATCH(
     const locationPromise = getDefaultStockLocationId(authorization).catch(
       () => null,
     )
-    const res = await fetch(`${MEDUSA_URL}/admin/products/${id}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: authorization,
-      },
-      body: JSON.stringify(body),
-    })
+    lap('sending update to Medusa')
+    let res: Response
+    try {
+      // Medusa's default response is the whole product (variants, prices,
+      // options, images, ...) — ~90 KB and a heavy re-query for big products.
+      // Only the ids are needed here, so ask for just those.
+      const postUpdate = (qs: string) =>
+        fetch(`${MEDUSA_URL}/admin/products/${id}${qs}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authorization,
+          },
+          body: JSON.stringify(body),
+          // Stay under nginx's 300s so the user gets a clear message instead
+          // of a gateway error, and so the log shows exactly where it hung.
+          signal: AbortSignal.timeout(280_000),
+        })
+      res = await postUpdate('?fields=id,variants.id,variants.title')
+      if (res.status === 400) {
+        // If this Medusa version rejects `fields`, fall back to the default
+        // response (a rejected 400 changed nothing, so retrying is safe).
+        const txt = await res.clone().text()
+        if (/field/i.test(txt)) {
+          lap('Medusa rejected fields param, retrying without it')
+          res = await postUpdate('')
+        }
+      }
+    } catch (e: any) {
+      lap(`Medusa update FAILED: ${e?.name ?? ''} ${e?.message ?? e}`)
+      return NextResponse.json(
+        {
+          error:
+            e?.name === 'TimeoutError' || e?.name === 'AbortError'
+              ? 'Medusa did not finish saving this product within 280 seconds. The product update is stuck on the backend — check the Medusa logs / database before trying again.'
+              : `Cannot reach Medusa (${e?.cause?.code ?? e?.message}).`,
+        },
+        { status: 504 },
+      )
+    }
+    lap(`Medusa update answered HTTP ${res.status}`)
     const data = await safeJson(res)
     if (res.status === 502 || res.status === 503 || res.status === 504) {
       console.error('[PATCH product] Medusa gateway error', res.status)
@@ -180,6 +219,7 @@ export async function PATCH(
         } else {
           // stockQty is a fallback default when a variant has no
           // variant-specific quantity in the payload (e.g. single-variant edits).
+          lap('inventory sync start')
           await syncVariantInventory(
             data.product.id,
             authorization,
@@ -192,6 +232,7 @@ export async function PATCH(
             },
           )
         }
+        lap('inventory sync done')
       } catch (invErr: any) {
         console.warn(
           '[PATCH product] Inventory set error (non-fatal):',
@@ -203,6 +244,7 @@ export async function PATCH(
       invalidateCatalog()
       // Dashboard list reflects this edit immediately.
       await upsertAdminProduct(data.product.id, authorization)
+      lap('done')
     }
     return NextResponse.json(data, {
       status: res.status,
