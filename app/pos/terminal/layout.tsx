@@ -50,11 +50,6 @@ export default function POSTerminalLayout({
   useEffect(() => {
     if (!storeSettingsLoaded) fetchStoreSettings()
   }, [storeSettingsLoaded, fetchStoreSettings])
-  // Star PassPRNT hands control back to us by reloading whichever page
-  // triggered it, with its real print/connect result appended to the URL
-  // (passprnt_code / passprnt_message) — this is the actual outcome, not
-  // a guess. Runs once per mount, which covers both the billing page's
-  // real receipt prints and the settings page's connection test.
   useEffect(() => {
     const result = consumePassPrntCallback()
     if (!result) return

@@ -9,12 +9,19 @@ async function loadPdfJs() {
   return pdfjsLib
 }
 
-export async function pdfUrlToPrintHtml(url: string): Promise<string> {
+export interface LabelPages {
+  /** One PNG data URL per PDF page. */
+  pages: string[]
+  widthMm: number
+  heightMm: number
+}
+
+export async function pdfUrlToLabelPages(url: string): Promise<LabelPages> {
   const pdfjsLib = await loadPdfJs()
   const doc = await pdfjsLib.getDocument({ url }).promise
   const RENDER_SCALE = 2
 
-  const pageHtml: string[] = []
+  const pages: string[] = []
   let pageWidthMm = 0
   let pageHeightMm = 0
 
@@ -35,12 +42,23 @@ export async function pdfUrlToPrintHtml(url: string): Promise<string> {
       pageHeightMm = heightMm
     }
 
-    pageHtml.push(
-      `<div class="page"><img src="${canvas.toDataURL('image/png')}" /></div>`,
-    )
+    pages.push(canvas.toDataURL('image/png'))
     canvas.width = 0
     canvas.height = 0
   }
+
+  return { pages, widthMm: pageWidthMm, heightMm: pageHeightMm }
+}
+
+export async function pdfUrlToPrintHtml(url: string): Promise<string> {
+  const {
+    pages,
+    widthMm: pageWidthMm,
+    heightMm: pageHeightMm,
+  } = await pdfUrlToLabelPages(url)
+  const pageHtml = pages.map(
+    (src) => `<div class="page"><img src="${src}" /></div>`,
+  )
 
   return `<!doctype html>
 <html><head><meta charset="utf-8" />

@@ -295,6 +295,18 @@ interface POSState {
   addAuditEntry: (entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) => void
   clearAuditLog: () => void
 }
+// Per-line discounts are stored as the total amount off that line (all units).
+// clamp keeps a typed value valid; scale keeps the same per-unit discount when
+// the quantity on the line changes.
+function clampLineDiscount(item: POSCartItem, discount: number) {
+  const gross = item.product.price * item.quantity
+  const d = Number.isFinite(discount) ? discount : 0
+  return Math.round(Math.min(Math.max(d, 0), gross) * 100) / 100
+}
+function scaleLineDiscount(item: POSCartItem, newQuantity: number) {
+  if (!item.discount || item.quantity <= 0) return item.discount
+  return Math.round((item.discount / item.quantity) * newQuantity * 100) / 100
+}
 function computePOSTotals(
   items: POSCartItem[],
   customDiscount: number,
@@ -687,6 +699,7 @@ export const usePOSStore = create<POSState>()(
                 ? {
                     ...item,
                     quantity: item.quantity + quantity,
+                    discount: scaleLineDiscount(item, item.quantity + quantity),
                   }
                 : item,
             )
@@ -744,6 +757,7 @@ export const usePOSStore = create<POSState>()(
               ? {
                   ...item,
                   quantity,
+                  discount: scaleLineDiscount(item, quantity),
                 }
               : item,
           )
@@ -765,7 +779,7 @@ export const usePOSStore = create<POSState>()(
             item.product.id === productId && item.variant?.id === variantId
               ? {
                   ...item,
-                  discount,
+                  discount: clampLineDiscount(item, discount),
                 }
               : item,
           )

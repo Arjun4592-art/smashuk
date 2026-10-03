@@ -47,11 +47,13 @@ export function buildThermalReceiptHtml(
 
   const items = data.items
     .map((i) => {
-      const unit = i.quantity > 0 ? i.lineTotal / i.quantity : i.lineTotal
+      const gross = i.lineTotal + (i.discount ?? 0)
+      const unit = i.quantity > 0 ? gross / i.quantity : gross
       return `<div class="item">
         <div class="row b"><span class="nm">${esc(i.name)}</span><span class="amt">${fmt(i.lineTotal)}</span></div>
         ${i.variantTitle ? `<div class="sub">${esc(i.variantTitle)}</div>` : ''}
         <div class="sub">${i.quantity} x ${fmt(unit)}</div>
+        ${i.discount && i.discount > 0 ? `<div class="sub">Discount -${fmt(i.discount)}</div>` : ''}
       </div>`
     })
     .join('')
@@ -151,7 +153,7 @@ export function buildThermalReceiptHtml(
   <div class="meta">
     <div>${esc(data.dateStr)}, ${esc(data.timeStr)}</div>
     <div>Receipt: #${esc(data.orderId)}</div>
-    <div class="small">Staff: ${esc(data.cashier)}</div>
+//     <div class="small">Staff: ${esc(data.cashier)}</div>
     <div style="margin-top:10px">${esc(data.footerLine1 ?? 'Thank you for shopping with us!')}</div>
     ${data.footerLine2 ? `<div class="small">${esc(data.footerLine2)}</div>` : ''}
   </div>

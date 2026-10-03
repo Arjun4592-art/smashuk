@@ -30,6 +30,10 @@ interface PrinterState {
   serialHandle: SerialPrinterHandle | null
   lanAgentHandle: LanAgentHandle | null
   openDrawerOnPrint: boolean
+  // iPad/iPhone only: send SHIPPING labels (Parcel2Go 4x6) to the Star PassPRNT
+  // app instead of the normal iOS print sheet. Off by default — a 4x6 label
+  // printer is reached through AirPrint, not PassPRNT.
+  shippingLabelViaPassPRNT: boolean
   // Label size in millimetres. labelHeightMm = 0 means "continuous roll" —
   // the page height is measured from the content at print time.
   labelWidthMm: number
@@ -42,6 +46,7 @@ interface PrinterState {
   setSerialHandle: (h: SerialPrinterHandle | null) => void
   setLanAgentHandle: (h: LanAgentHandle | null) => void
   setOpenDrawerOnPrint: (v: boolean) => void
+  setShippingLabelViaPassPRNT: (v: boolean) => void
   setLabelSize: (widthMm: number, heightMm: number) => void
   disconnect: () => void
 }
@@ -63,6 +68,7 @@ export const usePrinterStore = create<PrinterState>()(
       serialHandle: null,
       lanAgentHandle: null,
       openDrawerOnPrint: false,
+      shippingLabelViaPassPRNT: false,
       labelWidthMm: 101.6, // 4in
       labelHeightMm: 50.8, // 2in
       setConnectionType: (t) => set({ connectionType: t }),
@@ -73,6 +79,7 @@ export const usePrinterStore = create<PrinterState>()(
       setSerialHandle: (h) => set({ serialHandle: h }),
       setLanAgentHandle: (h) => set({ lanAgentHandle: h }),
       setOpenDrawerOnPrint: (v) => set({ openDrawerOnPrint: v }),
+      setShippingLabelViaPassPRNT: (v) => set({ shippingLabelViaPassPRNT: v }),
       setLabelSize: (widthMm, heightMm) =>
         set({ labelWidthMm: widthMm, labelHeightMm: heightMm }),
       disconnect: () =>

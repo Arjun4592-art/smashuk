@@ -45,6 +45,9 @@ export interface CreatePOSOrderPayload {
     variant_id: string
     quantity: number
     product_id?: string
+    /** Manual discount on this line, in pounds off the whole line (all units).
+     * Applied server-side as a one-off item-level promotion. */
+    manual_discount?: number
   }[]
   customer_id?: string
   customer_email?: string

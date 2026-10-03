@@ -217,7 +217,7 @@ export async function POST(request: NextRequest) {
   // discount, so it can be cleaned up in `finally` below regardless of how
   // this handler exits (early return or thrown error) — see the discount
   // block right after line items are added.
-  let tempManualDiscountPromotionId: string | null = null
+  const tempPromotionIds: string[] = []
   let orderCompleted = false
   if (!(await requirePosSession())) {
     return NextResponse.json(
@@ -487,10 +487,83 @@ export async function POST(request: NextRequest) {
     // Manual discounts have no equivalent in Medusa's promotion engine, so a
     // single-use, unconditional promotion is created on the fly to carry the
     // discount into the cart, then cleaned up in `finally` if the sale never
-    // completes (see `tempManualDiscountPromotionId` above).
+    // completes (see `tempPromotionIds` above).
     const promoCodesToApply: string[] = []
     if (coupon_code) {
       promoCodesToApply.push(String(coupon_code).trim().toUpperCase())
+    }
+    // Per-line manual discounts ("discount this item" in the POS cart).
+    // Medusa's promotion engine can target a product but not one variant, so
+    // lines of the same product are combined into a single item-level
+    // promotion carrying their summed amount, spread across that product's
+    // lines. The order total is exact; if the same product is in the cart as
+    // two lines with different discounts, the per-line split on the Medusa
+    // order is proportional rather than identical to the POS receipt.
+    const lineDiscountByProduct = new Map<string, number>()
+    for (const item of items) {
+      const amount = Number(item.manual_discount)
+      if (!item.product_id || !Number.isFinite(amount) || amount <= 0) continue
+      lineDiscountByProduct.set(
+        item.product_id,
+        Math.round(
+          ((lineDiscountByProduct.get(item.product_id) ?? 0) + amount) * 100,
+        ) / 100,
+      )
+    }
+    let lineDiscountIndex = 0
+    for (const [productId, amount] of lineDiscountByProduct) {
+      lineDiscountIndex += 1
+      const lineCode =
+        `POS-LINE-${cartId.slice(-10)}-${lineDiscountIndex}`.toUpperCase()
+      const lineRes = await medusaServiceFetch('/admin/promotions', {
+        method: 'POST',
+        body: JSON.stringify({
+          code: lineCode,
+          type: 'standard',
+          is_automatic: false,
+          status: 'active',
+          application_method: {
+            type: 'fixed',
+            target_type: 'items',
+            allocation: 'across',
+            value: amount,
+            currency_code: 'gbp',
+            target_rules: [
+              {
+                attribute: 'items.product.id',
+                operator: 'eq',
+                values: [productId],
+              },
+            ],
+          },
+          campaign: {
+            name: lineCode,
+            campaign_identifier: `${lineCode}-${Date.now()}`,
+            budget: {
+              type: 'usage',
+              limit: 1,
+            },
+          },
+        }),
+      })
+      const lineData = await safeJson(lineRes, 'line discount setup')
+      if (!lineRes.ok || !lineData?.promotion?.id) {
+        console.error(
+          '[POS orders] line discount promotion create failed:',
+          lineRes.status,
+          lineData,
+        )
+        return NextResponse.json(
+          {
+            error: stepError('line discount setup', lineRes.status, lineData),
+          },
+          {
+            status: lineRes.status || 500,
+          },
+        )
+      }
+      tempPromotionIds.push(lineData.promotion.id)
+      promoCodesToApply.push(lineCode)
     }
     if (manual_discount_amount && Number(manual_discount_amount) > 0) {
       const tempCode = `POS-MANUAL-${cartId.slice(-12)}`.toUpperCase()
@@ -543,7 +616,7 @@ export async function POST(request: NextRequest) {
           },
         )
       }
-      tempManualDiscountPromotionId = createPromoData.promotion.id
+      tempPromotionIds.push(createPromoData.promotion.id)
       promoCodesToApply.push(tempCode)
     }
     if (promoCodesToApply.length > 0) {
@@ -1104,19 +1177,18 @@ export async function POST(request: NextRequest) {
     // place — it's already spent (usage limit 1) and the order's adjustment
     // records reference it, so deleting it post-completion could orphan
     // that reference.
-    if (tempManualDiscountPromotionId && !orderCompleted) {
-      try {
-        await medusaServiceFetch(
-          `/admin/promotions/${tempManualDiscountPromotionId}`,
-          {
+    if (!orderCompleted) {
+      for (const promotionId of tempPromotionIds) {
+        try {
+          await medusaServiceFetch(`/admin/promotions/${promotionId}`, {
             method: 'DELETE',
-          },
-        )
-      } catch (cleanupErr) {
-        console.warn(
-          '[POS orders] failed to clean up unused manual-discount promotion:',
-          cleanupErr,
-        )
+          })
+        } catch (cleanupErr) {
+          console.warn(
+            '[POS orders] failed to clean up unused manual-discount promotion:',
+            cleanupErr,
+          )
+        }
       }
     }
   }

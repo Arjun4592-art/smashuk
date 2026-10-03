@@ -922,13 +922,6 @@ export function ReceiptBody({
           <div>Receipt: {orderId}</div>
           <div
             style={{
-              marginTop: '1mm',
-            }}
-          >
-            Staff: {cashier}
-          </div>
-          <div
-            style={{
               marginTop: '2mm',
               fontWeight: 600,
             }}
@@ -985,7 +978,7 @@ export function ReceiptBody({
             color: '#8C9196',
           }}
         >
-          {orderId} · {cashier}
+          {orderId}
         </p>
       </div>
 

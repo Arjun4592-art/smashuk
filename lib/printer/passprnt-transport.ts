@@ -80,7 +80,12 @@ function buildReceiptHtml(data: ReceiptData, width: PaperWidth): string {
           <span class="name">${escapeHtml(item.name)} x${item.quantity}</span>
           <span class="amt">${fmt(item.lineTotal)}</span>
         </div>
-        ${variantLine}`
+        ${variantLine}
+        ${
+          item.discount && item.discount > 0
+            ? `<div class="item-row"><span class="name">&nbsp;&nbsp;Discount</span><span class="amt">-${fmt(item.discount)}</span></div>`
+            : ''
+        }`
     })
     .join('')
 
@@ -170,7 +175,6 @@ function buildReceiptHtml(data: ReceiptData, width: PaperWidth): string {
   <hr />
   <div class="center">${escapeHtml(data.dateStr)}, ${escapeHtml(data.timeStr)}</div>
   <div class="center">Receipt: ${escapeHtml(data.orderId)}</div>
-  <div class="center">Staff: ${escapeHtml(data.cashier)}</div>
   <br />
   <div class="center bold">${escapeHtml(data.footerLine1 ?? 'Thank you for shopping with us!')}</div>
   ${data.footerLine2 ? `<div class="center">${escapeHtml(data.footerLine2)}</div>` : ''}

@@ -20,6 +20,7 @@ export interface ReceiptLineItem {
   variantTitle?: string | null
   quantity: number
   lineTotal: number // already formatted amount for the line (price*qty - discount)
+  discount?: number // amount off this line, already taken off lineTotal
 }
 
 export interface ReceiptData {
@@ -271,6 +272,9 @@ export async function buildReceiptEscPos(
     if (item.variantTitle) {
       b.line(`  ${item.variantTitle}`)
     }
+    if (item.discount && item.discount > 0) {
+      b.row('  Discount', `-${fmt(item.discount)}`)
+    }
   }
   b.hr()
 
@@ -342,7 +346,6 @@ export async function buildReceiptEscPos(
   b.align('center')
   b.line(`${data.dateStr}, ${data.timeStr}`)
   b.line(`Receipt: ${data.orderId}`)
-  b.line(`Staff: ${data.cashier}`)
   b.feed(1)
   b.bold(true)
   b.line(data.footerLine1 ?? 'Thank you for shopping with us!')

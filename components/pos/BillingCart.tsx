@@ -14,6 +14,8 @@ interface Props {
   onIncrease: (id: string) => void
   onDecrease: (id: string) => void
   onRemove: (id: string) => void
+  /** Set the discount on one line: total amount off that line (all units). 0 clears it. */
+  onItemDiscount?: (id: string, amountOff: number) => void
   onDiscountPercentChange: (percent: number) => void
   onCharge: () => void
   onClear: () => void
@@ -32,12 +34,32 @@ export default function BillingCart({
   onIncrease,
   onDecrease,
   onRemove,
+  onItemDiscount,
   onDiscountPercentChange,
   onCharge,
   onClear,
 }: Props) {
   const due = amountDue ?? total
   const [percentInput, setPercentInput] = useState('')
+  // Per-line discount editor (one line open at a time)
+  const [editingLine, setEditingLine] = useState<string | null>(null)
+  const [discMode, setDiscMode] = useState<'amount' | 'percent'>('amount')
+  const [discInput, setDiscInput] = useState('')
+  const openLineDiscount = (lineId: string, current?: number) => {
+    setEditingLine(lineId)
+    setDiscMode('amount')
+    setDiscInput(current && current > 0 ? String(current) : '')
+  }
+  const applyLineDiscount = (lineId: string, gross: number) => {
+    const v = parseFloat(discInput)
+    let off = 0
+    if (Number.isFinite(v) && v > 0) {
+      off = discMode === 'percent' ? (gross * Math.min(v, 100)) / 100 : v
+    }
+    off = Math.round(Math.min(off, gross) * 100) / 100
+    onItemDiscount?.(lineId, off)
+    setEditingLine(null)
+  }
   return (
     <div
       className='flex flex-col h-full'
@@ -148,140 +170,257 @@ export default function BillingCart({
               return (
                 <div
                   key={lineId}
-                  className='flex items-center gap-2 py-2.5'
                   style={{
                     borderBottom: '1px solid #F6F6F7',
                   }}
                 >
-                  {}
-                  <div className='flex-1 min-w-0'>
-                    <p
-                      className='text-xs font-medium truncate'
-                      style={{
-                        color: '#202223',
-                      }}
-                    >
-                      {item.name}
-                    </p>
-                    <div className='flex items-center gap-1.5 flex-wrap'>
-                      {}
-                      {item.variantTitle && (
-                        <span
-                          className='text-[10px] font-semibold px-1.5 py-[1px] rounded shrink-0'
-                          style={{
-                            background: '#F2F7F5',
-                            color: '#008060',
-                          }}
-                        >
-                          {item.variantTitle}
-                        </span>
-                      )}
+                  <div className='flex items-center gap-2 py-2.5'>
+                    {}
+                    <div className='flex-1 min-w-0'>
                       <p
-                        className='text-[11px]'
+                        className='text-xs font-medium truncate'
                         style={{
-                          color: '#8C9196',
+                          color: '#202223',
                         }}
                       >
-                        {fmt(item.price)} each
+                        {item.name}
                       </p>
+                      <div className='flex items-center gap-1.5 flex-wrap'>
+                        {}
+                        {item.variantTitle && (
+                          <span
+                            className='text-[10px] font-semibold px-1.5 py-[1px] rounded shrink-0'
+                            style={{
+                              background: '#F2F7F5',
+                              color: '#008060',
+                            }}
+                          >
+                            {item.variantTitle}
+                          </span>
+                        )}
+                        <p
+                          className='text-[11px]'
+                          style={{
+                            color: '#8C9196',
+                          }}
+                        >
+                          {fmt(item.price)} each
+                        </p>
+                        {onItemDiscount && (
+                          <button
+                            type='button'
+                            onClick={() =>
+                              editingLine === lineId
+                                ? setEditingLine(null)
+                                : openLineDiscount(lineId, item.discount)
+                            }
+                            className='text-[10px] font-semibold hover:underline'
+                            style={{
+                              color: '#008060',
+                            }}
+                          >
+                            {item.discount && item.discount > 0
+                              ? `Discount −${fmt(item.discount)}`
+                              : 'Add discount'}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  {}
-                  <div
-                    className='flex items-center rounded overflow-hidden shrink-0'
-                    style={{
-                      border: '1px solid #E1E3E5',
-                    }}
-                  >
-                    <button
-                      onClick={() => onDecrease(lineId)}
-                      className='w-6 h-6 flex items-center justify-center transition-colors hover:bg-[#F6F6F7]'
+                    {}
+                    <div
+                      className='flex items-center rounded overflow-hidden shrink-0'
                       style={{
-                        color: '#6D7175',
+                        border: '1px solid #E1E3E5',
                       }}
                     >
-                      <svg
-                        width='10'
-                        height='10'
-                        viewBox='0 0 24 24'
-                        fill='none'
-                        stroke='currentColor'
-                        strokeWidth='2.5'
-                        strokeLinecap='round'
+                      <button
+                        onClick={() => onDecrease(lineId)}
+                        className='w-6 h-6 flex items-center justify-center transition-colors hover:bg-[#F6F6F7]'
+                        style={{
+                          color: '#6D7175',
+                        }}
                       >
-                        <line x1='5' y1='12' x2='19' y2='12' />
-                      </svg>
-                    </button>
-                    <span
-                      className='w-7 h-6 flex items-center justify-center text-xs font-semibold'
+                        <svg
+                          width='10'
+                          height='10'
+                          viewBox='0 0 24 24'
+                          fill='none'
+                          stroke='currentColor'
+                          strokeWidth='2.5'
+                          strokeLinecap='round'
+                        >
+                          <line x1='5' y1='12' x2='19' y2='12' />
+                        </svg>
+                      </button>
+                      <span
+                        className='w-7 h-6 flex items-center justify-center text-xs font-semibold'
+                        style={{
+                          borderLeft: '1px solid #E1E3E5',
+                          borderRight: '1px solid #E1E3E5',
+                          color: '#202223',
+                        }}
+                      >
+                        {item.quantity}
+                      </span>
+                      <button
+                        onClick={() => onIncrease(lineId)}
+                        className='w-6 h-6 flex items-center justify-center transition-colors hover:bg-[#F6F6F7]'
+                        style={{
+                          color: '#6D7175',
+                        }}
+                      >
+                        <svg
+                          width='10'
+                          height='10'
+                          viewBox='0 0 24 24'
+                          fill='none'
+                          stroke='currentColor'
+                          strokeWidth='2.5'
+                          strokeLinecap='round'
+                        >
+                          <line x1='12' y1='5' x2='12' y2='19' />
+                          <line x1='5' y1='12' x2='19' y2='12' />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {}
+                    <div
+                      className='text-xs font-semibold shrink-0 min-w-[52px] text-right'
                       style={{
-                        borderLeft: '1px solid #E1E3E5',
-                        borderRight: '1px solid #E1E3E5',
                         color: '#202223',
                       }}
                     >
-                      {item.quantity}
-                    </span>
+                      {item.discount && item.discount > 0 ? (
+                        <>
+                          <div
+                            className='text-[10px] font-normal'
+                            style={{
+                              color: '#8C9196',
+                              textDecoration: 'line-through',
+                            }}
+                          >
+                            {fmt(item.price * item.quantity)}
+                          </div>
+                          <div>
+                            {fmt(item.price * item.quantity - item.discount)}
+                          </div>
+                        </>
+                      ) : (
+                        fmt(item.price * item.quantity)
+                      )}
+                    </div>
+
+                    {}
                     <button
-                      onClick={() => onIncrease(lineId)}
-                      className='w-6 h-6 flex items-center justify-center transition-colors hover:bg-[#F6F6F7]'
+                      onClick={() => onRemove(lineId)}
+                      className='shrink-0 p-1 rounded transition-colors hover:bg-[#FFF4F4]'
                       style={{
-                        color: '#6D7175',
+                        color: '#8C9196',
                       }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.color = '#D82C0D')
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.color = '#8C9196')
+                      }
                     >
                       <svg
-                        width='10'
-                        height='10'
+                        width='13'
+                        height='13'
                         viewBox='0 0 24 24'
                         fill='none'
                         stroke='currentColor'
-                        strokeWidth='2.5'
+                        strokeWidth='2'
                         strokeLinecap='round'
                       >
-                        <line x1='12' y1='5' x2='12' y2='19' />
-                        <line x1='5' y1='12' x2='19' y2='12' />
+                        <line x1='18' y1='6' x2='6' y2='18' />
+                        <line x1='6' y1='6' x2='18' y2='18' />
                       </svg>
                     </button>
                   </div>
 
-                  {}
-                  <div
-                    className='text-xs font-semibold shrink-0 min-w-[52px] text-right'
-                    style={{
-                      color: '#202223',
-                    }}
-                  >
-                    {fmt(item.price * item.quantity)}
-                  </div>
-
-                  {}
-                  <button
-                    onClick={() => onRemove(lineId)}
-                    className='shrink-0 p-1 rounded transition-colors hover:bg-[#FFF4F4]'
-                    style={{
-                      color: '#8C9196',
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.color = '#D82C0D')
-                    }
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.color = '#8C9196')
-                    }
-                  >
-                    <svg
-                      width='13'
-                      height='13'
-                      viewBox='0 0 24 24'
-                      fill='none'
-                      stroke='currentColor'
-                      strokeWidth='2'
-                      strokeLinecap='round'
-                    >
-                      <line x1='18' y1='6' x2='6' y2='18' />
-                      <line x1='6' y1='6' x2='18' y2='18' />
-                    </svg>
-                  </button>
+                  {editingLine === lineId && onItemDiscount && (
+                    <div className='flex items-center gap-1.5 pb-2.5 flex-wrap'>
+                      <div
+                        className='flex rounded overflow-hidden shrink-0'
+                        style={{
+                          border: '1px solid #E1E3E5',
+                        }}
+                      >
+                        {(['amount', 'percent'] as const).map((m) => (
+                          <button
+                            key={m}
+                            type='button'
+                            onClick={() => setDiscMode(m)}
+                            className='px-2.5 h-7 text-[11px] font-semibold'
+                            style={{
+                              background:
+                                discMode === m ? '#008060' : '#FFFFFF',
+                              color: discMode === m ? '#FFFFFF' : '#6D7175',
+                            }}
+                          >
+                            {m === 'amount' ? CURRENCY_SYMBOL : '%'}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type='number'
+                        inputMode='decimal'
+                        min='0'
+                        step='0.01'
+                        autoFocus
+                        value={discInput}
+                        onChange={(e) => setDiscInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter')
+                            applyLineDiscount(
+                              lineId,
+                              item.price * item.quantity,
+                            )
+                          if (e.key === 'Escape') setEditingLine(null)
+                        }}
+                        placeholder={
+                          discMode === 'amount'
+                            ? 'Amount off line'
+                            : 'Percent off'
+                        }
+                        className='w-28 h-7 px-2 text-xs rounded outline-none'
+                        style={{
+                          border: '1px solid #E1E3E5',
+                          color: '#202223',
+                        }}
+                      />
+                      <button
+                        type='button'
+                        onClick={() =>
+                          applyLineDiscount(lineId, item.price * item.quantity)
+                        }
+                        className='h-7 px-3 rounded text-[11px] font-semibold text-white'
+                        style={{
+                          background: '#008060',
+                        }}
+                      >
+                        Apply
+                      </button>
+                      {item.discount && item.discount > 0 ? (
+                        <button
+                          type='button'
+                          onClick={() => {
+                            onItemDiscount(lineId, 0)
+                            setEditingLine(null)
+                          }}
+                          className='h-7 px-2 text-[11px] font-semibold'
+                          style={{
+                            color: '#D82C0D',
+                          }}
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               )
             })}

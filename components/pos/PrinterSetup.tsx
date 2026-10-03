@@ -163,6 +163,7 @@ export default function PrinterSetup() {
     serialHandle,
     lanAgentHandle,
     openDrawerOnPrint,
+    shippingLabelViaPassPRNT,
     labelWidthMm,
     labelHeightMm,
     setConnectionType,
@@ -173,6 +174,7 @@ export default function PrinterSetup() {
     setSerialHandle,
     setLanAgentHandle,
     setOpenDrawerOnPrint,
+    setShippingLabelViaPassPRNT,
     disconnect,
   } = usePrinterStore()
   const [busy, setBusy] = useState(false)
@@ -669,6 +671,36 @@ export default function PrinterSetup() {
               className='absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-200'
               style={{
                 left: openDrawerOnPrint ? 'calc(100% - 20px)' : '4px',
+              }}
+            />
+          </button>
+        </div>
+
+        <div className='flex items-center justify-between'>
+          <div>
+            <p className='text-sm font-medium text-gray-800'>
+              Shipping labels via PassPRNT
+            </p>
+            <p className='text-xs text-gray-500 mt-0.5'>
+              iPad / iPhone only. Off = the normal iOS print sheet (use this for
+              a 4×6 label printer)
+            </p>
+          </div>
+          <button
+            onClick={() =>
+              setShippingLabelViaPassPRNT(!shippingLabelViaPassPRNT)
+            }
+            className='w-11 h-6 rounded-full transition-colors duration-200 relative shrink-0'
+            style={{
+              background: shippingLabelViaPassPRNT ? '#008060' : '#D1D5DB',
+            }}
+            role='switch'
+            aria-checked={shippingLabelViaPassPRNT}
+          >
+            <span
+              className='absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-200'
+              style={{
+                left: shippingLabelViaPassPRNT ? 'calc(100% - 20px)' : '4px',
               }}
             />
           </button>

@@ -166,14 +166,14 @@ export function buildReceiptLabelHtml(
         <div class="small">${esc(data.addressLine2)}</div>
         <div class="small">${esc(data.phone)}</div></div>`
 
-  const meta = `<div class="row small"><span class="b">Receipt #${esc(data.orderId)}</span><span>${esc(data.dateStr)}, ${esc(data.timeStr)}</span></div>
-    <div class="small">Staff: ${esc(data.cashier)}</div>`
+  const meta = `<div class="row small"><span class="b">Receipt #${esc(data.orderId)}</span><span>${esc(data.dateStr)}, ${esc(data.timeStr)}</span></div>`
 
   const items = data.items
     .map(
       (i) => `<div class="item">
         <div class="row"><span class="nm">${esc(i.name)} ×${i.quantity}</span><span class="amt">${fmt(i.lineTotal)}</span></div>
         ${i.variantTitle ? `<div class="sub">${esc(i.variantTitle)}</div>` : ''}
+        ${i.discount && i.discount > 0 ? `<div class="sub">Discount -${fmt(i.discount)}</div>` : ''}
       </div>`,
     )
     .join('')

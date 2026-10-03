@@ -126,6 +126,7 @@ export default function BillingPage() {
     addItem,
     removeItem,
     updateQuantity,
+    setItemDiscount,
     setPaymentMethod,
     clearCart,
     voidSale,
@@ -572,6 +573,14 @@ export default function BillingPage() {
     },
     [removeItem],
   )
+  // amountOff = total £ off this line (all units), 0 clears it.
+  const handleItemDiscount = useCallback(
+    (lineId: string, amountOff: number) => {
+      const item = findByLineId(lineId)
+      if (item) setItemDiscount(item.product.id, amountOff, item.variant?.id)
+    },
+    [setItemDiscount],
+  )
   const handleOpenReturn = async () => {
     try {
       const { fetchPOSOrderHistory } = await import('@/lib/api/pos')
@@ -620,6 +629,8 @@ export default function BillingPage() {
             variant_id: variantId,
             quantity: i.quantity,
             product_id: (i.product as any).id,
+            manual_discount:
+              i.discount && i.discount > 0 ? i.discount : undefined,
           }
         })
         const orderResult = await createPOSOrder({
@@ -729,6 +740,7 @@ export default function BillingPage() {
         variantTitle: i.variantTitle,
         quantity: i.quantity,
         lineTotal: i.price * i.quantity - (i.discount ?? 0),
+        discount: i.discount && i.discount > 0 ? i.discount : undefined,
       })),
       subtotal,
       discountAmount: discountTotal,
@@ -1158,6 +1170,7 @@ export default function BillingPage() {
               onIncrease={handleIncrease}
               onDecrease={handleDecrease}
               onRemove={handleRemove}
+              onItemDiscount={handleItemDiscount}
               onDiscountPercentChange={(percent) =>
                 usePOSStore.getState().applyPercentageDiscount(percent)
               }
@@ -1452,6 +1465,7 @@ export default function BillingPage() {
             onIncrease={handleIncrease}
             onDecrease={handleDecrease}
             onRemove={handleRemove}
+            onItemDiscount={handleItemDiscount}
             onDiscountPercentChange={(percent) =>
               usePOSStore.getState().applyPercentageDiscount(percent)
             }
