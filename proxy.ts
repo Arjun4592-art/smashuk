@@ -213,6 +213,17 @@ export function proxy(request: NextRequest) {
     }
   }
   if (pathname.startsWith('/api/pos')) {
+    // Star PassPRNT is a separate native app with no session cookie, so it
+    // must be able to fetch the single-use, unguessable print token without
+    // logging in (otherwise it gets a 401 and shows "Error E016: Failed to
+    // download print data"). Only GET/HEAD are opened; the POST that creates
+    // the token still requires a POS/dashboard session (checked in the route).
+    if (
+      pathname === '/api/pos/print/receipt-html' &&
+      (request.method === 'GET' || request.method === 'HEAD')
+    ) {
+      return NextResponse.next()
+    }
     if (pathname === '/api/pos/staff') {
       return NextResponse.next()
     }
