@@ -1344,10 +1344,25 @@ export default function ProductDetailClient({
     typeof selectedVariant?.inventory_quantity === 'number'
       ? selectedVariant.inventory_quantity > 0
       : product.inStock
+  // The dashboard's "Variant Media" picker saves the chosen product images in
+  // the variant's metadata (`variant_images`), not in Medusa's native
+  // variant images — so read those first. Only images that still exist on the
+  // product count (a deleted image must not leave a broken thumbnail). With
+  // nothing picked, the variant shows the product's normal images.
+  const variantPickedImages: string[] = Array.isArray(
+    selectedVariant?.metadata?.variant_images,
+  )
+    ? (selectedVariant.metadata.variant_images as unknown[]).filter(
+        (u): u is string =>
+          typeof u === 'string' && (product.images ?? []).includes(u),
+      )
+    : []
   const galleryImages: string[] =
-    selectedVariant?.images?.length > 0
-      ? selectedVariant.images.map((img: any) => img.url)
-      : product.images
+    variantPickedImages.length > 0
+      ? variantPickedImages
+      : selectedVariant?.images?.length > 0
+        ? selectedVariant.images.map((img: any) => img.url)
+        : product.images
   // Each variant can carry its own price (Variants tab in the dashboard
   // overrides price per size/colour) — `product.price`/`originalPrice` are
   // only ever the FIRST variant's price, fixed at the server. Display must

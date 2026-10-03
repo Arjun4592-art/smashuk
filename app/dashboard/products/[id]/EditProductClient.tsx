@@ -10,6 +10,7 @@ import {
   deleteProductVariant,
   upsertProductTags,
   fetchProductOptionLinks,
+  updateProductVariant,
 } from '@/lib/api/dashboard'
 import { inferSellingChannel } from '@/lib/api/selling-channels-client'
 import { toast } from 'sonner'
@@ -759,9 +760,75 @@ export default function EditProductClient({
       d: defaultVariantId,
     })
   const variantsBaselineRef = useRef<string | null>(null)
+  // Stock each existing variant had when the page loaded (or was last saved),
+  // by Medusa variant id. Only variants whose stock differs are sent on Save,
+  // so an edit that doesn't touch stock never triggers the slow inventory sync.
+  const variantStockBaselineRef = useRef<Map<string, string>>(new Map())
+  // Same idea for everything else about a variant (options, sku, price,
+  // images ...): its state as loaded / last saved, by Medusa variant id, plus
+  // the product-level fields that feed into every variant's payload.
+  const variantStateBaselineRef = useRef<Map<string, string>>(new Map())
+  const variantGlobalBaselineRef = useRef<string | null>(null)
+  const variantStateSig = (v: Variant) => {
+    const { stock: _s, ...rest } = v
+    return JSON.stringify(rest)
+  }
+  const globalVariantSig = () =>
+    JSON.stringify([
+      form.sku,
+      form.barcode,
+      form.ean,
+      form.price,
+      form.weight,
+      form.trackInventory,
+    ])
+  const snapshotVariantStocks = () => {
+    variantStockBaselineRef.current = new Map(
+      variants
+        .filter((v) => !!v.medusaId)
+        .map((v) => [v.medusaId as string, v.stock]),
+    )
+    variantStateBaselineRef.current = new Map(
+      variants
+        .filter((v) => !!v.medusaId)
+        .map((v) => [v.medusaId as string, variantStateSig(v)]),
+    )
+    variantGlobalBaselineRef.current = globalVariantSig()
+  }
+  // When only a FEW existing variants changed, returns just those so Save can
+  // update them one by one instead of re-sending (and Medusa re-processing)
+  // every variant. Returns null — meaning "use the normal full update" — when
+  // all variants changed, nothing structural can be trusted (variants added or
+  // deleted, product-level fields that every variant inherits changed), or
+  // too many changed for parallel single updates to be worth it.
+  const planChangedVariants = (allVariants: any[] | undefined) => {
+    if (!allVariants || allVariants.length < 2) return null
+    const base = variantStateBaselineRef.current
+    if (base.size !== allVariants.length) return null
+    if (variantGlobalBaselineRef.current !== globalVariantSig()) return null
+    if (
+      variantsToDeleteRef.current.length > 0 ||
+      deletedBaseVariantIdRef.current ||
+      deletedDefaultVariantRef.current
+    )
+      return null
+    if (allVariants.some((v) => !v?.id || !base.has(v.id))) return null
+    const changed = allVariants.filter((v) => {
+      const state = variants.find((x) => x.medusaId === v.id)
+      return !state || variantStateSig(state) !== base.get(v.id)
+    })
+    if (
+      changed.length === 0 ||
+      changed.length === allVariants.length ||
+      changed.length > 4
+    )
+      return null
+    return changed
+  }
   useEffect(() => {
     if (!loading && variantsBaselineRef.current === null) {
       variantsBaselineRef.current = variantsSignature()
+      snapshotVariantStocks()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading])
@@ -826,12 +893,11 @@ export default function EditProductClient({
                 color_code: v.colorCode,
               }
             : undefined,
-          images:
-            v.imageUrls.length > 0
-              ? v.imageUrls.map((url) => ({
-                  url,
-                }))
-              : undefined,
+          // Always sent (even empty): leaving it out meant un-picking every
+          // image never reached the server, so the old picks stayed saved.
+          images: v.imageUrls.map((url) => ({
+            url,
+          })),
         }
       })
     const allVariants = hasExtraVariants ? extraVariants : [baseVariant]
@@ -914,6 +980,13 @@ export default function EditProductClient({
         ? Object.fromEntries(
             variants
               .filter((v) => v.stock && filledOptions(v).length > 0)
+              // Existing variants whose stock is unchanged are left out; new
+              // variants (no Medusa id yet) are always included.
+              .filter(
+                (v) =>
+                  !v.medusaId ||
+                  variantStockBaselineRef.current.get(v.medusaId) !== v.stock,
+              )
               .map((v) => [
                 sortedFilled(v)
                   .map((o) => o.value.trim())
@@ -1432,6 +1505,27 @@ export default function EditProductClient({
           : []
       const payload = buildPayload(saveStatus)
       payload.tags = skipTags ? undefined : tagIds.length > 0 ? tagIds : []
+      // Only some variants changed? Update just those first, then send the
+      // product without its variants. If a single update fails for any
+      // reason, fall back to sending every variant like before.
+      const changedVariants = planChangedVariants(payload.variants)
+      if (changedVariants) {
+        const fullVariants = payload.variants
+        try {
+          await Promise.all(
+            changedVariants.map(({ id: variantId, ...body }: any) =>
+              updateProductVariant(id, variantId, body),
+            ),
+          )
+          payload.variants = undefined
+        } catch (variantErr) {
+          console.warn(
+            '[save] single-variant update failed, sending all variants instead',
+            variantErr,
+          )
+          payload.variants = fullVariants
+        }
+      }
       let updateResult: any
       try {
         updateResult = await updateProduct(id, payload)
@@ -1446,6 +1540,7 @@ export default function EditProductClient({
         updateResult = await updateProduct(id, payload)
       }
       variantsBaselineRef.current = variantsSignature()
+      snapshotVariantStocks()
       if (hadExtraVariants) {
         setDefaultOption(null)
       }

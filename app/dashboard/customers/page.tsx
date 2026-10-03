@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Papa from 'papaparse'
 import { toast } from 'sonner'
@@ -260,6 +260,70 @@ function EmptyCustomersIcon() {
     </svg>
   )
 }
+function BulkDeleteCustomersModal({
+  count,
+  names,
+  withOrders,
+  working,
+  onConfirm,
+  onCancel,
+}: {
+  count: number
+  names: string[]
+  withOrders: number
+  working: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const extra = count - names.length
+  return (
+    <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
+      <div
+        className='absolute inset-0 bg-black/40 backdrop-blur-sm'
+        onClick={() => !working && onCancel()}
+      />
+      <div className='relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6'>
+        <h3 className='text-[16px] font-semibold text-[#202223]'>
+          Delete {count} customer{count !== 1 ? 's' : ''}?
+        </h3>
+        <p className='text-[12.5px] text-[#6D7175] mt-0.5 mb-4'>
+          This action cannot be undone
+        </p>
+        <ul className='text-[13px] text-[#202223] mb-4 space-y-1 list-disc pl-5'>
+          {names.map((n, i) => (
+            <li key={i} className='truncate'>
+              {n}
+            </li>
+          ))}
+          {extra > 0 && <li className='text-[#6D7175]'>and {extra} more…</li>}
+        </ul>
+        {withOrders > 0 && (
+          <p className='text-[12.5px] text-[#B45309] bg-[#FFF7E6] border border-[#FFE0A3] rounded-lg px-3 py-2 mb-4'>
+            {withOrders} of the selected customer
+            {withOrders !== 1 ? 's have' : ' has'} placed orders. Double-check
+            the list before deleting.
+          </p>
+        )}
+        <div className='flex items-center gap-3'>
+          <button
+            onClick={onCancel}
+            disabled={working}
+            className='flex-1 py-2.5 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg transition-colors disabled:opacity-50 cursor-pointer'
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={working}
+            className='flex-1 py-2.5 bg-[#D82C0D] hover:bg-[#C02009] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer border-none'
+          >
+            {working ? 'Deleting…' : `Delete ${count}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 function StatCard({
   label,
   value,
@@ -440,6 +504,96 @@ function CustomersContent() {
   })
   const totalPages = Math.ceil(filtered.length / pageSize)
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
+  // ---- bulk selection / delete -------------------------------------------
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  // A selection that is no longer visible must never be deleted by accident,
+  // so it is cleared whenever the search or status filter changes.
+  useEffect(() => {
+    setSelectedIds([])
+  }, [debouncedSearch, statusFilter])
+  const toggleSelect = (cid: string) =>
+    setSelectedIds((prev) =>
+      prev.includes(cid) ? prev.filter((i) => i !== cid) : [...prev, cid],
+    )
+  const pageAllSelected =
+    paginated.length > 0 &&
+    paginated.every((c: (typeof customers)[number]) =>
+      selectedIds.includes(c.id),
+    )
+  const toggleAllOnPage = () =>
+    setSelectedIds((prev) =>
+      pageAllSelected
+        ? prev.filter(
+            (i) =>
+              !paginated.some((c: (typeof customers)[number]) => c.id === i),
+          )
+        : Array.from(
+            new Set([
+              ...prev,
+              ...paginated.map((c: (typeof customers)[number]) => c.id),
+            ]),
+          ),
+    )
+  const selectAllMatching = () =>
+    setSelectedIds(filtered.map((c: (typeof customers)[number]) => c.id))
+  const selectedCustomers = customers.filter((c: (typeof customers)[number]) =>
+    selectedIds.includes(c.id),
+  )
+  // Deletes in chunks of 25 (the API's limit) and shows progress. Customers
+  // that failed stay selected so the delete can simply be retried.
+  const runBulkDelete = async () => {
+    if (bulkBusy || selectedIds.length === 0) return
+    setBulkBusy(true)
+    const ids = [...selectedIds]
+    const toastId = toast.loading(`Deleting… 0 / ${ids.length}`)
+    const okIds: string[] = []
+    const failed: { id: string; error: string }[] = []
+    try {
+      const CHUNK = 25
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK)
+        try {
+          const res = await fetch('/api/admin/customers/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ action: 'delete', ids: chunk }),
+          })
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`)
+          okIds.push(...(data.ok ?? []))
+          failed.push(...(data.failed ?? []))
+        } catch (err: any) {
+          const raw = String(err?.message ?? 'Request failed')
+          const msg = /failed to fetch|networkerror|load failed/i.test(raw)
+            ? 'Connection to the server dropped (timeout). Try again.'
+            : raw
+          chunk.forEach((cid) => failed.push({ id: cid, error: msg }))
+        }
+        toast.loading(
+          `Deleting… ${Math.min(i + CHUNK, ids.length)} / ${ids.length}`,
+          { id: toastId },
+        )
+      }
+      const noun = `customer${okIds.length !== 1 ? 's' : ''}`
+      if (failed.length === 0) {
+        toast.success(`Deleted ${okIds.length} ${noun}`, { id: toastId })
+      } else {
+        toast.error(
+          `${okIds.length} deleted, ${failed.length} failed: ${failed[0].error}`,
+          { id: toastId, duration: 8000 },
+        )
+      }
+      setBulkDeleteOpen(false)
+      setSelectedIds(failed.map((f) => f.id))
+      setPage(1)
+      refetch()
+    } finally {
+      setBulkBusy(false)
+    }
+  }
   const totalRevenue = customers.reduce(
     (s: number, c: (typeof customers)[number]) => s + c.totalSpent,
     0,
@@ -660,11 +814,72 @@ function CustomersContent() {
               ))}
             </div>
 
+            {selectedIds.length > 0 && (
+              <div className='flex items-center gap-3 px-4 py-2.5 bg-[#008060]/8 border-b border-[#008060]/20 flex-wrap'>
+                <span className='text-[13px] font-medium text-[#008060]'>
+                  {selectedIds.length} selected
+                </span>
+                {pageAllSelected && filtered.length > selectedIds.length && (
+                  <button
+                    onClick={selectAllMatching}
+                    disabled={bulkBusy}
+                    className='text-[12.5px] font-medium text-[#008060] underline bg-transparent border-none cursor-pointer disabled:opacity-50'
+                  >
+                    Select all {filtered.length} customers
+                  </button>
+                )}
+                <div className='flex items-center gap-2 ml-2'>
+                  <button
+                    onClick={() => setBulkDeleteOpen(true)}
+                    disabled={bulkBusy}
+                    className='px-3 py-1.5 text-[12px] font-medium rounded-lg border border-[#D82C0D]/30 text-[#D82C0D] hover:bg-[#D82C0D]/5 bg-transparent cursor-pointer transition-colors disabled:opacity-50'
+                  >
+                    Delete
+                  </button>
+                </div>
+                <button
+                  className='ml-auto text-[#6D7175] hover:text-[#202223] bg-transparent border-none cursor-pointer text-lg'
+                  onClick={() => setSelectedIds([])}
+                  disabled={bulkBusy}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            {bulkDeleteOpen && (
+              <BulkDeleteCustomersModal
+                count={selectedIds.length}
+                names={selectedCustomers
+                  .slice(0, 5)
+                  .map(
+                    (c: (typeof customers)[number]) => `${c.name} (${c.email})`,
+                  )}
+                withOrders={
+                  selectedCustomers.filter(
+                    (c: (typeof customers)[number]) => c.totalOrders > 0,
+                  ).length
+                }
+                working={bulkBusy}
+                onConfirm={runBulkDelete}
+                onCancel={() => setBulkDeleteOpen(false)}
+              />
+            )}
+
             {}
             <div className='overflow-x-auto'>
               <table className='w-full'>
                 <thead>
                   <tr className='border-b border-[#E1E3E5] bg-[#FAFAFA]'>
+                    <th className='px-4 py-3 w-10'>
+                      <input
+                        type='checkbox'
+                        aria-label='Select all customers on this page'
+                        checked={pageAllSelected}
+                        onChange={toggleAllOnPage}
+                        disabled={loading || paginated.length === 0}
+                        className='w-4 h-4 rounded accent-[#008060] cursor-pointer'
+                      />
+                    </th>
                     {[
                       'Customer',
                       'Location',
@@ -688,6 +903,9 @@ function CustomersContent() {
                     [...Array(8)].map((_, i) => (
                       <tr key={i} className='animate-pulse'>
                         <td className='px-4 py-3.5'>
+                          <div className='w-4 h-4 bg-[#F1F1F1] rounded' />
+                        </td>
+                        <td className='px-4 py-3.5'>
                           <div className='flex items-center gap-3'>
                             <div className='w-8 h-8 bg-[#F1F1F1] rounded-full shrink-0' />
                             <div className='space-y-2'>
@@ -707,7 +925,7 @@ function CustomersContent() {
                     ))
                   ) : paginated.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className='px-4 py-16 text-center'>
+                      <td colSpan={8} className='px-4 py-16 text-center'>
                         <div className='flex flex-col items-center gap-3'>
                           <EmptyCustomersIcon />
                           <div>
@@ -725,8 +943,17 @@ function CustomersContent() {
                     paginated.map((customer: (typeof customers)[number]) => (
                       <tr
                         key={customer.id}
-                        className='hover:bg-[#FAFAFA] transition-colors duration-100 group'
+                        className={`hover:bg-[#FAFAFA] transition-colors duration-100 group ${selectedIds.includes(customer.id) ? 'bg-[#F2F7F5]' : ''}`}
                       >
+                        <td className='px-4 py-3.5'>
+                          <input
+                            type='checkbox'
+                            aria-label={`Select ${customer.name}`}
+                            checked={selectedIds.includes(customer.id)}
+                            onChange={() => toggleSelect(customer.id)}
+                            className='w-4 h-4 rounded accent-[#008060] cursor-pointer'
+                          />
+                        </td>
                         {}
                         <td className='px-4 py-3.5'>
                           <div className='flex items-center gap-3'>

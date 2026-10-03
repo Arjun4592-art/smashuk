@@ -211,15 +211,63 @@ export async function PATCH(
     }
     if (res.ok && data.product?.id) {
       try {
-        const locationId = await locationPromise
-        if (!locationId) {
+        // Inventory sync starts with ONE deep read of the product (all
+        // variants + inventory items + stock levels). On a 12-variant product
+        // that single read took ~63s on this Medusa, even when every stock
+        // value was already correct. So only sync when something stock-related
+        // can actually have changed: the form sent a changed variant stock
+        // (the dashboard now sends only those), the single Stock field was
+        // edited, or a variant without an id (brand new) was sent and needs
+        // its inventory item + level created.
+        const hasNewVariant =
+          Array.isArray(body.variants) && body.variants.some((v: any) => !v?.id)
+        const needsInventorySync =
+          Object.keys(variantStocks).length > 0 || stockDirty || hasNewVariant
+        if (!needsInventorySync) {
+          lap('inventory sync skipped (no stock change)')
+        }
+        const locationId = needsInventorySync ? await locationPromise : null
+        if (!needsInventorySync) {
+          // nothing to do
+        } else if (!locationId) {
           console.warn(
             '[PATCH product] No stock location found — inventory not set.',
           )
         } else {
           // stockQty is a fallback default when a variant has no
           // variant-specific quantity in the payload (e.g. single-variant edits).
-          lap('inventory sync start')
+          // Only some variants' stock changed (the dashboard sends just
+          // those, keyed by variant title): read just those variants.
+          let onlyVariantIds: string[] | undefined
+          if (
+            !stockDirty &&
+            !hasNewVariant &&
+            Object.keys(variantStocks).length > 0
+          ) {
+            const respVariants: { id: string; title?: string }[] =
+              data.product.variants ?? []
+            const ids: string[] = []
+            let allMatched = true
+            for (const key of Object.keys(variantStocks)) {
+              const hit = respVariants.find(
+                (v) =>
+                  (v.title ?? '') === key ||
+                  (v.title ?? '').trim().toLowerCase() ===
+                    key.trim().toLowerCase(),
+              )
+              if (hit) ids.push(hit.id)
+              else {
+                allMatched = false
+                break
+              }
+            }
+            if (allMatched && ids.length > 0) {
+              onlyVariantIds = Array.from(new Set(ids))
+            }
+          }
+          lap(
+            `inventory sync start (${onlyVariantIds ? `${onlyVariantIds.length} variant(s)` : 'all variants'})`,
+          )
           await syncVariantInventory(
             data.product.id,
             authorization,
@@ -229,6 +277,7 @@ export async function PATCH(
             {
               applyDefaultToExisting:
                 stockDirty && Object.keys(variantStocks).length === 0,
+              onlyVariantIds,
             },
           )
         }

@@ -599,6 +599,20 @@ export async function upsertProductTags(values: string[]): Promise<
     id,
   }))
 }
+// Updates ONE existing variant (price / sku / options / images ...) without
+// re-sending the whole product, so Medusa does not re-process every other
+// variant. `data` is the same per-variant object the product update takes.
+export async function updateProductVariant(
+  productId: string,
+  variantId: string,
+  data: Record<string, any>,
+) {
+  return mutate(
+    `/api/admin/products/${productId}/variants/${variantId}`,
+    'POST',
+    data,
+  )
+}
 export async function deleteProductVariant(
   productId: string,
   variantId: string,

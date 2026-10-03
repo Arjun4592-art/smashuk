@@ -198,22 +198,76 @@ export async function syncVariantInventory(
      * quantity, and that lookup is one extra Medusa call per variant.
      */
     skipSharedCheck?: boolean
+    /**
+     * Read ONLY these variants (one small request each) instead of the whole
+     * product with every variant's inventory levels — that deep read took ~63s
+     * on a 12-variant product. If any of these reads fails, or a variant comes
+     * back without inventory data, it falls back to the full read, so the
+     * worst case is the old behaviour.
+     */
+    onlyVariantIds?: string[]
   } = {},
 ): Promise<SyncResult> {
   const result: SyncResult = { updated: 0, failed: 0 }
   const syncStartedAt = Date.now()
   let skippedUnchanged = 0
   let sharedChecks = 0
-  const res = await fetch(
-    `${MEDUSA_URL}/admin/products/${productId}?fields=*variants,*variants.inventory_items,*variants.inventory_items.inventory.location_levels`,
-    { headers: { Authorization: authorization } },
-  )
-  if (!res.ok) {
-    result.error = `Could not read product (HTTP ${res.status})`
-    return result
+  let readMs = 0
+  let loadedVariants: SyncVariant[] | null = null
+  let readMode = 'full'
+  if (options.onlyVariantIds && options.onlyVariantIds.length > 0) {
+    const picked: SyncVariant[] = []
+    let allOk = true
+    await runLimited(
+      options.onlyVariantIds,
+      VARIANT_CONCURRENCY,
+      async (variantId: string) => {
+        try {
+          const r = await fetch(
+            `${MEDUSA_URL}/admin/products/${productId}/variants/${variantId}?fields=id,title,sku,*inventory_items,*inventory_items.inventory.location_levels`,
+            { headers: { Authorization: authorization } },
+          )
+          if (!r.ok) {
+            allOk = false
+            return
+          }
+          const d = await r.json().catch(() => null)
+          const v = d?.variant
+          // No inventory data in the answer = we cannot tell "no item yet"
+          // from "field not returned"; never risk creating a duplicate item.
+          if (
+            !v?.id ||
+            !Array.isArray(v.inventory_items) ||
+            v.inventory_items.length === 0
+          ) {
+            allOk = false
+            return
+          }
+          picked.push(v)
+        } catch {
+          allOk = false
+        }
+      },
+    )
+    if (allOk) {
+      loadedVariants = picked
+      readMode = 'targeted'
+    }
   }
-  const data = await res.json().catch(() => null)
-  const variants: SyncVariant[] = data?.product?.variants ?? []
+  if (!loadedVariants) {
+    const res = await fetch(
+      `${MEDUSA_URL}/admin/products/${productId}?fields=*variants,*variants.inventory_items,*variants.inventory_items.inventory.location_levels`,
+      { headers: { Authorization: authorization } },
+    )
+    if (!res.ok) {
+      result.error = `Could not read product (HTTP ${res.status})`
+      return result
+    }
+    const data = await res.json().catch(() => null)
+    loadedVariants = data?.product?.variants ?? []
+  }
+  readMs = Date.now() - syncStartedAt
+  const variants: SyncVariant[] = loadedVariants ?? []
 
   const applyDefault =
     options.applyDefaultToAllVariants === true ||
@@ -405,7 +459,7 @@ export async function syncVariantInventory(
     }
   })
   console.log(
-    `[inventory-sync] ${productId}: ${variants.length} variants, ${skippedUnchanged} unchanged (skipped), ${sharedChecks} shared-checks, ${result.updated} written, ${result.failed} failed in ${Date.now() - syncStartedAt}ms`,
+    `[inventory-sync] ${productId}: ${variants.length} variants, ${skippedUnchanged} unchanged (skipped), ${sharedChecks} shared-checks, ${result.updated} written, ${result.failed} failed in ${Date.now() - syncStartedAt}ms (product read ${readMs}ms, ${readMode})`,
   )
   return result
 }
