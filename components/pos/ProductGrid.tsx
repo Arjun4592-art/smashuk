@@ -26,8 +26,18 @@ interface Props {
   products: POSProduct[]
   onAdd: (product: POSProduct) => void
   isLoading?: boolean
+  pinnedIds?: Set<string>
+  onTogglePin?: (product: POSProduct) => void
+  emptyMessage?: string
 }
-export default function ProductGrid({ products, onAdd, isLoading }: Props) {
+export default function ProductGrid({
+  products,
+  onAdd,
+  isLoading,
+  pinnedIds,
+  onTogglePin,
+  emptyMessage,
+}: Props) {
   const showStockCount = usePOSStore((s) => s.showStockCount)
   if (isLoading && products.length === 0) {
     return (
@@ -81,7 +91,7 @@ export default function ProductGrid({ products, onAdd, isLoading }: Props) {
             color: '#8C9196',
           }}
         >
-          No products found
+          {emptyMessage ?? 'No products found'}
         </p>
       </div>
     )
@@ -94,163 +104,193 @@ export default function ProductGrid({ products, onAdd, isLoading }: Props) {
         // false "Out of stock" during the brief window before it lands.
         const isOut = !p.pricePending && p.stock === 0
         const isLow = !p.pricePending && p.stock > 0 && p.stock <= 3
+        const isPinned = pinnedIds?.has(p.id) ?? false
         return (
-          <button
-            key={p.variantId ?? p.id}
-            onClick={() => onAdd(p)}
-            title={
-              isOut
-                ? `${p.name}${p.size ? ` — ${p.size}` : ''} (out of stock — will still be sold)`
-                : `${p.name}${p.size ? ` — ${p.size}` : ''}`
-            }
-            disabled={p.pricePending}
-            className='flex flex-col p-3 rounded-lg border text-left transition-all'
-            style={{
-              background: '#FFFFFF',
-              borderColor: '#E1E3E5',
-              cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = '#008060'
-              e.currentTarget.style.background = '#F2F7F5'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = '#E1E3E5'
-              e.currentTarget.style.background = '#FFFFFF'
-            }}
-          >
-            {}
-            <div
-              className='w-full aspect-square rounded-md flex items-center justify-center mb-2 overflow-hidden'
+          <div key={p.variantId ?? p.id} className='relative flex'>
+            <button
+              onClick={() => onAdd(p)}
+              title={
+                isOut
+                  ? `${p.name}${p.size ? ` — ${p.size}` : ''} (out of stock — will still be sold)`
+                  : `${p.name}${p.size ? ` — ${p.size}` : ''}`
+              }
+              disabled={p.pricePending}
+              className='flex flex-col flex-1 min-w-0 p-3 rounded-lg border text-left transition-all'
               style={{
-                background: '#F6F6F7',
+                background: '#FFFFFF',
+                borderColor: '#E1E3E5',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#008060'
+                e.currentTarget.style.background = '#F2F7F5'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#E1E3E5'
+                e.currentTarget.style.background = '#FFFFFF'
               }}
             >
-              {p.image ? (
-                <img
-                  src={p.image}
-                  alt={p.name}
-                  className='w-full h-full object-cover'
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none'
-                    const svg =
-                      e.currentTarget.parentElement?.querySelector('svg')
-                    if (svg) svg.style.display = ''
-                  }}
-                />
-              ) : null}
-              <svg
-                width='28'
-                height='28'
-                viewBox='0 0 24 24'
-                fill='none'
-                stroke='#8C9196'
-                strokeWidth='1.5'
+              {}
+              <div
+                className='w-full aspect-square rounded-md flex items-center justify-center mb-2 overflow-hidden'
                 style={{
-                  display: p.image ? 'none' : undefined,
+                  background: '#F6F6F7',
                 }}
               >
-                <path d='M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z' />
-                <line x1='3' y1='6' x2='21' y2='6' />
-                <path d='M16 10a4 4 0 01-8 0' />
-              </svg>
-            </div>
-
-            {}
-            <p
-              className='text-xs font-medium leading-tight line-clamp-2 mb-0.5'
-              style={{
-                color: '#202223',
-              }}
-            >
-              {p.name}
-            </p>
-
-            {}
-            <div className='flex items-center gap-1 mb-1.5'>
-              <p
-                className='text-[11px]'
-                style={{
-                  color: '#8C9196',
-                }}
-              >
-                {p.brand}
-              </p>
-              {p.size && (
-                <span
-                  className='text-[10px] font-semibold px-1.5 py-[1px] rounded'
+                {p.image ? (
+                  <img
+                    src={p.image}
+                    alt={p.name}
+                    className='w-full h-full object-cover'
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none'
+                      const svg =
+                        e.currentTarget.parentElement?.querySelector('svg')
+                      if (svg) svg.style.display = ''
+                    }}
+                  />
+                ) : null}
+                <svg
+                  width='28'
+                  height='28'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='#8C9196'
+                  strokeWidth='1.5'
                   style={{
-                    background: '#F2F7F5',
-                    color: '#008060',
+                    display: p.image ? 'none' : undefined,
                   }}
                 >
-                  {p.size}
-                </span>
-              )}
-              {!p.size &&
-                p.variantCountOverride &&
-                p.variantCountOverride > 1 && (
+                  <path d='M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z' />
+                  <line x1='3' y1='6' x2='21' y2='6' />
+                  <path d='M16 10a4 4 0 01-8 0' />
+                </svg>
+              </div>
+
+              {}
+              <p
+                className='text-xs font-medium leading-tight line-clamp-2 mb-0.5'
+                style={{
+                  color: '#202223',
+                }}
+              >
+                {p.name}
+              </p>
+
+              {}
+              <div className='flex items-center gap-1 mb-1.5'>
+                <p
+                  className='text-[11px]'
+                  style={{
+                    color: '#8C9196',
+                  }}
+                >
+                  {p.brand}
+                </p>
+                {p.size && (
                   <span
                     className='text-[10px] font-semibold px-1.5 py-[1px] rounded'
                     style={{
-                      background: '#F0F1F2',
-                      color: '#6D7175',
+                      background: '#F2F7F5',
+                      color: '#008060',
                     }}
                   >
-                    {p.variantCountOverride} sizes
+                    {p.size}
                   </span>
                 )}
-            </div>
-
-            {}
-            <p
-              className='text-sm font-semibold mb-1'
-              style={{
-                color: p.pricePending ? '#8C9196' : '#202223',
-              }}
-            >
-              {p.pricePending ? (
-                '…'
-              ) : (
-                <>
-                  {CURRENCY_SYMBOL}
-                  {p.price.toLocaleString('en-GB')}
-                </>
-              )}
-            </p>
-
-            {}
-            {(showStockCount || isOut) && (
-              <div className='flex items-center gap-1'>
-                <div
-                  className='w-1.5 h-1.5 rounded-full shrink-0'
-                  style={{
-                    background: isOut
-                      ? '#D82C0D'
-                      : isLow
-                        ? '#FFC453'
-                        : '#008060',
-                  }}
-                />
-                <p
-                  className='text-[10px]'
-                  style={{
-                    color: isOut ? '#D82C0D' : isLow ? '#B7791F' : '#6D7175',
-                  }}
-                >
-                  {p.pricePending
-                    ? ''
-                    : isOut
-                      ? 'Out of stock'
-                      : showStockCount
-                        ? isLow
-                          ? `Only ${p.stock} left`
-                          : `${p.stock} in stock`
-                        : ''}
-                </p>
+                {!p.size &&
+                  p.variantCountOverride &&
+                  p.variantCountOverride > 1 && (
+                    <span
+                      className='text-[10px] font-semibold px-1.5 py-[1px] rounded'
+                      style={{
+                        background: '#F0F1F2',
+                        color: '#6D7175',
+                      }}
+                    >
+                      {p.variantCountOverride} sizes
+                    </span>
+                  )}
               </div>
+
+              {}
+              <p
+                className='text-sm font-semibold mb-1'
+                style={{
+                  color: p.pricePending ? '#8C9196' : '#202223',
+                }}
+              >
+                {p.pricePending ? (
+                  '…'
+                ) : (
+                  <>
+                    {CURRENCY_SYMBOL}
+                    {p.price.toLocaleString('en-GB')}
+                  </>
+                )}
+              </p>
+
+              {}
+              {(showStockCount || isOut) && (
+                <div className='flex items-center gap-1'>
+                  <div
+                    className='w-1.5 h-1.5 rounded-full shrink-0'
+                    style={{
+                      background: isOut
+                        ? '#D82C0D'
+                        : isLow
+                          ? '#FFC453'
+                          : '#008060',
+                    }}
+                  />
+                  <p
+                    className='text-[10px]'
+                    style={{
+                      color: isOut ? '#D82C0D' : isLow ? '#B7791F' : '#6D7175',
+                    }}
+                  >
+                    {p.pricePending
+                      ? ''
+                      : isOut
+                        ? 'Out of stock'
+                        : showStockCount
+                          ? isLow
+                            ? `Only ${p.stock} left`
+                            : `${p.stock} in stock`
+                          : ''}
+                  </p>
+                </div>
+              )}
+            </button>
+            {onTogglePin && (
+              <button
+                type='button'
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onTogglePin(p)
+                }}
+                aria-label={isPinned ? 'Edit favorites' : 'Add to favorites'}
+                title={isPinned ? 'Favorite — tap to edit' : 'Add to favorites'}
+                className='absolute top-1.5 right-1.5 w-7 h-7 flex items-center justify-center rounded-full'
+                style={{
+                  background: 'rgba(255,255,255,0.92)',
+                  border: '1px solid #E1E3E5',
+                }}
+              >
+                <svg
+                  width='14'
+                  height='14'
+                  viewBox='0 0 24 24'
+                  fill={isPinned ? '#F5A623' : 'none'}
+                  stroke={isPinned ? '#F5A623' : '#8C9196'}
+                  strokeWidth='2'
+                  strokeLinejoin='round'
+                >
+                  <polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2' />
+                </svg>
+              </button>
             )}
-          </button>
+          </div>
         )
       })}
     </div>

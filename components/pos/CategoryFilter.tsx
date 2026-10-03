@@ -6,17 +6,19 @@ interface Props {
   selected: string
   onChange: (cat: string) => void
   allLabel?: string
+  showAll?: boolean
 }
 export default function CategoryFilter({
   categories,
   selected,
   onChange,
   allLabel = 'All',
+  showAll = true,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
-  const all = [allLabel, ...categories]
+  const all = showAll ? [allLabel, ...categories] : categories
   const updateArrows = () => {
     const el = scrollerRef.current
     if (!el) return

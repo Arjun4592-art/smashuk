@@ -1,4 +1,9 @@
 import {
+  sanitizeFavorites,
+  type FavoritesMap,
+  type FavoriteTabId,
+} from '@/lib/pos/favorites'
+import {
   saveIndexSnapshot,
   loadIndexSnapshot,
   saveDetailEntries,
@@ -865,4 +870,60 @@ export async function fetchPOSDetailsForVariants(
     }
     return { byVariantId, fromCache: true, cachedAt: oldestSavedAt }
   }
+}
+
+const FAVORITES_LS_KEY = 'pos-favorites-v1'
+function readFavoritesCache(): FavoritesMap | null {
+  try {
+    if (typeof window === 'undefined') return null
+    const raw = window.localStorage.getItem(FAVORITES_LS_KEY)
+    return raw ? sanitizeFavorites(JSON.parse(raw)) : null
+  } catch {
+    return null
+  }
+}
+function writeFavoritesCache(favorites: FavoritesMap) {
+  try {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(FAVORITES_LS_KEY, JSON.stringify(favorites))
+  } catch {}
+}
+export async function fetchPOSFavorites(): Promise<{
+  favorites: FavoritesMap
+  fromCache: boolean
+}> {
+  try {
+    const res = await fetch('/api/pos/favorites', {
+      method: 'GET',
+      cache: 'no-store',
+    })
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}))
+      throw new Error(errorData.error || `HTTP ${res.status}`)
+    }
+    const data = await res.json()
+    const favorites = sanitizeFavorites(data.favorites)
+    writeFavoritesCache(favorites)
+    return { favorites, fromCache: false }
+  } catch (err) {
+    const cached = readFavoritesCache()
+    if (cached) return { favorites: cached, fromCache: true }
+    throw err
+  }
+}
+export async function updatePOSFavorite(
+  action: 'pin' | 'unpin',
+  tab: FavoriteTabId,
+  productId: string,
+): Promise<FavoritesMap> {
+  const res = await fetch('/api/pos/favorites', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, tab, productId }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  const favorites = sanitizeFavorites(data.favorites)
+  writeFavoritesCache(favorites)
+  return favorites
 }
