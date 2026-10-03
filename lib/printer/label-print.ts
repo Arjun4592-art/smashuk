@@ -20,6 +20,7 @@ import qrcodegen from 'qrcode-generator'
 import { usePrinterStore } from '@/store/printerStore'
 import type { ReceiptData } from './escpos'
 import { isIOSDevice, printHtmlViaPassPRNT } from './passprnt-transport'
+import { buildThermalReceiptHtml } from './thermal-receipt-html'
 
 export interface LabelSize {
   widthMm: number
@@ -415,6 +416,11 @@ function printLabelHtml(html: string, size: LabelSize): Promise<void> {
 
 /** Print a receipt on the label printer (label size comes from settings). */
 export function printReceiptOnLabel(data: ReceiptData): Promise<void> {
+  // iPad/iPhone: print the full-size portrait thermal receipt through
+  // Star PassPRNT (continuous roll) instead of the small label layout.
+  if (isIOSDevice()) {
+    return printHtmlViaPassPRNT(buildThermalReceiptHtml(data), 'receipt')
+  }
   const size = getLabelSize()
   return printLabelHtml(buildReceiptLabelHtml(data, size), size)
 }
