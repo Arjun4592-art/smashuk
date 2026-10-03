@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { toast } from 'sonner'
 import { usePOSStore } from '@/store/posStore'
+import { useAuthStore } from '@/store/authStore'
 import {
   fetchPOSIndex,
   fetchPOSDetailsForVariants,
@@ -14,85 +13,244 @@ import {
 } from '@/lib/api/pos'
 import ProductSearch from '@/components/pos/ProductSearch'
 import CategoryFilter from '@/components/pos/CategoryFilter'
-import NewFavoriteTabInput from '@/components/pos/NewFavoriteTabInput'
-import ConfirmDialog from '@/components/pos/ConfirmDialog'
-import { PencilIcon, TrashIcon } from '@/components/pos/TabActionIcons'
 import ProductGrid, { POSProduct } from '@/components/pos/ProductGrid'
 import VariantPickerModal from '@/components/pos/VariantPickerModal'
-import { playScanBeep } from '@/lib/utils'
-import { CURRENCY_SYMBOL } from '@/lib/constants'
+import FavoritePinModal from '@/components/pos/FavoritePinModal'
 import {
   DEFAULT_FAVORITE_TABS,
-  MAX_CUSTOM_TABS,
   MAX_FAVORITES_PER_TAB,
   emptyFavorites,
   type FavoriteTab,
   type FavoriteTabId,
   type FavoritesMap,
 } from '@/lib/pos/favorites'
-
-const MAX_SEARCH_RESULTS = 60
-const STOCK_PENDING_PLACEHOLDER = 9999
-
-export default function FavoritesPage() {
-  const router = useRouter()
-  const { items, total, soundOnScan, addItem } = usePOSStore()
-  const [tabs, setTabs] = useState<FavoriteTab[]>(DEFAULT_FAVORITE_TABS)
-  const [activeTabId, setActiveTabId] = useState<FavoriteTabId>(
-    DEFAULT_FAVORITE_TABS[0].id,
+import { sortSizeValues } from '@/lib/pos-size-sort'
+import BillingCart from '@/components/pos/BillingCart'
+import PaymentModal, {
+  type PaymentResult,
+  type SplitPayment,
+} from '@/components/pos/PaymentModal'
+import Receipt from '@/components/pos/Receipt'
+import CustomerSearch from '@/components/pos/CustomerSearch'
+import DiscountModal from '@/components/pos/DiscountModal'
+import GiftCardModal from '@/components/pos/GiftCardModal'
+import CameraBarcodeScanner from '@/components/pos/CameraBarcodeScanner'
+import NoteModal from '@/components/pos/NoteModal'
+import FulfillmentModal from '@/components/pos/FulfillmentModal'
+import VoidModal from '@/components/pos/VoidModal'
+import SavedCarts from '@/components/pos/SavedCarts'
+import ReturnModal from '@/components/pos/ReturnModal'
+import EmailReceiptModal from '@/components/pos/EmailReceiptModal'
+import {
+  generateOrderNumber,
+  playScanBeep,
+  waitForPrintImages,
+} from '@/lib/utils'
+import type { CartDisplayItem } from '@/types'
+import { toast } from 'sonner'
+import {
+  printReceipt,
+  printReceiptOnLabel,
+  NoPrinterConnectedError,
+} from '@/lib/printer/print-receipt'
+import type { ReceiptData } from '@/lib/printer/escpos'
+import { usePrinterStore } from '@/store/printerStore'
+import {
+  CURRENCY_SYMBOL,
+  STORE_DISPLAY_NAME,
+  STORE_ADDRESS_LINE1,
+  STORE_ADDRESS_LINE2,
+  CONTACT_PHONE,
+  VAT_RATE,
+  SITE_LOGO,
+  SITE_URL,
+} from '@/lib/constants'
+const PAY_LABELS: Record<string, string> = {
+  cash: 'Cash',
+  card: 'Card',
+  card_terminal: 'Card terminal',
+  upi: 'UPI',
+  split: 'Split payment',
+}
+function cashRounding(total: number) {
+  return Math.ceil(total) - total
+}
+type Screen = 'terminal' | 'receipt'
+export default function BillingPage() {
+  const [screen, setScreen] = useState<Screen>('terminal')
+  const [orderId, setOrderId] = useState('')
+  const [medusaOrderId, setMedusaOrderId] = useState<string | undefined>(
+    undefined,
   )
-  const [addingTab, setAddingTab] = useState(false)
-  const [renamingTab, setRenamingTab] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [deletingTab, setDeletingTab] = useState(false)
+  const [trackingToken, setTrackingToken] = useState<string | undefined>(
+    undefined,
+  )
   const [search, setSearch] = useState('')
+  const [cat, setCat] = useState('All')
   const [favorites, setFavorites] = useState<FavoritesMap>(() =>
     emptyFavorites(),
   )
+  const [favoriteTabs, setFavoriteTabs] = useState<FavoriteTab[]>(
+    DEFAULT_FAVORITE_TABS,
+  )
+  const [pinPickerFor, setPinPickerFor] = useState<POSProduct | null>(null)
+  const [size, setSize] = useState('All sizes')
+  const [sizeTitle, setSizeTitle] = useState<string | null>(null)
+  const [sizeGroup, setSizeGroup] = useState<string | null>(null)
+  const [mounted, setMounted] = useState(false)
+  const [showEmailReceipt, setShowEmailReceipt] = useState(false)
+  const [splitPayments, setSplitPayments] = useState<SplitPayment[] | null>(
+    null,
+  )
+  const [showPayment, setShowPayment] = useState(false)
+  const [showCustomer, setShowCustomer] = useState(false)
+  const [showDiscount, setShowDiscount] = useState(false)
+  const [showGiftCard, setShowGiftCard] = useState(false)
+  const [showCameraScan, setShowCameraScan] = useState(false)
+  const [showNote, setShowNote] = useState(false)
+  const [showFulfillment, setShowFulfillment] = useState(false)
+  const [showVoid, setShowVoid] = useState(false)
+  const [showSavedCarts, setShowSavedCarts] = useState(false)
+  const [showReturn, setShowReturn] = useState(false)
+  const [returnOrders, setReturnOrders] = useState<
+    import('@/lib/api/pos').PosOrderRecord[]
+  >([])
+  const [pendingCharge, setPendingCharge] = useState(false)
+  const [mobileCartOpen, setMobileCartOpen] = useState(false)
+  const {
+    items,
+    subtotal,
+    discountTotal,
+    shippingCost,
+    tax,
+    total,
+    customDiscount,
+    couponCode,
+    giftCardCode,
+    giftCardAmount,
+    amountDue,
+    paymentMethod,
+    customer,
+    orderNote,
+    fulfillmentType,
+    shippingSpeed,
+    shippingAddress,
+    // Kept in the store and still loaded in the background (see the
+    // effect below) for other POS surfaces (returns, saved carts,
+    // analytics) that still read the full catalogue — just no longer used
+    // for this screen's own rendering, which is index/details-driven now.
+    products,
+    soundOnScan,
+    autoPrintReceipt,
+    addItem,
+    removeItem,
+    updateQuantity,
+    setPaymentMethod,
+    clearCart,
+    voidSale,
+    completeOrder,
+    addRevenueEntry,
+    loadMedusaProducts,
+  } = usePOSStore()
+  const printerType = usePrinterStore((s) => s.connectionType)
+  useEffect(() => {
+    const t = setTimeout(() => setMounted(true), 50)
+    return () => clearTimeout(t)
+  }, [])
+  const authUser = useAuthStore((s) => s.user)
+  const user = authUser
+    ? {
+        name: authUser.name,
+      }
+    : null
+  useEffect(() => {
+    // Still triggered here (not removed) because other POS surfaces
+    // (returns, saved carts, analytics) read the full catalogue from this
+    // store and expect billing to have kicked off the load, same as
+    // before. This screen itself no longer waits on it or reads from it —
+    // see the index/details state below.
+    //
+    // Delayed a few seconds rather than fired immediately: a DevTools
+    // capture showed this full-catalogue request (still heavy — it's the
+    // deep inventory join across ~1700 products, not something touched
+    // today) competing for the same connection as the index/details calls
+    // that actually matter for this screen appearing quickly. Firing it
+    // after the critical path has had a moment to complete means it no
+    // longer competes with what the cashier is actually waiting on.
+    const timer = setTimeout(() => {
+      loadMedusaProducts()
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [loadMedusaProducts])
+  // ── Search-index architecture ──────────────────────────────────────────
+  // Replaces reading the full ~1700-product `products` array (from
+  // usePOSStore, above) for search/scan/category/size filtering on this
+  // screen. See app/api/pos/index/route.ts for the full reasoning — short
+  // version: that full-catalogue load is what made this screen take 30+
+  // seconds, and Medusa's own admin search (q=) doesn't cover variant SKU
+  // (a confirmed, open Medusa limitation), so a naive "just search Medusa
+  // directly" rebuild would have silently broken barcode scanning. Instead:
+  //   1. `indexEntries` — name/sku/category/size only, no price or stock,
+  //      loaded once, small enough to be fast and to filter instantly.
+  //   2. Whatever the current search/category/size narrows `indexEntries`
+  //      down to, `detailsByVariantId` fetches REAL price + live stock for
+  //      just that narrow set — never the whole catalogue.
   const [indexEntries, setIndexEntries] = useState<POSIndexEntry[]>([])
   const [indexLoading, setIndexLoading] = useState(true)
   const [indexError, setIndexError] = useState<string | null>(null)
   const [detailsByVariantId, setDetailsByVariantId] = useState<
     Map<string, POSDetailEntry>
   >(new Map())
-  const [variantPickerFor, setVariantPickerFor] = useState<POSProduct[] | null>(
-    null,
-  )
-  const favoritesRef = useRef(favorites)
-  favoritesRef.current = favorites
+  // Set whenever EITHER the index or a details fetch had to fall back to
+  // the local offline cache — i.e. the shop's connection to the server
+  // itself is down, not just Medusa being slow. This must stay visible
+  // and explicit: prices/stock shown while this is true may be minutes
+  // old, and staff need to know that, not just see numbers that look
+  // normal. Cleared the next time either fetch succeeds live.
+  const [offlineSince, setOfflineSince] = useState<number | null>(null)
+  // Guards against a real bug a DevTools capture caught: this effect fired
+  // /api/pos/index TWICE on one page load (React StrictMode double-invoking
+  // effects in dev is the usual cause — same class of bug already fixed in
+  // store/posStore.ts's loadMedusaProducts). A `useState` guard isn't
+  // reliable here because both near-simultaneous calls can read the old
+  // state before either has set it; a ref is checked and set synchronously,
+  // so the second call sees the first one already in flight.
   const indexLoadInFlight = useRef(false)
-
   const loadIndex = useCallback(async () => {
     if (indexLoadInFlight.current) return
     indexLoadInFlight.current = true
     setIndexLoading(true)
     setIndexError(null)
     try {
-      const { entries } = await fetchPOSIndex()
+      const { entries, fromCache, cachedAt } = await fetchPOSIndex()
       setIndexEntries(entries)
+      setOfflineSince(fromCache ? (cachedAt ?? Date.now()) : null)
     } catch (err: unknown) {
-      setIndexError(
-        err instanceof Error ? err.message : 'Failed to load products',
-      )
+      const message =
+        err instanceof Error ? err.message : 'Failed to load products'
+      console.error('[POS] Index load failed:', message)
+      setIndexError(message)
     } finally {
       setIndexLoading(false)
       indexLoadInFlight.current = false
     }
   }, [])
-
   useEffect(() => {
     loadIndex()
   }, [loadIndex])
-
+  const favoritesRef = useRef(favorites)
+  favoritesRef.current = favorites
   useEffect(() => {
     fetchPOSFavorites()
       .then(({ favorites: saved, tabs: savedTabs }) => {
         setFavorites(saved)
-        setTabs(savedTabs)
+        setFavoriteTabs(savedTabs)
       })
-      .catch(() => toast.error('Could not load Favorites'))
+      .catch((err) => {
+        console.error('[POS] Favorites load failed:', err)
+        toast.error('Could not load Favorites')
+      })
   }, [])
-
   const toggleFavorite = useCallback(
     async (tab: FavoriteTabId, productId: string) => {
       const current = favoritesRef.current
@@ -120,7 +278,7 @@ export default function FavoritesPage() {
         })
         favoritesRef.current = saved.favorites
         setFavorites(saved.favorites)
-        setTabs(saved.tabs)
+        setFavoriteTabs(saved.tabs)
       } catch (err: unknown) {
         const reverted = apply(favoritesRef.current, wasPinned)
         favoritesRef.current = reverted
@@ -132,164 +290,301 @@ export default function FavoritesPage() {
     },
     [],
   )
-
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0]
-  const pinnedForTab = favorites[activeTab.id] ?? []
-
-  const createTab = useCallback(async (label: string) => {
-    const saved = await updatePOSFavorites({ action: 'addTab', label })
-    favoritesRef.current = saved.favorites
-    setFavorites(saved.favorites)
-    setTabs(saved.tabs)
-    if (saved.tabId) setActiveTabId(saved.tabId)
-    setAddingTab(false)
-  }, [])
-
-  const renameActiveTab = useCallback(
-    async (label: string) => {
-      if (!activeTab.custom) return
+  const createFavoriteTab = useCallback(
+    async (label: string, productId: string) => {
       const saved = await updatePOSFavorites({
-        action: 'renameTab',
-        tab: activeTab.id,
+        action: 'addTab',
         label,
+        productId,
       })
       favoritesRef.current = saved.favorites
       setFavorites(saved.favorites)
-      setTabs(saved.tabs)
-      setRenamingTab(false)
+      setFavoriteTabs(saved.tabs)
     },
-    [activeTab],
+    [],
   )
-
-  const deleteActiveTab = useCallback(async () => {
-    if (!activeTab.custom) return
-    setDeletingTab(true)
-    try {
-      const saved = await updatePOSFavorites({
-        action: 'deleteTab',
-        tab: activeTab.id,
-      })
-      favoritesRef.current = saved.favorites
-      setFavorites(saved.favorites)
-      setTabs(saved.tabs)
-      setActiveTabId(saved.tabs[0].id)
-      setRenamingTab(false)
-      toast.success(`Deleted "${activeTab.label}" tab`)
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Could not delete tab')
-    } finally {
-      setDeletingTab(false)
-      setConfirmingDelete(false)
-    }
-  }, [activeTab])
-  const query = search.trim().toLowerCase()
-  const isSearching = query.length > 0
-
-  const visibleEntries = useMemo(() => {
-    if (isSearching) {
-      const matches: POSIndexEntry[] = []
-      const seenProducts = new Set<string>()
-      for (const e of indexEntries) {
-        const hit =
-          (e.name ?? '').toLowerCase().includes(query) ||
-          (e.sku ?? '').toLowerCase().includes(query) ||
-          (e.ean ?? '').includes(query) ||
-          (e.barcode ?? '').toLowerCase().includes(query)
-        if (!hit) continue
-        if (!seenProducts.has(e.productId)) {
-          if (seenProducts.size >= MAX_SEARCH_RESULTS) continue
-          seenProducts.add(e.productId)
-        }
-        matches.push(e)
-      }
-      return matches
-    }
-    const order = new Map(pinnedForTab.map((id, i) => [id, i]))
-    return indexEntries
-      .filter((e) => order.has(e.productId))
-      .sort((a, b) => order.get(a.productId)! - order.get(b.productId)!)
-  }, [indexEntries, isSearching, query, pinnedForTab])
-
-  const visibleProductKey = useMemo(
-    () => Array.from(new Set(visibleEntries.map((e) => e.productId))).join(','),
-    [visibleEntries],
+  const pinnedIds = useMemo(
+    () => new Set(Object.values(favorites).flat()),
+    [favorites],
   )
-
+  // All of this now runs over `indexEntries` (name/sku/category/size only)
+  // instead of the full `products` catalogue — same exact matching logic as
+  // before, just against a far smaller, instantly-available object.
+  const CATEGORIES = Array.from(
+    new Set(
+      indexEntries
+        .map((p) => p.category)
+        .filter((c): c is string => Boolean(c) && c !== 'Uncategorized'),
+    ),
+  ).sort((a, b) => a.localeCompare(b))
+  const productsInCat = indexEntries.filter(
+    (p) => cat === 'All' || p.category === cat,
+  )
+  // Each entry can carry MORE THAN ONE size-like dimension at once (e.g. a
+  // racket with both Weight and Grip Size on the same variant) — see
+  // app/api/pos/index/route.ts's extractSizes for why this is an array
+  // rather than a single value. Flatten across all of them when building
+  // the title/value chip lists so every dimension is browsable, not just
+  // whichever happened to be first.
+  const SIZE_TITLES = Array.from(
+    new Set(
+      productsInCat.flatMap((p: any) => p.sizes.map((s: any) => s.title)),
+    ),
+  ).sort((a, b) => a.localeCompare(b))
+  const sizeValuesForTitle = (title: string) =>
+    sortSizeValues(
+      Array.from(
+        new Set(
+          productsInCat.flatMap((p: any) =>
+            p.sizes
+              .filter((s: any) => s.title === title)
+              .map((s: any) => s.value),
+          ),
+        ),
+      ),
+    )
+  useEffect(() => {
+    if (sizeGroup && !SIZE_TITLES.includes(sizeGroup)) {
+      setSizeGroup(null)
+    }
+  }, [SIZE_TITLES.join(','), sizeGroup])
+  // Cap the default ("All", no search) view — fetching live price+stock for
+  // literally the whole catalogue on an unfiltered screen would defeat the
+  // entire point of this rework. Typing a search or picking a category
+  // narrows well below this in practice; this cap only bites on the
+  // deliberately-broad default view.
+  const MAX_VISIBLE = 100
+  const matchedIndexEntries = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return indexEntries.filter((p: any) => {
+      const matchCat = cat === 'All' || p.category === cat
+      const matchSize =
+        size === 'All sizes' ||
+        p.sizes.some((s: any) => s.title === sizeTitle && s.value === size)
+      const matchSearch =
+        !q ||
+        (p.name ?? '').toLowerCase().includes(q) ||
+        (p.sku ?? '').toLowerCase().includes(q) ||
+        (p.ean ?? '').includes(q) ||
+        (p.barcode ?? '').toLowerCase().includes(q)
+      return matchCat && matchSize && matchSearch
+    })
+  }, [indexEntries, cat, size, sizeTitle, search])
+  const visibleIndexEntries = matchedIndexEntries.slice(0, MAX_VISIBLE)
+  const hiddenCount = matchedIndexEntries.length - visibleIndexEntries.length
+  // Debounced: fetch live price+stock only for what's actually about to be
+  // shown, and only after typing settles for a moment, so scanning through
+  // a search string doesn't fire a request per keystroke.
   useEffect(() => {
     const productIds = Array.from(
-      new Set(visibleEntries.map((e) => e.productId)),
+      new Set(visibleIndexEntries.map((e) => e.productId)),
     )
-    const variantIds = visibleEntries.map((e) => e.variantId)
+    const variantIds = visibleIndexEntries.map((e) => e.variantId)
     if (productIds.length === 0) return
     const timer = setTimeout(() => {
       fetchPOSDetailsForVariants(productIds, variantIds)
-        .then(({ byVariantId }) => {
+        .then(({ byVariantId, fromCache, cachedAt }) => {
           setDetailsByVariantId((prev) => {
             const merged = new Map(prev)
             for (const [k, v] of byVariantId) merged.set(k, v)
             return merged
           })
+          if (fromCache) setOfflineSince(cachedAt ?? Date.now())
+          else setOfflineSince(null)
         })
         .catch((err) => {
           console.error('[POS] Details fetch failed:', err)
         })
     }, 250)
     return () => clearTimeout(timer)
-  }, [visibleProductKey])
-
-  const toPOSProduct = useCallback(
-    (entry: POSIndexEntry): POSProduct => {
-      const detail = detailsByVariantId.get(entry.variantId)
-      const first = entry.sizes[0]
-      return {
-        id: entry.productId,
-        name: entry.name,
-        brand: entry.brand,
-        sku: entry.sku,
-        price: detail?.price ?? 0,
-        stock: detail?.stock ?? STOCK_PENDING_PLACEHOLDER,
-        category: entry.category,
-        image: detail?.image,
-        channel: detail?.channel ?? 'both',
-        variantId: entry.variantId,
-        size: first?.value,
-        sizeOptionTitle: first?.title,
-        pricePending: !detail,
-      }
-    },
-    [detailsByVariantId],
+  }, [visibleIndexEntries.map((e) => e.productId).join(',')])
+  const detailsLoading =
+    visibleIndexEntries.length > 0 &&
+    visibleIndexEntries.some((e) => !detailsByVariantId.has(e.variantId))
+  const STOCK_PENDING_PLACEHOLDER = 9999
+  // A tile only has room to show ONE size label. When a specific size
+  // dimension is being filtered on (sizeTitle set), show that one — it's
+  // what the staff member is currently browsing by. Otherwise fall back to
+  // the first dimension the variant has, purely for a compact label; this
+  // doesn't affect which dimensions are searchable/filterable (that's
+  // matchSize above, which checks all of them).
+  function pickDisplaySize(entry: POSIndexEntry): {
+    size?: string
+    sizeOptionTitle?: string
+  } {
+    if (entry.sizes.length === 0) return {}
+    const forActiveTitle = sizeTitle
+      ? entry.sizes.find((s) => s.title === sizeTitle)
+      : undefined
+    const chosen = forActiveTitle ?? entry.sizes[0]
+    return { size: chosen.value, sizeOptionTitle: chosen.title }
+  }
+  function toPOSProduct(entry: POSIndexEntry): POSProduct {
+    const detail = detailsByVariantId.get(entry.variantId)
+    const displaySize = pickDisplaySize(entry)
+    return {
+      id: entry.productId,
+      name: entry.name,
+      brand: entry.brand,
+      sku: entry.sku,
+      price: detail?.price ?? 0,
+      // Optimistic placeholder until the real count lands — same reasoning
+      // as the /api/pos/products fast/stock split: POS already lets staff
+      // sell an item Medusa shows as out of stock, so a brief "looks
+      // available" beats a brief, wrong "out of stock".
+      stock: detail?.stock ?? STOCK_PENDING_PLACEHOLDER,
+      category: entry.category,
+      image: detail?.image,
+      channel: detail?.channel ?? 'both',
+      variantId: entry.variantId,
+      size: displaySize.size,
+      sizeOptionTitle: displaySize.sizeOptionTitle,
+      pricePending: !detail,
+    }
+  }
+  const filtered = useMemo(
+    () => visibleIndexEntries.map(toPOSProduct),
+    [visibleIndexEntries, detailsByVariantId],
   )
-
+  // The size filter chips above already let staff narrow to one exact
+  // variant when they know it, but with no size picked `filtered` still
+  // has one row per variant — a shoe in 6 sizes showed as 6 identical
+  // tiles. Collapse that down to one tile per product id; the tile shows
+  // whichever variant is picked as "representative" (first in-stock one)
+  // and clicking it opens a size picker instead of adding directly,
+  // unless the product only has the one variant to begin with.
   const productGroups = useMemo(() => {
     const byId = new Map<string, POSProduct[]>()
-    for (const e of visibleEntries) {
-      const p = toPOSProduct(e)
+    for (const p of filtered) {
       const list = byId.get(p.id)
       if (list) list.push(p)
       else byId.set(p.id, [p])
     }
     return byId
-  }, [visibleEntries, toPOSProduct])
-
-  const gridProducts = useMemo(
-    () =>
-      Array.from(productGroups.values()).map((group) => {
-        const representative = group.find((v) => v.stock > 0) ?? group[0]
-        return group.length > 1
-          ? {
-              ...representative,
-              size: undefined,
-              variantCountOverride: group.length,
-            }
-          : representative
-      }),
-    [productGroups],
+  }, [filtered])
+  const gridProducts = useMemo(() => {
+    return Array.from(productGroups.values()).map((group) => {
+      const representative = group.find((v) => v.stock > 0) ?? group[0]
+      return group.length > 1
+        ? {
+            ...representative,
+            size: undefined,
+            variantCountOverride: group.length,
+          }
+        : representative
+    })
+  }, [productGroups])
+  const [variantPickerFor, setVariantPickerFor] = useState<POSProduct[] | null>(
+    null,
   )
-
+  const [scanLookupPending, setScanLookupPending] = useState(false)
+  const handleScanSubmit = async (raw: string) => {
+    const q = raw.trim().toLowerCase()
+    if (!q) return
+    // Matching runs over indexEntries (name/sku/category/size only) —
+    // identical logic to before, just against the small index instead of
+    // the full catalogue. This is also why scanning stays reliable: it
+    // never depends on Medusa's own admin search, which doesn't cover SKU
+    // (see app/api/pos/index/route.ts).
+    // A scanner types the EAN/barcode, so try an exact EAN/barcode hit first,
+    // then fall back to SKU exactly as before.
+    const byEan = indexEntries.find(
+      (p) =>
+        (p.ean ?? '').toLowerCase() === q ||
+        (p.barcode ?? '').toLowerCase() === q,
+    )
+    const bySku =
+      byEan ??
+      indexEntries.find((p) => p.sku.toLowerCase() === q) ??
+      indexEntries.find((p) => p.sku.toLowerCase().includes(q))
+    const byExactName = indexEntries.find((p) => p.name.toLowerCase() === q)
+    const partialMatches = indexEntries.filter(
+      (p) =>
+        (p.name ?? '').toLowerCase().includes(q) ||
+        (p.sku ?? '').toLowerCase().includes(q) ||
+        (p.ean ?? '').includes(q),
+    )
+    const match =
+      bySku ??
+      byExactName ??
+      (partialMatches.length === 1 ? partialMatches[0] : undefined)
+    if (!match) {
+      if (partialMatches.length > 1) {
+        return
+      }
+      toast.error('Product not found', {
+        description: `No product matches "${raw}" — check the SKU or add it in Products.`,
+      })
+      return
+    }
+    // A scan is about to be sold — it needs REAL price and stock, not the
+    // index (which carries neither) and not a placeholder. This is a small,
+    // single-product Medusa call, not the full catalogue, so it's fast even
+    // though it's a genuine network round trip.
+    setScanLookupPending(true)
+    try {
+      const { byVariantId, fromCache, cachedAt } =
+        await fetchPOSDetailsForVariants([match.productId], [match.variantId])
+      const detail = byVariantId.get(match.variantId)
+      if (!detail) {
+        toast.error(`Could not confirm price for ${match.name}`, {
+          description: fromCache
+            ? "Offline, and this item isn't in the local cache yet — try again once reconnected."
+            : 'Not added — try scanning again.',
+        })
+        return
+      }
+      setDetailsByVariantId((prev) =>
+        new Map(prev).set(match.variantId, detail),
+      )
+      if (fromCache) setOfflineSince(cachedAt ?? Date.now())
+      const posProduct: POSProduct = {
+        id: match.productId,
+        name: match.name,
+        brand: match.brand,
+        sku: match.sku,
+        price: detail.price,
+        stock: detail.stock,
+        category: match.category,
+        image: detail.image,
+        channel: detail.channel,
+        variantId: match.variantId,
+        ...pickDisplaySize(match),
+      }
+      handleAdd(posProduct)
+      setSearch('')
+      // A scan while offline is the one moment this needs to be louder than
+      // the background banner — this specific item is about to be sold at
+      // a price that could be minutes old.
+      if (fromCache) {
+        toast(`${match.name} added at last-known price — you're offline`, {
+          duration: 3000,
+        })
+      } else if (detail.stock <= 0) {
+        toast(`${match.name} added — out of stock, selling anyway`, {
+          duration: 1800,
+        })
+      } else {
+        toast.success(`${match.name} added`, {
+          duration: 1200,
+        })
+      }
+    } catch (err) {
+      console.error('[POS] Scan detail lookup failed:', err)
+      toast.error(`Could not add ${match.name}`, {
+        description: 'Network error confirming price — try again.',
+      })
+    } finally {
+      setScanLookupPending(false)
+    }
+  }
   const handleAdd = useCallback(
     (p: POSProduct) => {
       if (!p.variantId) {
-        toast.error(`${p.name} is missing a Medusa variant`)
+        toast.error(`${p.name} is missing a Medusa variant`, {
+          description:
+            'This item cannot be sold until it is re-synced from Products.',
+        })
         return
       }
       addItem(
@@ -317,171 +612,581 @@ export default function FavoritesPage() {
         } as any,
       )
       if (soundOnScan) playScanBeep()
-      toast.success(`Added ${p.name}${p.size ? ` — ${p.size}` : ''}`, {
-        duration: 1200,
-      })
     },
     [addItem, soundOnScan],
   )
-
-  const cartCount = items.reduce((sum, i) => sum + i.quantity, 0)
-  const activeLabel = activeTab.label
-  const customTabCount = tabs.filter((t) => t.custom).length
-
-  return (
-    <div className='flex-1 min-h-0 flex flex-col overflow-hidden p-3 gap-2.5'>
-      {indexError && (
-        <div
-          className='flex items-center justify-between px-3 py-2 rounded-lg text-xs'
-          style={{
-            background: '#FFF4F4',
-            border: '1px solid #FECACA',
-            color: '#D82C0D',
+  const cartDisplayItems: CartDisplayItem[] = items.map((i) => ({
+    id: i.product.id,
+    lineId: `${i.product.id}::${i.variant?.id ?? ''}`,
+    name: i.product.name,
+    brand: i.product.brand ?? '',
+    price: i.product.price,
+    quantity: i.quantity,
+    sku: i.product.sku ?? '',
+    stock: i.product.stock ?? 0,
+    category: i.product.categoryId ?? '',
+    variantTitle: i.variant?.title || undefined,
+    originalPrice: i.product.originalPrice,
+    discount: i.discount,
+  }))
+  // Cart lines are looked up by lineId (product id + variant id combined),
+  // not just product id — the same shoe can be in the cart multiple times
+  // as different sizes, and matching on product id alone would always hit
+  // the first matching line regardless of which size's +/- was tapped.
+  const findByLineId = (lineId: string) =>
+    usePOSStore
+      .getState()
+      .items.find((i) => `${i.product.id}::${i.variant?.id ?? ''}` === lineId)
+  const handleIncrease = useCallback(
+    (lineId: string) => {
+      const item = findByLineId(lineId)
+      if (item)
+        updateQuantity(item.product.id, item.quantity + 1, item.variant?.id)
+    },
+    [updateQuantity],
+  )
+  const handleDecrease = useCallback(
+    (lineId: string) => {
+      const item = findByLineId(lineId)
+      if (item)
+        updateQuantity(item.product.id, item.quantity - 1, item.variant?.id)
+    },
+    [updateQuantity],
+  )
+  const handleRemove = useCallback(
+    (lineId: string) => {
+      const item = findByLineId(lineId)
+      if (item) removeItem(item.product.id, item.variant?.id)
+    },
+    [removeItem],
+  )
+  const handleOpenReturn = async () => {
+    try {
+      const { fetchPOSOrderHistory } = await import('@/lib/api/pos')
+      const history = await fetchPOSOrderHistory()
+      setReturnOrders(history)
+      setShowReturn(true)
+    } catch (err: unknown) {
+      toast.error('Could not load order history', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    }
+  }
+  const handleChargeClick = () => {
+    setPendingCharge(true)
+    setShowCustomer(true)
+  }
+  const handleConfirmPayment = async (result: PaymentResult) => {
+    if (fulfillmentType === 'ship' && !shippingAddress?.address_1) {
+      toast.error('Add the shipping address before charging this sale', {
+        description: 'Tap the "Ship to them" button above the cart.',
+      })
+      return
+    }
+    setPaymentMethod(result.method)
+    setSplitPayments(result.splits ?? null)
+    const id = `POS-${generateOrderNumber()}`
+    const cashierName = user?.name ?? 'Staff'
+    let medusaOrderId: string | undefined
+    let trackingToken: string | undefined
+    if (items.length > 0) {
+      try {
+        const { createPOSOrder, fetchDefaultRegion } =
+          await import('@/lib/api/pos')
+        const regionId = await fetchDefaultRegion()
+        if (!regionId) {
+          throw new Error('No default region configured in Medusa')
+        }
+        const orderItems = items.map((i) => {
+          const variantId = (i.product as any).variantId ?? i.variant?.id
+          if (!variantId) {
+            throw new Error(
+              `"${i.product.name}" has no linked Medusa variant — remove it and re-add from Products.`,
+            )
+          }
+          return {
+            variant_id: variantId,
+            quantity: i.quantity,
+            product_id: (i.product as any).id,
+            manual_discount:
+              i.discount && i.discount > 0 ? i.discount : undefined,
+          }
+        })
+        const orderResult = await createPOSOrder({
+          items: orderItems,
+          customer_id:
+            customer?.id && !customer.id.startsWith('local-')
+              ? customer.id
+              : undefined,
+          customer_email: (customer as any)?.email || shippingAddress?.email,
+          customer_name: customer?.name,
+          customer_phone: customer?.phone,
+          payment_method: result.method,
+          note: orderNote,
+          cashier: cashierName,
+          region_id: regionId,
+          fulfillment_type: fulfillmentType,
+          shipping_speed: shippingSpeed,
+          shipping_address:
+            fulfillmentType === 'ship' && shippingAddress
+              ? shippingAddress
+              : undefined,
+          stripe_payment_intent_id:
+            result.stripePaymentIntentId ??
+            result.splits?.find((s) => s.stripePaymentIntentId)
+              ?.stripePaymentIntentId,
+          stripe_payment_amount:
+            result.stripePaymentAmount ??
+            result.splits?.find((s) => s.stripePaymentIntentId)
+              ?.stripePaymentAmount,
+          gift_card_code: giftCardCode ?? undefined,
+          coupon_code: couponCode ?? undefined,
+          manual_discount_amount:
+            customDiscount > 0 ? customDiscount : undefined,
+          split_payments: result.splits?.map((s) => ({
+            method: s.method,
+            amount: s.amount,
+          })),
+        })
+        medusaOrderId = orderResult?.order?.id
+        trackingToken = orderResult?.trackingToken
+      } catch (err: unknown) {
+        console.error('[BillingPage] Medusa order create failed:', err)
+        toast.error('Sale not synced to Medusa', {
+          description:
+            (err instanceof Error ? err.message : 'Unknown error') +
+            ' — receipt is printing, but please record this sale manually and check stock.',
+          duration: 10000,
+        })
+      }
+    }
+    completeOrder(id, cashierName, medusaOrderId)
+    addRevenueEntry({
+      source: 'pos',
+      amount: total,
+      orderId: id,
+      cashier: cashierName,
+    })
+    const cashCollected =
+      result.method === 'cash'
+        ? amountDue
+        : result.method === 'split'
+          ? (result.splits ?? [])
+              .filter((s) => s.method === 'cash')
+              .reduce((sum, s) => sum + s.amount, 0)
+          : 0
+    if (cashCollected > 0) {
+      usePOSStore.getState().recordCashSale(cashCollected)
+    }
+    setOrderId(id)
+    setMedusaOrderId(medusaOrderId)
+    setTrackingToken(trackingToken)
+    setShowPayment(false)
+    setScreen('receipt')
+  }
+  const handleNewSale = () => {
+    clearCart()
+    setScreen('terminal')
+    setOrderId('')
+    setMedusaOrderId(undefined)
+    setTrackingToken(undefined)
+    setSplitPayments(null)
+  }
+  // Everything a printer needs for the receipt currently on screen. Shared by
+  // the normal print button (whatever printer is set up) and the explicit
+  // "Print on label printer" button.
+  const buildReceiptData = useCallback((): ReceiptData => {
+    const now = new Date()
+    const rounding = paymentMethod === 'cash' ? cashRounding(total) : 0
+    return {
+      storeName: STORE_DISPLAY_NAME,
+      addressLine1: STORE_ADDRESS_LINE1,
+      addressLine2: STORE_ADDRESS_LINE2,
+      phone: CONTACT_PHONE,
+      orderId,
+      dateStr: now.toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }),
+      timeStr: now.toLocaleTimeString('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      cashier: user?.name || 'Staff',
+      items: cartDisplayItems.map((i) => ({
+        name: i.name,
+        variantTitle: i.variantTitle,
+        quantity: i.quantity,
+        lineTotal: i.price * i.quantity - (i.discount ?? 0),
+        discount: i.discount && i.discount > 0 ? i.discount : undefined,
+      })),
+      subtotal,
+      discountAmount: discountTotal,
+      discountLabel: couponCode || 'Discount',
+      shippingAmount: shippingCost,
+      giftCardAmount: giftCardAmount ?? 0,
+      giftCardMasked: giftCardCode
+        ? `**** **** ${giftCardCode.slice(-4)}`
+        : undefined,
+      tax,
+      vatPct: Math.round(VAT_RATE * 100),
+      total,
+      rounding,
+      payMethodLabel: PAY_LABELS[paymentMethod] || paymentMethod,
+      change: paymentMethod === 'cash' ? rounding : 0,
+      splitPayments: splitPayments?.map((s) => ({
+        label: PAY_LABELS[s.method] || s.method,
+        amount: s.amount,
+      })),
+      shipTo:
+        fulfillmentType === 'ship' && shippingAddress?.address_1
+          ? {
+              name: `${shippingAddress.first_name} ${shippingAddress.last_name}`.trim(),
+              address1: shippingAddress.address_1,
+              cityPostcode:
+                `${shippingAddress.city} ${shippingAddress.postal_code}`.trim(),
+            }
+          : null,
+      orderNote,
+      currencySymbol: CURRENCY_SYMBOL,
+      logoUrl: SITE_LOGO,
+      // Same signed public tracking link the on-screen receipt's QR uses.
+      trackingUrl:
+        medusaOrderId && trackingToken
+          ? `${SITE_URL}/track/${encodeURIComponent(medusaOrderId)}?t=${encodeURIComponent(trackingToken)}`
+          : `${SITE_URL}/orders/${encodeURIComponent(orderId)}`,
+    }
+  }, [
+    orderId,
+    medusaOrderId,
+    trackingToken,
+    user,
+    cartDisplayItems,
+    subtotal,
+    discountTotal,
+    couponCode,
+    giftCardAmount,
+    giftCardCode,
+    tax,
+    total,
+    paymentMethod,
+    splitPayments,
+    fulfillmentType,
+    shippingAddress,
+    orderNote,
+    shippingCost,
+  ])
+  const handlePrintReceipt = useCallback(async () => {
+    const { connectionType } = usePrinterStore.getState()
+    if (connectionType === 'none') {
+      // No hardware printer configured — use the browser's print dialog.
+      await waitForPrintImages()
+      window.print()
+      return
+    }
+    try {
+      await printReceipt(buildReceiptData())
+    } catch (err: unknown) {
+      if (err instanceof NoPrinterConnectedError) {
+        await waitForPrintImages()
+        window.print()
+        return
+      }
+      toast.error(
+        connectionType === 'label'
+          ? 'Could not print on label printer'
+          : 'Could not print to receipt printer',
+        {
+          description:
+            err instanceof Error
+              ? err.message
+              : connectionType === 'label'
+                ? 'Unknown error'
+                : 'Unknown error — falling back to browser print.',
+        },
+      )
+      // A label printer failing must not spit a second copy out of the
+      // regular 80mm print dialog.
+      if (connectionType === 'label') return
+      await waitForPrintImages()
+      window.print()
+    }
+  }, [buildReceiptData])
+  // Explicit label-printer button on the receipt screen, independent of
+  // which printer is configured for normal receipts.
+  const handlePrintLabelReceipt = useCallback(async () => {
+    try {
+      await printReceiptOnLabel(buildReceiptData())
+    } catch (err: unknown) {
+      toast.error('Could not print on label printer', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    }
+  }, [buildReceiptData])
+  useEffect(() => {
+    if (screen === 'receipt' && autoPrintReceipt && orderId) {
+      handlePrintReceipt()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, orderId])
+  if (screen === 'receipt') {
+    return (
+      <div
+        className='flex-1 min-h-0'
+        style={{
+          opacity: mounted ? 1 : 0,
+          transform: mounted ? 'translateY(0)' : 'translateY(8px)',
+          transition: 'opacity 0.25s ease, transform 0.25s ease',
+        }}
+      >
+        <Receipt
+          orderId={orderId}
+          medusaOrderId={medusaOrderId}
+          trackingToken={trackingToken}
+          items={cartDisplayItems}
+          subtotal={subtotal}
+          discountAmount={discountTotal}
+          shippingAmount={shippingCost}
+          gst={tax}
+          total={total}
+          payMethod={paymentMethod}
+          splitPayments={splitPayments}
+          cashier={user?.name || 'Staff'}
+          couponCode={couponCode}
+          giftCardCode={giftCardCode}
+          giftCardAmount={giftCardAmount}
+          fulfillmentType={fulfillmentType}
+          shippingAddress={shippingAddress}
+          orderNote={orderNote}
+          onNewSale={handleNewSale}
+          onPrint={handlePrintReceipt}
+          onPrintLabel={
+            printerType !== 'label' ? handlePrintLabelReceipt : undefined
+          }
+          onEmail={() => {
+            if (!medusaOrderId) {
+              toast.error('Could not email receipt', {
+                description:
+                  'This sale never synced to Medusa, so there is no order to email. Record it manually.',
+              })
+              return
+            }
+            setShowEmailReceipt(true)
           }}
-        >
-          <span>Products failed to load: {indexError}</span>
-          <button
-            onClick={() => loadIndex()}
-            className='font-medium underline ml-2'
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      <div className='flex items-center gap-2'>
-        <div className='flex-1 min-w-0'>
-          <CategoryFilter
-            showAll={false}
-            categories={tabs.map((t) => t.label)}
-            selected={activeLabel}
-            onChange={(label) => {
-              const tab = tabs.find((t) => t.label === label)
-              if (tab) {
-                setActiveTabId(tab.id)
-                setRenamingTab(false)
-              }
+        />
+        {showEmailReceipt && (
+          <EmailReceiptModal
+            onClose={() => setShowEmailReceipt(false)}
+            defaultEmail={
+              (customer as any)?.email || shippingAddress?.email || ''
+            }
+            receipt={{
+              orderId: medusaOrderId ?? orderId,
+              items: cartDisplayItems,
+              subtotal,
+              discountAmount: discountTotal,
+              tax,
+              total,
+              payMethod: paymentMethod,
+              splitPayments,
+              cashier: user?.name || 'Staff',
             }}
           />
-        </div>
-        {customTabCount < MAX_CUSTOM_TABS && (
-          <button
-            type='button'
-            onClick={() => {
-              setAddingTab((v) => !v)
-              setRenamingTab(false)
-            }}
-            className='shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border'
-            style={{
-              background: '#FFFFFF',
-              color: '#008060',
-              borderColor: '#008060',
-            }}
-          >
-            + New tab
-          </button>
         )}
       </div>
-
-      {addingTab && (
-        <NewFavoriteTabInput
-          onSubmit={createTab}
-          onCancel={() => setAddingTab(false)}
-        />
-      )}
-
-      {renamingTab && activeTab.custom && (
-        <NewFavoriteTabInput
-          key={activeTab.id}
-          initialValue={activeTab.label}
-          placeholder='Tab name'
-          submitLabel='Save'
-          busyLabel='Saving...'
-          onSubmit={renameActiveTab}
-          onCancel={() => setRenamingTab(false)}
-        />
-      )}
-
-      <ProductSearch value={search} onChange={setSearch} />
-
-      <div className='flex items-center justify-between px-1'>
-        <p className='text-[11px]' style={{ color: '#8C9196' }}>
-          {isSearching
-            ? `Search results — tap the star to add to ${activeLabel}`
-            : `${pinnedForTab.length} pinned in ${activeLabel}`}
-        </p>
-        {activeTab.custom && !isSearching && (
-          <div className='flex items-center gap-2'>
+    )
+  }
+  const hasItems = items.length > 0
+  return (
+    <div
+      className='flex-1 flex flex-col lg:flex-row overflow-hidden h-full min-h-0'
+      style={{
+        opacity: mounted ? 1 : 0,
+        transform: mounted ? 'translateY(0)' : 'translateY(6px)',
+        transition: 'opacity 0.2s ease, transform 0.2s ease',
+      }}
+    >
+      {}
+      <div className='flex-1 min-h-0 flex flex-col overflow-hidden p-3 gap-2.5'>
+        {offlineSince !== null && (
+          <div
+            className='flex items-center justify-between px-3 py-2 rounded-lg text-xs'
+            style={{
+              background: '#FFF8E5',
+              border: '1px solid #F5D67A',
+              color: '#946200',
+            }}
+          >
+            <span>
+              You're offline — showing prices/stock last synced{' '}
+              {new Date(offlineSince).toLocaleTimeString('en-GB', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+              . Card payments will not work until reconnected.
+            </span>
             <button
-              type='button'
               onClick={() => {
-                setRenamingTab((v) => !v)
-                setAddingTab(false)
+                loadIndex()
               }}
-              aria-pressed={renamingTab}
-              className='inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-xs font-semibold border transition-colors hover:bg-[#F6F6F7]'
-              style={{
-                borderColor: renamingTab ? '#008060' : '#C9CCCF',
-                background: renamingTab ? '#F1F8F5' : '#FFFFFF',
-                color: renamingTab ? '#008060' : '#202223',
-              }}
+              className='font-medium underline ml-2 shrink-0'
             >
-              <PencilIcon size={15} />
-              Rename
-            </button>
-            <button
-              type='button'
-              onClick={() => setConfirmingDelete(true)}
-              className='inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-xs font-semibold border transition-colors hover:bg-[#FFF4F4]'
-              style={{
-                borderColor: '#F3C4BC',
-                background: '#FFFFFF',
-                color: '#D82C0D',
-              }}
-            >
-              <TrashIcon size={15} />
-              Delete
+              Retry
             </button>
           </div>
         )}
-      </div>
 
-      <div className='flex-1 min-h-0 overflow-y-auto'>
-        <ProductGrid
-          products={gridProducts}
-          isLoading={indexLoading}
-          pinnedIds={new Set(pinnedForTab)}
-          onTogglePin={(p) => toggleFavorite(activeTab.id, p.id)}
-          emptyMessage={
-            isSearching
-              ? 'No products found'
-              : `Nothing pinned in ${activeLabel} yet — search above and tap the star to add products`
-          }
-          onAdd={(p) => {
-            const group = productGroups.get(p.id) ?? [p]
-            if (group.length > 1) {
-              setVariantPickerFor(group)
-              return
-            }
-            handleAdd(p)
+        {indexError && (
+          <div
+            className='flex items-center justify-between px-3 py-2 rounded-lg text-xs'
+            style={{
+              background: '#FFF4F4',
+              border: '1px solid #FECACA',
+              color: '#D82C0D',
+            }}
+          >
+            <span>Products failed to load: {indexError}</span>
+            <button
+              onClick={() => loadIndex()}
+              className='font-medium underline ml-2'
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {indexLoading && (
+          <div
+            className='flex items-center gap-2 px-3 py-2 rounded-lg text-xs'
+            style={{
+              background: '#F2F7F5',
+              border: '1px solid #B5E4D8',
+              color: '#008060',
+            }}
+          >
+            <div
+              className='w-3 h-3 rounded-full border-2 animate-spin flex-shrink-0'
+              style={{
+                borderColor: '#B5E4D8',
+                borderTopColor: '#008060',
+              }}
+            />
+            <span>Loading products...</span>
+          </div>
+        )}
+
+        <ProductSearch
+          value={search}
+          onChange={setSearch}
+          onSubmit={handleScanSubmit}
+          onOpenCamera={() => setShowCameraScan(true)}
+        />
+        <CategoryFilter
+          categories={CATEGORIES}
+          selected={cat}
+          onChange={(next) => {
+            setCat(next)
+            setSize('All sizes')
+            setSizeTitle(null)
+            setSizeGroup(null)
           }}
         />
+        {SIZE_TITLES.length > 0 && (
+          <div className='flex gap-1.5'>
+            {SIZE_TITLES.map((title) => {
+              const isSelected = sizeTitle === title && size !== 'All sizes'
+              const isOpen = sizeGroup === title
+              return (
+                <button
+                  key={title}
+                  onClick={() =>
+                    setSizeGroup((g) => (g === title ? null : title))
+                  }
+                  className='flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap border transition-all'
+                  style={{
+                    background: isOpen || isSelected ? '#008060' : '#FFFFFF',
+                    color: isOpen || isSelected ? '#FFFFFF' : '#6D7175',
+                    borderColor: isOpen || isSelected ? '#008060' : '#E1E3E5',
+                  }}
+                >
+                  {isSelected ? `${title}: ${size}` : title}
+                  {isSelected && (
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSize('All sizes')
+                        setSizeTitle(null)
+                      }}
+                      className='ml-0.5'
+                    >
+                      ✕
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {sizeGroup && (
+          <CategoryFilter
+            categories={sizeValuesForTitle(sizeGroup)}
+            selected={sizeTitle === sizeGroup ? size : 'All'}
+            onChange={(next) => {
+              if (next === 'All') {
+                setSize('All sizes')
+                setSizeTitle(null)
+              } else {
+                setSize(next)
+                setSizeTitle(sizeGroup)
+              }
+              setSizeGroup(null)
+            }}
+          />
+        )}
+        <div className='flex-1 min-h-0 overflow-y-auto'>
+          {hiddenCount > 0 && (
+            <p className='text-[11px] px-1 pb-1.5' style={{ color: '#8C9196' }}>
+              Showing {MAX_VISIBLE} of {matchedIndexEntries.length} matches —
+              type to search or pick a category to narrow it down.
+            </p>
+          )}
+          <ProductGrid
+            products={gridProducts}
+            isLoading={indexLoading}
+            pinnedIds={pinnedIds}
+            onTogglePin={(p) => setPinPickerFor(p)}
+            onAdd={(p) => {
+              const group = productGroups.get(p.id) ?? [p]
+              if (group.length > 1) {
+                setVariantPickerFor(group)
+                return
+              }
+              handleAdd(p)
+              setMobileCartOpen(true)
+            }}
+          />
+        </div>
       </div>
 
-      {cartCount > 0 && (
-        <button
-          onClick={() => router.push('/pos/terminal/billing')}
-          className='shrink-0 flex items-center justify-between px-4 py-3 rounded-lg text-sm font-semibold'
-          style={{ background: '#008060', color: '#FFFFFF' }}
-        >
-          <span>
-            {cartCount} item{cartCount === 1 ? '' : 's'} in cart
-          </span>
-          <span>
-            Go to Billing · {CURRENCY_SYMBOL}
-            {total.toFixed(2)}
-          </span>
-        </button>
+      {pinPickerFor && (
+        <FavoritePinModal
+          productName={pinPickerFor.name}
+          image={pinPickerFor.image}
+          tabs={favoriteTabs}
+          pinnedTabs={
+            new Set(
+              favoriteTabs
+                .filter((t) =>
+                  (favorites[t.id] ?? []).includes(pinPickerFor.id),
+                )
+                .map((t) => t.id),
+            )
+          }
+          onToggle={(tab) => toggleFavorite(tab, pinPickerFor.id)}
+          onCreateTab={(label) => createFavoriteTab(label, pinPickerFor.id)}
+          onClose={() => setPinPickerFor(null)}
+        />
       )}
 
       {variantPickerFor && (
@@ -492,38 +1197,445 @@ export default function FavoritesPage() {
           onSelect={(v) => {
             handleAdd(v)
             setVariantPickerFor(null)
+            setMobileCartOpen(true)
           }}
           onClose={() => setVariantPickerFor(null)}
         />
       )}
 
-      {confirmingDelete && activeTab.custom && (
-        <ConfirmDialog
-          title='Delete this tab?'
-          message={
-            <>
-              <span className='font-medium' style={{ color: '#202223' }}>
-                {activeTab.label}
-              </span>{' '}
-              will be removed
-              {pinnedForTab.length > 0 ? (
-                <>
-                  {' '}
-                  and{' '}
-                  <span className='font-medium' style={{ color: '#202223' }}>
-                    {pinnedForTab.length} pinned product
-                    {pinnedForTab.length !== 1 ? 's' : ''}
-                  </span>{' '}
-                  will be unpinned from it
-                </>
-              ) : null}
-              . The products themselves are not deleted.
-            </>
-          }
-          confirmLabel='Delete tab'
-          busy={deletingTab}
-          onConfirm={deleteActiveTab}
-          onCancel={() => setConfirmingDelete(false)}
+      {}
+      {hasItems && (
+        <div className='lg:hidden fixed bottom-16 left-0 right-0 z-30 flex justify-center pointer-events-none'>
+          <button
+            onClick={() => setMobileCartOpen(true)}
+            className='pointer-events-auto flex items-center gap-2.5 px-5 py-3 rounded-full text-sm font-semibold shadow-xl'
+            style={{
+              background: '#008060',
+              color: '#fff',
+            }}
+          >
+            <span className='flex items-center justify-center w-5 h-5 rounded-full bg-white/20 text-xs font-bold'>
+              {items.reduce((s, i) => s + i.quantity, 0)}
+            </span>
+            View Cart
+            <span className='font-bold'>£{total.toFixed(2)}</span>
+          </button>
+        </div>
+      )}
+
+      {}
+      <div
+        className={`lg:hidden fixed inset-0 z-40 transition-all duration-300 ${mobileCartOpen ? 'visible' : 'invisible'}`}
+      >
+        {}
+        <div
+          className={`absolute inset-0 bg-black transition-opacity duration-300 ${mobileCartOpen ? 'opacity-40' : 'opacity-0'}`}
+          onClick={() => setMobileCartOpen(false)}
+        />
+        {}
+        <div
+          className={`absolute bottom-0 left-0 right-0 flex flex-col rounded-t-2xl overflow-hidden transition-transform duration-300 ${mobileCartOpen ? 'translate-y-0' : 'translate-y-full'}`}
+          style={{
+            background: '#fff',
+            maxHeight: '80dvh',
+          }}
+        >
+          {}
+          <div
+            className='flex items-center justify-between px-4 py-3 shrink-0'
+            style={{
+              borderBottom: '1px solid #E1E3E5',
+            }}
+          >
+            <span className='text-sm font-semibold text-[#202223]'>
+              Cart · {items.reduce((s, i) => s + i.quantity, 0)} items
+            </span>
+            <button
+              onClick={() => setMobileCartOpen(false)}
+              className='w-7 h-7 flex items-center justify-center rounded-full bg-[#F1F2F3] text-[#6D7175] text-lg leading-none'
+            >
+              ×
+            </button>
+          </div>
+          <div className='flex-1 min-h-0 overflow-y-auto'>
+            <BillingCart
+              items={cartDisplayItems}
+              subtotal={subtotal}
+              discountAmount={discountTotal}
+              shippingAmount={shippingCost}
+              gst={tax}
+              total={total}
+              giftCardCode={giftCardCode}
+              giftCardAmount={giftCardAmount}
+              amountDue={amountDue}
+              onIncrease={handleIncrease}
+              onDecrease={handleDecrease}
+              onRemove={handleRemove}
+              onDiscountPercentChange={(percent) =>
+                usePOSStore.getState().applyPercentageDiscount(percent)
+              }
+              onCharge={() => {
+                setMobileCartOpen(false)
+                handleChargeClick()
+              }}
+              onClear={clearCart}
+            />
+          </div>
+        </div>
+      </div>
+
+      {}
+      <div
+        className='hidden lg:flex w-72 xl:w-80 flex-col overflow-hidden'
+        style={{
+          borderLeft: '1px solid #E1E3E5',
+          minHeight: 0,
+        }}
+      >
+        <div
+          className='flex items-center gap-1.5 px-3 py-2 shrink-0 overflow-x-auto'
+          style={{
+            background: '#FFFFFF',
+            borderBottom: '1px solid #E1E3E5',
+          }}
+        >
+          <button
+            onClick={() => setShowCustomer(true)}
+            className='flex items-center gap-1 px-2 py-1.5 rounded text-xs border transition-all flex-1'
+            style={{
+              borderColor: customer ? '#008060' : '#E1E3E5',
+              color: customer ? '#008060' : '#6D7175',
+              background: customer ? '#F2F7F5' : '#FFFFFF',
+            }}
+          >
+            <svg
+              width='12'
+              height='12'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1.5'
+              strokeLinecap='round'
+            >
+              <path d='M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2' />
+              <circle cx='12' cy='7' r='4' />
+            </svg>
+            <span className='truncate'>
+              {customer ? customer.name : 'Customer'}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setShowFulfillment(true)}
+            className='p-1.5 rounded border transition-all'
+            title='Pickup or ship to customer'
+            style={{
+              borderColor: fulfillmentType === 'ship' ? '#008060' : '#E1E3E5',
+              color: fulfillmentType === 'ship' ? '#008060' : '#6D7175',
+              background: fulfillmentType === 'ship' ? '#F2F7F5' : '#FFFFFF',
+            }}
+          >
+            {fulfillmentType === 'ship' ? (
+              <svg
+                width='13'
+                height='13'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='1.5'
+                strokeLinecap='round'
+              >
+                <path d='M16.5 9.4 7.55 4.24' />
+                <path d='M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z' />
+                <path d='M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12' />
+              </svg>
+            ) : (
+              <svg
+                width='13'
+                height='13'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='1.5'
+                strokeLinecap='round'
+              >
+                <path d='M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z' />
+                <path d='M3 6h18M16 10a4 4 0 01-8 0' />
+              </svg>
+            )}
+          </button>
+
+          <button
+            onClick={() => setShowNote(true)}
+            className='p-1.5 rounded border transition-all'
+            title='Add note'
+            style={{
+              borderColor: orderNote ? '#008060' : '#E1E3E5',
+              color: orderNote ? '#008060' : '#6D7175',
+              background: orderNote ? '#F2F7F5' : '#FFFFFF',
+            }}
+          >
+            <svg
+              width='13'
+              height='13'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1.5'
+              strokeLinecap='round'
+            >
+              <path d='M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7' />
+              <path d='M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z' />
+            </svg>
+          </button>
+
+          <button
+            onClick={() => setShowDiscount(true)}
+            className='flex items-center gap-1 px-2 py-1.5 rounded text-xs border transition-all shrink-0'
+            title='Add discount'
+            style={{
+              borderColor:
+                customDiscount > 0 || couponCode ? '#008060' : '#E1E3E5',
+              color: customDiscount > 0 || couponCode ? '#008060' : '#6D7175',
+              background:
+                customDiscount > 0 || couponCode ? '#F2F7F5' : '#FFFFFF',
+            }}
+          >
+            <svg
+              width='13'
+              height='13'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1.5'
+              strokeLinecap='round'
+            >
+              <path d='M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z' />
+              <line x1='7' y1='7' x2='7.01' y2='7' />
+            </svg>
+            <span className='whitespace-nowrap'>Discount</span>
+          </button>
+
+          <button
+            onClick={() => setShowGiftCard(true)}
+            className='flex items-center gap-1 px-2 py-1.5 rounded text-xs border transition-all shrink-0'
+            title='Redeem gift card'
+            style={{
+              borderColor: giftCardCode ? '#008060' : '#E1E3E5',
+              color: giftCardCode ? '#008060' : '#6D7175',
+              background: giftCardCode ? '#F2F7F5' : '#FFFFFF',
+            }}
+          >
+            <svg
+              width='13'
+              height='13'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1.5'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <rect x='2' y='6' width='20' height='12' rx='2' />
+              <circle cx='7.5' cy='12' r='2' />
+              <path d='M14 10h4M14 14h4' />
+            </svg>
+            <span className='whitespace-nowrap'>Gift Card</span>
+          </button>
+
+          <button
+            onClick={() => setShowSavedCarts(true)}
+            className='p-1.5 rounded border transition-all'
+            title='Saved carts'
+            style={{
+              borderColor: '#E1E3E5',
+              color: '#6D7175',
+              background: '#FFFFFF',
+            }}
+          >
+            <svg
+              width='13'
+              height='13'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1.5'
+              strokeLinecap='round'
+            >
+              <path d='M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z' />
+              <polyline points='17 21 17 13 7 13 7 21' />
+              <polyline points='7 3 7 8 15 8' />
+            </svg>
+          </button>
+
+          <button
+            onClick={handleOpenReturn}
+            className='p-1.5 rounded border transition-all hover:border-[#D82C0D] hover:text-[#D82C0D]'
+            title='Process a return'
+            style={{
+              borderColor: '#E1E3E5',
+              color: '#6D7175',
+              background: '#FFFFFF',
+            }}
+          >
+            <svg
+              width='13'
+              height='13'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <polyline points='9 14 4 9 9 4' />
+              <path d='M20 20v-7a4 4 0 00-4-4H4' />
+            </svg>
+          </button>
+
+          {items.length > 0 && (
+            <button
+              onClick={() => setShowVoid(true)}
+              className='p-1.5 rounded border transition-all hover:border-[#D82C0D] hover:text-[#D82C0D]'
+              title='Void sale'
+              style={{
+                borderColor: '#E1E3E5',
+                color: '#6D7175',
+                background: '#FFFFFF',
+              }}
+            >
+              <svg
+                width='13'
+                height='13'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='1.5'
+                strokeLinecap='round'
+              >
+                <circle cx='12' cy='12' r='10' />
+                <line x1='4.93' y1='4.93' x2='19.07' y2='19.07' />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {orderNote && (
+          <div
+            className='px-3 py-1.5 flex items-center gap-2 text-xs shrink-0'
+            style={{
+              background: '#FFFBEB',
+              borderBottom: '1px solid #FDE68A',
+            }}
+          >
+            <svg
+              width='12'
+              height='12'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='#B7791F'
+              strokeWidth='1.5'
+              strokeLinecap='round'
+            >
+              <path d='M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7' />
+              <path d='M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z' />
+            </svg>
+            <span
+              className='truncate flex-1'
+              style={{
+                color: '#B7791F',
+              }}
+            >
+              {orderNote}
+            </span>
+          </div>
+        )}
+
+        <div className='flex-1 min-h-0 overflow-hidden'>
+          <BillingCart
+            items={cartDisplayItems}
+            discountAmount={discountTotal}
+            shippingAmount={shippingCost}
+            gst={tax}
+            total={total}
+            subtotal={subtotal}
+            giftCardCode={giftCardCode}
+            giftCardAmount={giftCardAmount}
+            amountDue={amountDue}
+            onIncrease={handleIncrease}
+            onDecrease={handleDecrease}
+            onRemove={handleRemove}
+            onDiscountPercentChange={(percent) =>
+              usePOSStore.getState().applyPercentageDiscount(percent)
+            }
+            onCharge={handleChargeClick}
+            onClear={clearCart}
+          />
+        </div>
+      </div>
+      {}
+
+      {}
+      {showPayment && (
+        <PaymentModal
+          total={amountDue}
+          onConfirm={handleConfirmPayment}
+          onClose={() => setShowPayment(false)}
+        />
+      )}
+      {showCustomer && (
+        <CustomerSearch
+          required={pendingCharge}
+          onClose={() => {
+            setShowCustomer(false)
+            if (pendingCharge) {
+              setPendingCharge(false)
+              setShowFulfillment(true)
+            }
+          }}
+        />
+      )}
+      {showDiscount && <DiscountModal onClose={() => setShowDiscount(false)} />}
+      {showGiftCard && <GiftCardModal onClose={() => setShowGiftCard(false)} />}
+      {showCameraScan && (
+        <CameraBarcodeScanner
+          onDetected={(code) => {
+            setShowCameraScan(false)
+            handleScanSubmit(code)
+          }}
+          onClose={() => setShowCameraScan(false)}
+        />
+      )}
+      {showNote && <NoteModal onClose={() => setShowNote(false)} />}
+      {showFulfillment && (
+        <FulfillmentModal
+          onClose={() => setShowFulfillment(false)}
+          onSave={() => setShowPayment(true)}
+        />
+      )}
+      {showVoid && (
+        <VoidModal
+          onConfirm={() => {
+            voidSale()
+            setShowVoid(false)
+          }}
+          onClose={() => setShowVoid(false)}
+        />
+      )}
+      {showSavedCarts && (
+        <SavedCarts
+          onClose={() => setShowSavedCarts(false)}
+          onSave={() => setShowSavedCarts(false)}
+        />
+      )}
+      {showReturn && (
+        <ReturnModal
+          orders={returnOrders}
+          onReturned={() => {
+            setShowReturn(false)
+            toast.success('Return processed')
+          }}
+          onClose={() => setShowReturn(false)}
         />
       )}
     </div>
