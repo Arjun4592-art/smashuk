@@ -13,11 +13,18 @@ import {
   InfoIcon,
   ListIcon,
   BoltIcon,
+  StarIcon,
 } from '@/components/ui/Icons'
 import POSProfileModal from '@/components/pos/POSProfileModal'
 import { SITE_LOGO, SITE_NAME } from '@/lib/constants'
 type Tab =
-  'billing' | 'orders' | 'products' | 'analytics' | 'customers' | 'settings'
+  | 'billing'
+  | 'favorites'
+  | 'orders'
+  | 'products'
+  | 'analytics'
+  | 'customers'
+  | 'settings'
 interface Props {
   user: any
   tab: Tab
@@ -36,6 +43,11 @@ const TABS: {
     id: 'billing',
     label: 'Billing',
     icon: <CartIcon size={14} />,
+  },
+  {
+    id: 'favorites',
+    label: 'Favorites',
+    icon: <StarIcon size={14} filled={false} />,
   },
   {
     id: 'orders',

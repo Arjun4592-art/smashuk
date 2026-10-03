@@ -1,22 +1,36 @@
 'use client'
 
-import { FAVORITE_TABS, type FavoriteTabId } from '@/lib/pos/favorites'
+import { useState } from 'react'
+import {
+  MAX_CUSTOM_TABS,
+  type FavoriteTab,
+  type FavoriteTabId,
+} from '@/lib/pos/favorites'
+import NewFavoriteTabInput from '@/components/pos/NewFavoriteTabInput'
 
 interface Props {
   productName: string
   image?: string
+  tabs: FavoriteTab[]
   pinnedTabs: Set<FavoriteTabId>
   onToggle: (tab: FavoriteTabId) => void
+  /** Creates a new tab and pins this product to it. Should throw on failure. */
+  onCreateTab: (label: string) => Promise<void>
   onClose: () => void
 }
 
 export default function FavoritePinModal({
   productName,
   image,
+  tabs,
   pinnedTabs,
   onToggle,
+  onCreateTab,
   onClose,
 }: Props) {
+  const [adding, setAdding] = useState(false)
+  const customCount = tabs.filter((t) => t.custom).length
+  const canAddTab = customCount < MAX_CUSTOM_TABS
   return (
     <div
       className='fixed inset-0 flex items-center justify-center z-50 p-4'
@@ -61,7 +75,7 @@ export default function FavoritePinModal({
         </div>
 
         <div className='overflow-y-auto p-2'>
-          {FAVORITE_TABS.map((tab) => {
+          {tabs.map((tab) => {
             const on = pinnedTabs.has(tab.id)
             return (
               <button
@@ -86,6 +100,30 @@ export default function FavoritePinModal({
           })}
         </div>
 
+        <div className='px-5 py-3 border-t' style={{ borderColor: '#E1E3E5' }}>
+          {adding ? (
+            <NewFavoriteTabInput
+              onSubmit={async (label) => {
+                await onCreateTab(label)
+                setAdding(false)
+              }}
+              onCancel={() => setAdding(false)}
+            />
+          ) : canAddTab ? (
+            <button
+              type='button'
+              onClick={() => setAdding(true)}
+              className='text-sm font-semibold'
+              style={{ color: '#008060' }}
+            >
+              + New tab
+            </button>
+          ) : (
+            <p className='text-xs' style={{ color: '#8C9196' }}>
+              Maximum of {MAX_CUSTOM_TABS} custom tabs reached
+            </p>
+          )}
+        </div>
         <div className='p-3 border-t' style={{ borderColor: '#E1E3E5' }}>
           <button
             onClick={onClose}

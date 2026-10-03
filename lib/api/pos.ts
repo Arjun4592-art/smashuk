@@ -1,5 +1,7 @@
 import {
   sanitizeFavorites,
+  sanitizeTabs,
+  type FavoriteTab,
   type FavoritesMap,
   type FavoriteTabId,
 } from '@/lib/pos/favorites'
@@ -872,26 +874,39 @@ export async function fetchPOSDetailsForVariants(
   }
 }
 
-const FAVORITES_LS_KEY = 'pos-favorites-v1'
-function readFavoritesCache(): FavoritesMap | null {
+const FAVORITES_LS_KEY = 'pos-favorites-v2'
+export interface POSFavoritesState {
+  favorites: FavoritesMap
+  tabs: FavoriteTab[]
+}
+// Custom tabs are the only part of `tabs` that varies, so the server's
+// response is re-sanitised here the same way before use / caching.
+function parseFavoritesState(data: unknown): POSFavoritesState {
+  const d = (data ?? {}) as { favorites?: unknown; tabs?: unknown }
+  const rawCustom = Array.isArray(d.tabs)
+    ? d.tabs.filter((t) => (t as FavoriteTab)?.custom)
+    : []
+  const tabs = sanitizeTabs(rawCustom)
+  return { tabs, favorites: sanitizeFavorites(d.favorites, tabs) }
+}
+function readFavoritesCache(): POSFavoritesState | null {
   try {
     if (typeof window === 'undefined') return null
     const raw = window.localStorage.getItem(FAVORITES_LS_KEY)
-    return raw ? sanitizeFavorites(JSON.parse(raw)) : null
+    return raw ? parseFavoritesState(JSON.parse(raw)) : null
   } catch {
     return null
   }
 }
-function writeFavoritesCache(favorites: FavoritesMap) {
+function writeFavoritesCache(state: POSFavoritesState) {
   try {
     if (typeof window === 'undefined') return
-    window.localStorage.setItem(FAVORITES_LS_KEY, JSON.stringify(favorites))
+    window.localStorage.setItem(FAVORITES_LS_KEY, JSON.stringify(state))
   } catch {}
 }
-export async function fetchPOSFavorites(): Promise<{
-  favorites: FavoritesMap
-  fromCache: boolean
-}> {
+export async function fetchPOSFavorites(): Promise<
+  POSFavoritesState & { fromCache: boolean }
+> {
   try {
     const res = await fetch('/api/pos/favorites', {
       method: 'GET',
@@ -901,29 +916,34 @@ export async function fetchPOSFavorites(): Promise<{
       const errorData = await res.json().catch(() => ({}))
       throw new Error(errorData.error || `HTTP ${res.status}`)
     }
-    const data = await res.json()
-    const favorites = sanitizeFavorites(data.favorites)
-    writeFavoritesCache(favorites)
-    return { favorites, fromCache: false }
+    const state = parseFavoritesState(await res.json())
+    writeFavoritesCache(state)
+    return { ...state, fromCache: false }
   } catch (err) {
     const cached = readFavoritesCache()
-    if (cached) return { favorites: cached, fromCache: true }
+    if (cached) return { ...cached, fromCache: true }
     throw err
   }
 }
-export async function updatePOSFavorite(
-  action: 'pin' | 'unpin',
-  tab: FavoriteTabId,
-  productId: string,
-): Promise<FavoritesMap> {
+export type POSFavoritesUpdate =
+  | { action: 'pin' | 'unpin'; tab: FavoriteTabId; productId: string }
+  | { action: 'addTab'; label: string; productId?: string }
+  | { action: 'renameTab'; tab: FavoriteTabId; label: string }
+  | { action: 'deleteTab'; tab: FavoriteTabId }
+export async function updatePOSFavorites(
+  update: POSFavoritesUpdate,
+): Promise<POSFavoritesState & { tabId?: string }> {
   const res = await fetch('/api/pos/favorites', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, tab, productId }),
+    body: JSON.stringify(update),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-  const favorites = sanitizeFavorites(data.favorites)
-  writeFavoritesCache(favorites)
-  return favorites
+  const state = parseFavoritesState(data)
+  writeFavoritesCache(state)
+  return {
+    ...state,
+    tabId: typeof data.tabId === 'string' ? data.tabId : undefined,
+  }
 }

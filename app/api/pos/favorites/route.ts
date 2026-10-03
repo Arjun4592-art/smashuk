@@ -3,9 +3,15 @@ import { cookies } from 'next/headers'
 import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import {
+  MAX_CUSTOM_TABS,
   MAX_FAVORITES_PER_TAB,
-  isFavoriteTabId,
+  customTabsOnly,
+  newCustomTabId,
+  normalizeTabLabel,
   sanitizeFavorites,
+  sanitizeTabs,
+  tabLabelExists,
+  type FavoriteTab,
   type FavoritesMap,
 } from '@/lib/pos/favorites'
 
@@ -35,15 +41,23 @@ async function loadStore(): Promise<{
   return { id: store.id, metadata: store.metadata ?? {} }
 }
 
+function readState(metadata: Record<string, unknown>): {
+  tabs: FavoriteTab[]
+  favorites: FavoritesMap
+} {
+  const tabs = sanitizeTabs(metadata.posFavoriteTabs)
+  const favorites = sanitizeFavorites(metadata.posFavorites, tabs)
+  return { tabs, favorites }
+}
+
 export async function GET() {
   if (!(await requirePosSession())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   try {
     const store = await loadStore()
-    return NextResponse.json({
-      favorites: sanitizeFavorites(store.metadata.posFavorites),
-    })
+    const { tabs, favorites } = readState(store.metadata)
+    return NextResponse.json({ favorites, tabs })
   } catch (err: any) {
     console.error('[POS] Favorites GET error:', err.message)
     return NextResponse.json(
@@ -59,42 +73,94 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json().catch(() => ({}))
-    const { action, tab, productId } = body ?? {}
-    if (action !== 'pin' && action !== 'unpin') {
+    const { action, tab, productId, label } = body ?? {}
+    if (
+      action !== 'pin' &&
+      action !== 'unpin' &&
+      action !== 'addTab' &&
+      action !== 'renameTab' &&
+      action !== 'deleteTab'
+    ) {
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
-    }
-    if (!isFavoriteTabId(tab)) {
-      return NextResponse.json({ error: 'Invalid tab' }, { status: 400 })
-    }
-    if (typeof productId !== 'string' || !productId) {
-      return NextResponse.json({ error: 'productId required' }, { status: 400 })
     }
 
     const store = await loadStore()
-    const favorites: FavoritesMap = sanitizeFavorites(
-      store.metadata.posFavorites,
-    )
-    const list = favorites[tab]
-    if (action === 'pin') {
-      if (!list.includes(productId)) {
-        if (list.length >= MAX_FAVORITES_PER_TAB) {
-          return NextResponse.json(
-            {
-              error: `This tab already has ${MAX_FAVORITES_PER_TAB} favorites`,
-            },
-            { status: 400 },
-          )
-        }
-        list.push(productId)
+    let { tabs, favorites } = readState(store.metadata)
+    let createdTabId: string | undefined
+
+    const fail = (error: string, status = 400) =>
+      NextResponse.json({ error }, { status })
+
+    if (action === 'pin' || action === 'unpin') {
+      if (typeof tab !== 'string' || !tabs.some((t) => t.id === tab)) {
+        return fail('Invalid tab')
       }
+      if (typeof productId !== 'string' || !productId) {
+        return fail('productId required')
+      }
+      const list = favorites[tab]
+      if (action === 'pin') {
+        if (!list.includes(productId)) {
+          if (list.length >= MAX_FAVORITES_PER_TAB) {
+            return fail(
+              `This tab already has ${MAX_FAVORITES_PER_TAB} favorites`,
+            )
+          }
+          list.push(productId)
+        }
+      } else {
+        favorites[tab] = list.filter((id) => id !== productId)
+      }
+    } else if (action === 'addTab') {
+      const cleanLabel = normalizeTabLabel(label)
+      if (!cleanLabel) return fail('Enter a tab name')
+      if (tabLabelExists(tabs, cleanLabel)) {
+        return fail('A tab with that name already exists')
+      }
+      if (tabs.filter((t) => t.custom).length >= MAX_CUSTOM_TABS) {
+        return fail(`You can add up to ${MAX_CUSTOM_TABS} custom tabs`)
+      }
+      if (
+        productId !== undefined &&
+        (typeof productId !== 'string' || !productId)
+      ) {
+        return fail('Invalid productId')
+      }
+      createdTabId = newCustomTabId()
+      tabs = [...tabs, { id: createdTabId, label: cleanLabel, custom: true }]
+      favorites = {
+        ...favorites,
+        [createdTabId]: typeof productId === 'string' ? [productId] : [],
+      }
+    } else if (action === 'renameTab') {
+      const target = tabs.find((t) => t.id === tab)
+      if (!target) return fail('Tab not found', 404)
+      if (!target.custom) return fail('Built-in tabs cannot be renamed')
+      const cleanLabel = normalizeTabLabel(label)
+      if (!cleanLabel) return fail('Enter a tab name')
+      if (tabLabelExists(tabs, cleanLabel, target.id)) {
+        return fail('A tab with that name already exists')
+      }
+      tabs = tabs.map((t) =>
+        t.id === target.id ? { ...t, label: cleanLabel } : t,
+      )
     } else {
-      favorites[tab] = list.filter((id) => id !== productId)
+      // deleteTab
+      const target = tabs.find((t) => t.id === tab)
+      if (!target) return fail('Tab not found', 404)
+      if (!target.custom) return fail('Built-in tabs cannot be deleted')
+      tabs = tabs.filter((t) => t.id !== target.id)
+      favorites = sanitizeFavorites(favorites, tabs)
     }
 
     const saveRes = await medusaServiceFetch(`/admin/stores/${store.id}`, {
       method: 'POST',
       body: JSON.stringify({
-        metadata: { ...store.metadata, posFavorites: favorites },
+        metadata: {
+          ...store.metadata,
+          posFavorites: favorites,
+          posFavoriteTabs: customTabsOnly(tabs),
+        },
       }),
     })
     if (!saveRes.ok) {
@@ -103,7 +169,7 @@ export async function POST(req: NextRequest) {
         `Medusa save error ${saveRes.status}: ${text.slice(0, 200)}`,
       )
     }
-    return NextResponse.json({ favorites })
+    return NextResponse.json({ favorites, tabs, tabId: createdTabId })
   } catch (err: any) {
     console.error('[POS] Favorites POST error:', err.message)
     return NextResponse.json(

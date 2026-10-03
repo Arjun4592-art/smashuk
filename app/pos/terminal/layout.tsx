@@ -14,9 +14,16 @@ import CashDrawer from '@/components/pos/CashDrawer'
 import StaffManagement from '@/components/pos/StaffManagement'
 import AuthProvider from '@/components/providers/AuthProvider'
 type Tab =
-  'billing' | 'orders' | 'products' | 'analytics' | 'customers' | 'settings'
+  | 'billing'
+  | 'favorites'
+  | 'orders'
+  | 'products'
+  | 'analytics'
+  | 'customers'
+  | 'settings'
 const TAB_ROUTES: Record<Tab, string> = {
   billing: '/pos/terminal/billing',
+  favorites: '/pos/terminal/favorites',
   orders: '/pos/terminal/orders',
   products: '/pos/terminal/products',
   analytics: '/pos/terminal/analytics',
@@ -24,6 +31,7 @@ const TAB_ROUTES: Record<Tab, string> = {
   settings: '/pos/terminal/settings',
 }
 function getTabFromPath(pathname: string): Tab {
+  if (pathname.includes('/favorites')) return 'favorites'
   if (pathname.includes('/orders')) return 'orders'
   if (pathname.includes('/products')) return 'products'
   if (pathname.includes('/analytics')) return 'analytics'

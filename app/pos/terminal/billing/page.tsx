@@ -7,7 +7,7 @@ import {
   fetchPOSIndex,
   fetchPOSDetailsForVariants,
   fetchPOSFavorites,
-  updatePOSFavorite,
+  updatePOSFavorites,
   type POSIndexEntry,
   type POSDetailEntry,
 } from '@/lib/api/pos'
@@ -17,9 +17,10 @@ import ProductGrid, { POSProduct } from '@/components/pos/ProductGrid'
 import VariantPickerModal from '@/components/pos/VariantPickerModal'
 import FavoritePinModal from '@/components/pos/FavoritePinModal'
 import {
-  FAVORITE_TABS,
+  DEFAULT_FAVORITE_TABS,
   MAX_FAVORITES_PER_TAB,
   emptyFavorites,
+  type FavoriteTab,
   type FavoriteTabId,
   type FavoritesMap,
 } from '@/lib/pos/favorites'
@@ -75,7 +76,6 @@ function cashRounding(total: number) {
   return Math.ceil(total) - total
 }
 type Screen = 'terminal' | 'receipt'
-const FAVORITES_CAT = '★ Favorites'
 export default function BillingPage() {
   const [screen, setScreen] = useState<Screen>('terminal')
   const [orderId, setOrderId] = useState('')
@@ -87,8 +87,12 @@ export default function BillingPage() {
   )
   const [search, setSearch] = useState('')
   const [cat, setCat] = useState('All')
-  const [favTab, setFavTab] = useState<FavoriteTabId>(FAVORITE_TABS[0].id)
-  const [favorites, setFavorites] = useState<FavoritesMap>(emptyFavorites)
+  const [favorites, setFavorites] = useState<FavoritesMap>(() =>
+    emptyFavorites(),
+  )
+  const [favoriteTabs, setFavoriteTabs] = useState<FavoriteTab[]>(
+    DEFAULT_FAVORITE_TABS,
+  )
   const [pinPickerFor, setPinPickerFor] = useState<POSProduct | null>(null)
   const [size, setSize] = useState('All sizes')
   const [sizeTitle, setSizeTitle] = useState<string | null>(null)
@@ -239,7 +243,10 @@ export default function BillingPage() {
   favoritesRef.current = favorites
   useEffect(() => {
     fetchPOSFavorites()
-      .then(({ favorites: saved }) => setFavorites(saved))
+      .then(({ favorites: saved, tabs: savedTabs }) => {
+        setFavorites(saved)
+        setFavoriteTabs(savedTabs)
+      })
       .catch((err) => {
         console.error('[POS] Favorites load failed:', err)
         toast.error('Could not load Favorites')
@@ -248,30 +255,31 @@ export default function BillingPage() {
   const toggleFavorite = useCallback(
     async (tab: FavoriteTabId, productId: string) => {
       const current = favoritesRef.current
-      const wasPinned = current[tab].includes(productId)
-      if (!wasPinned && current[tab].length >= MAX_FAVORITES_PER_TAB) {
+      const wasPinned = (current[tab] ?? []).includes(productId)
+      if (!wasPinned && (current[tab] ?? []).length >= MAX_FAVORITES_PER_TAB) {
         toast.error(`This tab already has ${MAX_FAVORITES_PER_TAB} favorites`)
         return
       }
       const apply = (map: FavoritesMap, pin: boolean): FavoritesMap => ({
         ...map,
         [tab]: pin
-          ? map[tab].includes(productId)
+          ? (map[tab] ?? []).includes(productId)
             ? map[tab]
-            : [...map[tab], productId]
-          : map[tab].filter((id) => id !== productId),
+            : [...(map[tab] ?? []), productId]
+          : (map[tab] ?? []).filter((id) => id !== productId),
       })
       const optimistic = apply(current, !wasPinned)
       favoritesRef.current = optimistic
       setFavorites(optimistic)
       try {
-        const saved = await updatePOSFavorite(
-          wasPinned ? 'unpin' : 'pin',
+        const saved = await updatePOSFavorites({
+          action: wasPinned ? 'unpin' : 'pin',
           tab,
           productId,
-        )
-        favoritesRef.current = saved
-        setFavorites(saved)
+        })
+        favoritesRef.current = saved.favorites
+        setFavorites(saved.favorites)
+        setFavoriteTabs(saved.tabs)
       } catch (err: unknown) {
         const reverted = apply(favoritesRef.current, wasPinned)
         favoritesRef.current = reverted
@@ -283,11 +291,23 @@ export default function BillingPage() {
     },
     [],
   )
-  const inFavorites = cat === FAVORITES_CAT
-  const pinnedIds = useMemo(() => {
-    if (inFavorites) return new Set(favorites[favTab])
-    return new Set(FAVORITE_TABS.flatMap((t) => favorites[t.id]))
-  }, [favorites, favTab, inFavorites])
+  const createFavoriteTab = useCallback(
+    async (label: string, productId: string) => {
+      const saved = await updatePOSFavorites({
+        action: 'addTab',
+        label,
+        productId,
+      })
+      favoritesRef.current = saved.favorites
+      setFavorites(saved.favorites)
+      setFavoriteTabs(saved.tabs)
+    },
+    [],
+  )
+  const pinnedIds = useMemo(
+    () => new Set(Object.values(favorites).flat()),
+    [favorites],
+  )
   // All of this now runs over `indexEntries` (name/sku/category/size only)
   // instead of the full `products` catalogue — same exact matching logic as
   // before, just against a far smaller, instantly-available object.
@@ -337,13 +357,8 @@ export default function BillingPage() {
   const MAX_VISIBLE = 100
   const matchedIndexEntries = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const pinnedForTab = new Set(favorites[favTab])
-    const matches = indexEntries.filter((p: any) => {
-      const matchCat =
-        cat === 'All' ||
-        (cat === FAVORITES_CAT
-          ? pinnedForTab.has(p.productId)
-          : p.category === cat)
+    return indexEntries.filter((p: any) => {
+      const matchCat = cat === 'All' || p.category === cat
       const matchSize =
         size === 'All sizes' ||
         p.sizes.some((s: any) => s.title === sizeTitle && s.value === size)
@@ -355,15 +370,7 @@ export default function BillingPage() {
         (p.barcode ?? '').toLowerCase().includes(q)
       return matchCat && matchSize && matchSearch
     })
-    if (cat === FAVORITES_CAT) {
-      const order = favorites[favTab]
-      matches.sort(
-        (a: any, b: any) =>
-          order.indexOf(a.productId) - order.indexOf(b.productId),
-      )
-    }
-    return matches
-  }, [indexEntries, cat, size, sizeTitle, search, favorites, favTab])
+  }, [indexEntries, cat, size, sizeTitle, search])
   const visibleIndexEntries = matchedIndexEntries.slice(0, MAX_VISIBLE)
   const hiddenCount = matchedIndexEntries.length - visibleIndexEntries.length
   // Debounced: fetch live price+stock only for what's actually about to be
@@ -1085,7 +1092,7 @@ export default function BillingPage() {
           onOpenCamera={() => setShowCameraScan(true)}
         />
         <CategoryFilter
-          categories={[FAVORITES_CAT, ...CATEGORIES]}
+          categories={CATEGORIES}
           selected={cat}
           onChange={(next) => {
             setCat(next)
@@ -1094,20 +1101,6 @@ export default function BillingPage() {
             setSizeGroup(null)
           }}
         />
-        {inFavorites && (
-          <CategoryFilter
-            showAll={false}
-            categories={FAVORITE_TABS.map((t) => t.label)}
-            selected={
-              FAVORITE_TABS.find((t) => t.id === favTab)?.label ??
-              FAVORITE_TABS[0].label
-            }
-            onChange={(label) => {
-              const tab = FAVORITE_TABS.find((t) => t.label === label)
-              if (tab) setFavTab(tab.id)
-            }}
-          />
-        )}
         {SIZE_TITLES.length > 0 && (
           <div className='flex gap-1.5'>
             {SIZE_TITLES.map((title) => {
@@ -1171,15 +1164,7 @@ export default function BillingPage() {
             products={gridProducts}
             isLoading={indexLoading}
             pinnedIds={pinnedIds}
-            emptyMessage={
-              inFavorites && !search.trim()
-                ? 'Nothing pinned here yet — tap the star on any product to add it'
-                : undefined
-            }
-            onTogglePin={(p) => {
-              if (inFavorites) toggleFavorite(favTab, p.id)
-              else setPinPickerFor(p)
-            }}
+            onTogglePin={(p) => setPinPickerFor(p)}
             onAdd={(p) => {
               const group = productGroups.get(p.id) ?? [p]
               if (group.length > 1) {
@@ -1197,14 +1182,18 @@ export default function BillingPage() {
         <FavoritePinModal
           productName={pinPickerFor.name}
           image={pinPickerFor.image}
+          tabs={favoriteTabs}
           pinnedTabs={
             new Set(
-              FAVORITE_TABS.filter((t) =>
-                favorites[t.id].includes(pinPickerFor.id),
-              ).map((t) => t.id),
+              favoriteTabs
+                .filter((t) =>
+                  (favorites[t.id] ?? []).includes(pinPickerFor.id),
+                )
+                .map((t) => t.id),
             )
           }
           onToggle={(tab) => toggleFavorite(tab, pinPickerFor.id)}
+          onCreateTab={(label) => createFavoriteTab(label, pinPickerFor.id)}
           onClose={() => setPinPickerFor(null)}
         />
       )}
