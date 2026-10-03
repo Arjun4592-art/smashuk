@@ -15,6 +15,8 @@ import {
 import ProductSearch from '@/components/pos/ProductSearch'
 import CategoryFilter from '@/components/pos/CategoryFilter'
 import NewFavoriteTabInput from '@/components/pos/NewFavoriteTabInput'
+import ConfirmDialog from '@/components/pos/ConfirmDialog'
+import { PencilIcon, TrashIcon } from '@/components/pos/TabActionIcons'
 import ProductGrid, { POSProduct } from '@/components/pos/ProductGrid'
 import VariantPickerModal from '@/components/pos/VariantPickerModal'
 import { playScanBeep } from '@/lib/utils'
@@ -41,6 +43,8 @@ export default function FavoritesPage() {
   )
   const [addingTab, setAddingTab] = useState(false)
   const [renamingTab, setRenamingTab] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deletingTab, setDeletingTab] = useState(false)
   const [search, setSearch] = useState('')
   const [favorites, setFavorites] = useState<FavoritesMap>(() =>
     emptyFavorites(),
@@ -159,13 +163,7 @@ export default function FavoritesPage() {
 
   const deleteActiveTab = useCallback(async () => {
     if (!activeTab.custom) return
-    if (
-      !window.confirm(
-        `Delete the "${activeTab.label}" tab? Its pinned products will be removed from this tab.`,
-      )
-    ) {
-      return
-    }
+    setDeletingTab(true)
     try {
       const saved = await updatePOSFavorites({
         action: 'deleteTab',
@@ -176,8 +174,12 @@ export default function FavoritesPage() {
       setTabs(saved.tabs)
       setActiveTabId(saved.tabs[0].id)
       setRenamingTab(false)
+      toast.success(`Deleted "${activeTab.label}" tab`)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not delete tab')
+    } finally {
+      setDeletingTab(false)
+      setConfirmingDelete(false)
     }
   }, [activeTab])
   const query = search.trim().toLowerCase()
@@ -409,25 +411,36 @@ export default function FavoritesPage() {
             : `${pinnedForTab.length} pinned in ${activeLabel}`}
         </p>
         {activeTab.custom && !isSearching && (
-          <div className='flex items-center gap-3'>
+          <div className='flex items-center gap-2'>
             <button
               type='button'
               onClick={() => {
                 setRenamingTab((v) => !v)
                 setAddingTab(false)
               }}
-              className='text-[11px] font-semibold'
-              style={{ color: '#008060' }}
+              aria-pressed={renamingTab}
+              className='inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-xs font-semibold border transition-colors hover:bg-[#F6F6F7]'
+              style={{
+                borderColor: renamingTab ? '#008060' : '#C9CCCF',
+                background: renamingTab ? '#F1F8F5' : '#FFFFFF',
+                color: renamingTab ? '#008060' : '#202223',
+              }}
             >
-              Rename tab
+              <PencilIcon size={15} />
+              Rename
             </button>
             <button
               type='button'
-              onClick={deleteActiveTab}
-              className='text-[11px] font-semibold'
-              style={{ color: '#D82C0D' }}
+              onClick={() => setConfirmingDelete(true)}
+              className='inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-xs font-semibold border transition-colors hover:bg-[#FFF4F4]'
+              style={{
+                borderColor: '#F3C4BC',
+                background: '#FFFFFF',
+                color: '#D82C0D',
+              }}
             >
-              Delete tab
+              <TrashIcon size={15} />
+              Delete
             </button>
           </div>
         )}
@@ -481,6 +494,36 @@ export default function FavoritesPage() {
             setVariantPickerFor(null)
           }}
           onClose={() => setVariantPickerFor(null)}
+        />
+      )}
+
+      {confirmingDelete && activeTab.custom && (
+        <ConfirmDialog
+          title='Delete this tab?'
+          message={
+            <>
+              <span className='font-medium' style={{ color: '#202223' }}>
+                {activeTab.label}
+              </span>{' '}
+              will be removed
+              {pinnedForTab.length > 0 ? (
+                <>
+                  {' '}
+                  and{' '}
+                  <span className='font-medium' style={{ color: '#202223' }}>
+                    {pinnedForTab.length} pinned product
+                    {pinnedForTab.length !== 1 ? 's' : ''}
+                  </span>{' '}
+                  will be unpinned from it
+                </>
+              ) : null}
+              . The products themselves are not deleted.
+            </>
+          }
+          confirmLabel='Delete tab'
+          busy={deletingTab}
+          onConfirm={deleteActiveTab}
+          onCancel={() => setConfirmingDelete(false)}
         />
       )}
     </div>

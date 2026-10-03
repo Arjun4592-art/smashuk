@@ -959,7 +959,8 @@ export const usePOSStore = create<POSState>()(
             (sum, item) => sum + item.product.price * item.quantity,
             0,
           )
-          const amount = Math.round((subtotal * percent) / 100)
+          // Round to the nearest penny (prices are in pounds), not the nearest pound.
+          const amount = Math.round(subtotal * percent) / 100
           return {
             customDiscount: amount,
             ...computePOSTotals(
