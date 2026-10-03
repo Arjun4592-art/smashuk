@@ -19,6 +19,7 @@
 import qrcodegen from 'qrcode-generator'
 import { usePrinterStore } from '@/store/printerStore'
 import type { ReceiptData } from './escpos'
+import { isIOSDevice, printHtmlViaPassPRNT } from './passprnt-transport'
 
 export interface LabelSize {
   widthMm: number
@@ -395,6 +396,17 @@ function printLabelHtml(html: string, size: LabelSize): Promise<void> {
     return Promise.reject(
       new Error('Printing is only available in the browser.'),
     )
+  }
+  // iPad/iPhone: the OS print dialog (AirPrint) can't see a Star TSP100IIIBI
+  // ("No Printer Selected"), so hand the label to the Star PassPRNT app.
+  // PassPRNT sizes to the paper configured inside the app, so drop the
+  // fixed @page size and make the layout fill the width instead.
+  if (isIOSDevice()) {
+    const fitted = html.replace(
+      '</head>',
+      '<style>html,body{width:100%!important;height:auto!important;overflow:visible!important}</style></head>',
+    )
+    return printHtmlViaPassPRNT(fitted, 'label')
   }
   return isIOS() ? printViaPopup(html, size) : printViaIframe(html, size)
 }

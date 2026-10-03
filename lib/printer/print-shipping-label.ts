@@ -1,4 +1,5 @@
 import { pdfUrlToPrintHtml } from './pdf-to-print-html'
+import { isIOSDevice, printHtmlViaPassPRNT } from './passprnt-transport'
 
 // Renders `html` into a hidden iframe and triggers the OS print dialog.
 // Same technique as lib/printer/browser-print.ts and label-print.ts: the
@@ -70,5 +71,14 @@ export async function printShippingLabel(labelUrl: string): Promise<void> {
     throw new Error('Printing is only available in the browser.')
   }
   const html = await pdfUrlToPrintHtml(labelUrl)
+  // iPad: AirPrint can't see the Star printer — go through PassPRNT.
+  if (isIOSDevice()) {
+    const fitted = html.replace(
+      '</head>',
+      '<style>.page{width:100%!important;height:auto!important;overflow:visible!important}html,body{width:100%}</style></head>',
+    )
+    await printHtmlViaPassPRNT(fitted, 'shipping-label')
+    return
+  }
   await printHtml(html)
 }

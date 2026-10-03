@@ -67,7 +67,14 @@ export default function POSTerminalLayout({
       }
       return
     }
-    const label = result.action === 'test-print' ? 'Test page' : 'Receipt'
+    const label =
+      result.action === 'test-print'
+        ? 'Test page'
+        : result.action === 'label'
+          ? 'Label'
+          : result.action === 'shipping-label'
+            ? 'Shipping label'
+            : 'Receipt'
     if (result.success) {
       toast.success(`${label} printed`)
     } else {

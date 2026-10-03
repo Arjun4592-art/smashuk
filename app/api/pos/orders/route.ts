@@ -510,6 +510,9 @@ export async function POST(request: NextRequest) {
           },
           campaign: {
             name: tempCode,
+            // Medusa requires campaign_identifier (unique). Suffix with a
+            // timestamp so a retried sale on the same cart can't collide.
+            campaign_identifier: `${tempCode}-${Date.now()}`,
             budget: {
               type: 'usage',
               limit: 1,

@@ -48,7 +48,7 @@ const ALL_OPTIONS: PrinterOption[] = [
     type: 'label',
     label: 'Label printer (TSP100IIIBI)',
     icon: '🏷️',
-    desc: 'Recommended for the TSP100IIIBI loaded with 4×2in (102×51mm) die-cut label rolls (e.g. Double Dragon). Pair it once in the tablet’s Bluetooth settings (install its print service if the OS asks for one) — it then shows up as a normal system printer, no app needed. Receipts print sized to the label below — set the size to match your roll.',
+    desc: 'Recommended for the TSP100IIIBI loaded with 4×2in (102×51mm) die-cut label rolls (e.g. Double Dragon). On Android, pair it once in Bluetooth settings (install its print service if asked) — it then shows up as a system printer. On iPad the system print dialog can’t see this printer, so labels, receipts and shipping labels are sent automatically through the free Star PassPRNT app: install it, add the printer inside it once, then print. Receipts print sized to the label below — set the size to match your roll.',
     recommended: true,
   },
   {

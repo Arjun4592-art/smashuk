@@ -296,6 +296,39 @@ export async function printTestPageViaPassPRNT(
   await launchPassPrnt({ html: buildTestHtml(paperWidth) }, tag)
 }
 
+// iPadOS Safari reports itself as a desktop "Macintosh" UA, so also treat a
+// Mac UA with multi-touch as an iPad.
+export function isIOSDevice(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return (
+    /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
+}
+
+// Sends any ready-made HTML document (label, shipping label, ...) to the
+// printer through the Star PassPRNT app. The HTML is stashed server-side and
+// PassPRNT is handed a short `url` to fetch (same approach as receipts, so
+// the URL scheme never overflows). This is the ONLY way to reach a Star
+// TSP100IIIBI from an iPad: iOS's AirPrint dialog never lists it, which is
+// why window.print() showed "No Printer Selected".
+export async function printHtmlViaPassPRNT(
+  html: string,
+  tag: string = 'print',
+): Promise<void> {
+  const res = await fetch('/api/pos/print/receipt-html', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ html }),
+  })
+  if (!res.ok) {
+    throw new Error('Could not prepare the document for printing.')
+  }
+  const { token } = (await res.json()) as { token: string }
+  const url = `${window.location.origin}/api/pos/print/receipt-html?token=${token}`
+  await launchPassPrnt({ url }, tag)
+}
+
 export { isAndroid as isAndroidDevice }
 
 // Reads the passprnt_code/passprnt_message/reason params that
