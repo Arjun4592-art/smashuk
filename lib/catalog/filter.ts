@@ -6,6 +6,12 @@ import {
 } from '@/lib/spec-filters'
 import type { CatalogQuery } from './types'
 import { matchesGender } from './gender'
+import {
+  matchesCategory,
+  matchesAnyCategory,
+  matchesSport,
+  matchesAnySport,
+} from './category-match'
 
 export function applyCatalogFilters(
   products: Product[],
@@ -46,24 +52,13 @@ export function applyCatalogFilters(
     )
   }
 
-  if (q.sport) result = result.filter((p) => p.sport === q.sport)
+  if (q.sport) result = result.filter((p) => matchesSport(p, q.sport!))
   else if (q.sports.length)
-    result = result.filter((p) => q.sports.includes(p.sport))
+    result = result.filter((p) => matchesAnySport(p, q.sports))
 
-  if (q.category)
-    result = result.filter(
-      (p) =>
-        !!p.category &&
-        (p.category.includes(q.category!) || q.category!.includes(p.category)),
-    )
+  if (q.category) result = result.filter((p) => matchesCategory(p, q.category!))
   else if (q.categories.length)
-    result = result.filter(
-      (p) =>
-        !!p.category &&
-        q.categories.some(
-          (c) => p.category!.includes(c) || c.includes(p.category!),
-        ),
-    )
+    result = result.filter((p) => matchesAnyCategory(p, q.categories))
 
   if (q.brands.length) result = result.filter((p) => q.brands.includes(p.brand))
   if (q.badges.length)
@@ -138,23 +133,12 @@ export function scopedForFacets(
         p.sport.toLowerCase().includes(needle),
     )
   }
-  if (q.sport) result = result.filter((p) => p.sport === q.sport)
+  if (q.sport) result = result.filter((p) => matchesSport(p, q.sport!))
   else if (q.sports.length)
-    result = result.filter((p) => q.sports.includes(p.sport))
-  if (q.category)
-    result = result.filter(
-      (p) =>
-        !!p.category &&
-        (p.category.includes(q.category!) || q.category!.includes(p.category)),
-    )
+    result = result.filter((p) => matchesAnySport(p, q.sports))
+  if (q.category) result = result.filter((p) => matchesCategory(p, q.category!))
   else if (q.categories.length)
-    result = result.filter(
-      (p) =>
-        !!p.category &&
-        q.categories.some(
-          (c) => p.category!.includes(c) || c.includes(p.category!),
-        ),
-    )
+    result = result.filter((p) => matchesAnyCategory(p, q.categories))
   if (q.inStockOnly) result = result.filter((p) => p.inStock)
   return result
 }

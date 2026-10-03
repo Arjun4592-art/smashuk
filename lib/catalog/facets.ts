@@ -10,6 +10,7 @@ import {
 import type { CatalogQuery, CatalogFacets } from './types'
 import { DEFAULT_PRICE_RANGE } from './types'
 import { scopedForFacets } from './filter'
+import { matchesAnySport } from './category-match'
 
 /**
  * Every count the sidebar renders, computed once on the server over the full
@@ -55,16 +56,8 @@ export function buildFacets(
   // Mirrors ShopClient's effectiveSports / effectiveBadges: a page-level sport
   // or badge (from a collection route) counts as active even though it never
   // appears in the sidebar's own state.
-  const activeSports = q.sports.length
-    ? q.sports
-    : q.sport
-      ? [q.sport]
-      : []
-  const activeBadges = q.badges.length
-    ? q.badges
-    : q.badge
-      ? [q.badge]
-      : []
+  const activeSports = q.sports.length ? q.sports : q.sport ? [q.sport] : []
+  const activeBadges = q.badges.length ? q.badges : q.badge ? [q.badge] : []
 
   // `catalog` plays the role the sidebar's `allProducts` used to; `scoped`
   // plays the role of `categoryProducts`.
@@ -74,7 +67,7 @@ export function buildFacets(
     if (activeSports.length === 0) return null
     const set = new Set<string>()
     for (const p of catalog) {
-      if (activeSports.includes(p.sport) && p.brand) set.add(p.brand)
+      if (matchesAnySport(p, activeSports) && p.brand) set.add(p.brand)
     }
     return [...set]
   })()
@@ -83,7 +76,7 @@ export function buildFacets(
     const map = new Map<string, number>()
     for (const p of catalog) {
       if (!p.inStock) continue
-      if (activeSports.length && !activeSports.includes(p.sport)) continue
+      if (activeSports.length && !matchesAnySport(p, activeSports)) continue
       if (q.brands.length && !q.brands.includes(p.brand)) continue
       if (
         activeBadges.length &&
@@ -108,7 +101,11 @@ export function buildFacets(
     for (const p of scoped) {
       for (const s of p.filterSpecs ?? p.specs ?? []) {
         if (!s.label || !s.value) continue
-        const canonicalLabel = canonicalizeSpecLabel(p.sport, p.category, s.label)
+        const canonicalLabel = canonicalizeSpecLabel(
+          p.sport,
+          p.category,
+          s.label,
+        )
         if (!canonicalLabel) continue
         const resolvedValue = resolveSpecFilterValue(
           p.sport,
@@ -157,10 +154,7 @@ export function buildFacets(
   const brandCounts = (() => {
     const map = new Map<string, number>()
     for (const p of scoped) {
-      if (
-        q.badges.length &&
-        !q.badges.some((b) => matchesBadgeFilter(p, b))
-      )
+      if (q.badges.length && !q.badges.some((b) => matchesBadgeFilter(p, b)))
         continue
       if (p.brand) map.set(p.brand, (map.get(p.brand) ?? 0) + 1)
     }
@@ -186,7 +180,7 @@ export function buildFacets(
   const availability = (() => {
     let source = catalog
     if (activeSports.length)
-      source = source.filter((p) => activeSports.includes(p.sport))
+      source = source.filter((p) => matchesAnySport(p, activeSports))
     if (q.brands.length)
       source = source.filter((p) => q.brands.includes(p.brand))
     if (activeBadges.length)
@@ -204,7 +198,11 @@ export function buildFacets(
     for (const p of scoped) {
       for (const s of p.filterSpecs ?? p.specs ?? []) {
         if (!s.label || !s.value) continue
-        const canonicalLabel = canonicalizeSpecLabel(p.sport, p.category, s.label)
+        const canonicalLabel = canonicalizeSpecLabel(
+          p.sport,
+          p.category,
+          s.label,
+        )
         if (!canonicalLabel) continue
         const resolvedValue = resolveSpecFilterValue(
           p.sport,

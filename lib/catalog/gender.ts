@@ -1,4 +1,5 @@
 import type { Product } from '@/types'
+import { genderWordsInHandle, genderWordsInTitle } from './category-match'
 
 export type GenderKey = 'men' | 'women'
 
@@ -45,6 +46,11 @@ export function getProductGenders(p: Product): Set<GenderKey> {
       if (word) addWord(word, out)
     }
   }
+  // Tags and specs are the source of truth. Only when they say nothing do we
+  // fall back to the category handle ("men-clothing") and then, for clothing,
+  // the title ("Yonex Men's Match Polo"), so untagged kit still shows up.
+  if (out.size === 0) for (const g of genderWordsInHandle(p)) out.add(g)
+  if (out.size === 0) for (const g of genderWordsInTitle(p)) out.add(g)
   return out
 }
 
