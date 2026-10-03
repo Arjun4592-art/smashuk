@@ -5,6 +5,7 @@ type SyncVariant = {
   id: string
   title?: string
   sku?: string | null
+  options?: { value?: string | null }[]
   inventory_items?: {
     inventory_item_id?: string
     inventory?: { id?: string; location_levels?: any[] }
@@ -40,6 +41,12 @@ export interface SyncResult {
   failed: number
   /** Set when the product itself could not be read. */
   error?: string
+  /**
+   * Human-readable reasons for anything that was NOT saved. Each line starts
+   * with FAILED / SKIPPED / THREW so the dashboard edit form shows it under
+   * the Save button instead of silently reporting success.
+   */
+  notes: string[]
 }
 
 // The default stock location practically never changes, so it is cached for a
@@ -208,7 +215,8 @@ export async function syncVariantInventory(
     onlyVariantIds?: string[]
   } = {},
 ): Promise<SyncResult> {
-  const result: SyncResult = { updated: 0, failed: 0 }
+  const result: SyncResult = { updated: 0, failed: 0, notes: [] }
+  const matchedStockKeys = new Set<string>()
   const syncStartedAt = Date.now()
   let skippedUnchanged = 0
   let sharedChecks = 0
@@ -224,7 +232,7 @@ export async function syncVariantInventory(
       async (variantId: string) => {
         try {
           const r = await fetch(
-            `${MEDUSA_URL}/admin/products/${productId}/variants/${variantId}?fields=id,title,sku,*inventory_items,*inventory_items.inventory.location_levels`,
+            `${MEDUSA_URL}/admin/products/${productId}/variants/${variantId}?fields=id,title,sku,*options,*inventory_items,*inventory_items.inventory.location_levels`,
             { headers: { Authorization: authorization } },
           )
           if (!r.ok) {
@@ -256,7 +264,7 @@ export async function syncVariantInventory(
   }
   if (!loadedVariants) {
     const res = await fetch(
-      `${MEDUSA_URL}/admin/products/${productId}?fields=*variants,*variants.inventory_items,*variants.inventory_items.inventory.location_levels`,
+      `${MEDUSA_URL}/admin/products/${productId}?fields=*variants,*variants.options,*variants.inventory_items,*variants.inventory_items.inventory.location_levels`,
       { headers: { Authorization: authorization } },
     )
     if (!res.ok) {
@@ -290,6 +298,38 @@ export async function syncVariantInventory(
         )
         if (fallbackKey) explicitQty = variantStocks[fallbackKey]
       }
+      // The form builds its stock keys from the option values it shows
+      // ("4U / G4"), but the title Medusa has stored can be formatted or
+      // ordered differently (imports, older edits). When the title does not
+      // match, compare the option VALUES instead, ignoring order and case, so
+      // a changed stock is never silently dropped.
+      const normKey = (str: string) =>
+        str
+          .split('/')
+          .map((part) => part.trim().toLowerCase())
+          .filter(Boolean)
+          .sort()
+          .join('|')
+      const optionsKey =
+        variant.options && variant.options.length > 0
+          ? normKey(variant.options.map((o) => o.value ?? '').join(' / '))
+          : ''
+      const keyMatchesVariant = (k: string) =>
+        k === variantTitle ||
+        k === (variant.sku ?? '\u0000') ||
+        k === variant.id ||
+        k.trim().toLowerCase() === normalizedTitle ||
+        (optionsKey !== '' && normKey(k) === optionsKey)
+      if (explicitQty === undefined && optionsKey) {
+        const optionKeyHit = Object.keys(variantStocks).find(
+          (k) => normKey(k) === optionsKey,
+        )
+        if (optionKeyHit !== undefined)
+          explicitQty = variantStocks[optionKeyHit]
+      }
+      for (const k of Object.keys(variantStocks)) {
+        if (keyMatchesVariant(k)) matchedStockKeys.add(k)
+      }
       const qty =
         explicitQty !== undefined && explicitQty >= 0 ? explicitQty : defaultQty
       // Nothing to write for this variant unless an explicit quantity was
@@ -322,6 +362,9 @@ export async function syncVariantInventory(
           console.warn(
             `[inventory-sync] Could not create inventory item for variant ${variant.id}`,
           )
+          result.notes.push(
+            `FAILED: could not create an inventory item for variant "${variantTitle || variant.id}" — stock NOT saved.`,
+          )
           result.failed++
           return
         }
@@ -344,6 +387,9 @@ export async function syncVariantInventory(
           console.warn(
             `[inventory-sync] Link failed for variant ${variant.id} (item ${inventoryItemId}):`,
             linkErr.message,
+          )
+          result.notes.push(
+            `FAILED: could not link inventory item for variant "${variantTitle || variant.id}" (${linkErr.message ?? 'unknown error'}) — stock NOT saved.`,
           )
           result.failed++
           return
@@ -415,8 +461,17 @@ export async function syncVariantInventory(
           },
         ).catch(() => null)
         if (!updateRes || !updateRes.ok) {
+          const updateErr = updateRes
+            ? await updateRes.json().catch(() => ({}))
+            : {}
+          const updateMsg = updateRes
+            ? `HTTP ${updateRes.status}${updateErr?.message ? ` — ${updateErr.message}` : ''}`
+            : 'no response from Medusa'
           console.warn(
-            `[inventory-sync] Stock level update failed for variant ${variant.id} (item ${inventoryItemId})`,
+            `[inventory-sync] Stock level update failed for variant ${variant.id} (item ${inventoryItemId}): ${updateMsg}`,
+          )
+          result.notes.push(
+            `FAILED: Medusa rejected the stock update for "${variantTitle || variant.id}" (${updateMsg}) — stock NOT saved.`,
           )
           result.failed++
           return
@@ -445,6 +500,9 @@ export async function syncVariantInventory(
             `[inventory-sync] Stock level create failed for variant ${variant.id} (item ${inventoryItemId}):`,
             levelErr.message,
           )
+          result.notes.push(
+            `FAILED: could not create the stock level for "${variantTitle || variant.id}" (${levelErr.message ?? 'unknown error'}) — stock NOT saved.`,
+          )
           result.failed++
           return
         }
@@ -455,9 +513,28 @@ export async function syncVariantInventory(
         `[inventory-sync] Variant ${variant.id} failed:`,
         err?.message,
       )
+      result.notes.push(
+        `THREW: variant "${variant.title || variant.id}" — ${err?.message ?? 'unknown error'} — stock NOT saved.`,
+      )
       result.failed++
     }
   })
+  // Anything the caller asked to save that never reached a variant used to
+  // vanish without a trace. Report it.
+  for (const key of Object.keys(variantStocks)) {
+    if (!matchedStockKeys.has(key)) {
+      result.failed++
+      result.notes.push(
+        `SKIPPED: the stock entered for "${key}" did not match any variant of this product — NOT saved.`,
+      )
+    }
+  }
+  if (options.applyDefaultToExisting === true && !applyDefault) {
+    result.failed++
+    result.notes.push(
+      `SKIPPED: a single stock value was sent but this product has ${variants.length} variants in Medusa — NOT saved. Edit the stock per variant instead.`,
+    )
+  }
   console.log(
     `[inventory-sync] ${productId}: ${variants.length} variants, ${skippedUnchanged} unchanged (skipped), ${sharedChecks} shared-checks, ${result.updated} written, ${result.failed} failed in ${Date.now() - syncStartedAt}ms (product read ${readMs}ms, ${readMode})`,
   )

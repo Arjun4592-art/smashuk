@@ -85,7 +85,7 @@ export interface CreatePOSOrderPayload {
   /** Cash+card split breakdown, so a reprinted receipt (dashboard or POS)
    * can show the same "Cash £x / Card £y" lines as the original. */
   split_payments?: {
-    method: 'cash' | 'card'
+    method: 'cash' | 'card' | 'card_terminal'
     amount: number
   }[]
 }
@@ -452,6 +452,9 @@ export interface PosOrderRecord {
   tax: number
   total: number
   paymentMethod: string
+  /** Where the order was placed: in-store POS, the website checkout, or
+   * created manually from the dashboard. */
+  source: 'pos' | 'website' | 'dashboard'
   note: string
   cashier: string
   completedAt: string
@@ -463,7 +466,7 @@ export interface PosOrderRecord {
   trackingToken: string
   splitPayments:
     | {
-        method: 'cash' | 'card'
+        method: 'cash' | 'card' | 'card_terminal'
         amount: number
       }[]
     | null
@@ -507,6 +510,22 @@ export async function fetchPOSOrderHistory(
       err instanceof Error ? err.message : 'Failed to load order history',
     )
   }
+}
+/** One page of order history plus the total number of orders in Medusa. */
+export async function fetchPOSOrderPage(
+  offset = 0,
+  limit = 150,
+): Promise<{ orders: PosOrderRecord[]; count: number }> {
+  const res = await fetch(`/api/pos/orders?limit=${limit}&offset=${offset}`, {
+    credentials: 'include',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Failed to load order history')
+  }
+  const data = await res.json()
+  const orders: PosOrderRecord[] = data.orders ?? []
+  return { orders, count: data.count ?? orders.length }
 }
 export async function markPOSOrderReturned(
   medusaOrderId: string,

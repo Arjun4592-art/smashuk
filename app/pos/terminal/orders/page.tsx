@@ -8,7 +8,7 @@ import OrderDetailModal, {
   type OrderDetailData,
 } from '@/components/pos/OrderDetailModal'
 import { POSOrderRowSkeleton } from '@/components/ui/Skeleton'
-import { fetchPOSOrderHistory, type PosOrderRecord } from '@/lib/api/pos'
+import { fetchPOSOrderPage, type PosOrderRecord } from '@/lib/api/pos'
 const STATUS_STYLE: Record<
   string,
   {
@@ -75,6 +75,92 @@ function toOrderDetail(o: PosOrderRecord): OrderDetailData {
     splitPayments: o.splitPayments,
   }
 }
+type SourceKey = 'pos' | 'website' | 'dashboard'
+type PayKey = 'cash' | 'card' | 'card_terminal' | 'split' | 'other'
+const SOURCE_LABEL: Record<SourceKey, string> = {
+  pos: 'POS',
+  website: 'Website',
+  dashboard: 'Dashboard',
+}
+const SOURCE_STYLE: Record<SourceKey, { bg: string; color: string }> = {
+  pos: { bg: '#E0F2F1', color: '#00695C' },
+  website: { bg: '#F1EBFA', color: '#5B3FA8' },
+  dashboard: { bg: '#F1F2F3', color: '#6D7175' },
+}
+const PAY_FILTERS: { key: PayKey; label: string }[] = [
+  { key: 'cash', label: 'Cash' },
+  { key: 'card', label: 'Card (Stripe)' },
+  { key: 'card_terminal', label: 'Card terminal' },
+  { key: 'split', label: 'Split' },
+  { key: 'other', label: 'Other' },
+]
+// Maps the stored payment method to a filter bucket + a short display label.
+// 'card' on a POS sale is the Stripe card reader; on a website order it's an
+// online card payment.
+function getPayment(o: PosOrderRecord): { key: PayKey; label: string } {
+  const m = (o.paymentMethod || '').toLowerCase()
+  if (m === 'cash') return { key: 'cash', label: 'Cash' }
+  if (m === 'card_terminal')
+    return { key: 'card_terminal', label: 'Card terminal' }
+  if (m === 'split') return { key: 'split', label: 'Split' }
+  if (m === 'card')
+    return {
+      key: 'card',
+      label: o.source === 'pos' ? 'Card (Stripe)' : 'Card (online)',
+    }
+  if (m === 'paypal') return { key: 'other', label: 'PayPal' }
+  if (!m || m === 'online') return { key: 'other', label: 'Online' }
+  const pretty = m.replace(/_/g, ' ')
+  return {
+    key: 'other',
+    label: pretty.charAt(0).toUpperCase() + pretty.slice(1),
+  }
+}
+const money = (n: number) =>
+  '£' +
+  (Number(n) || 0).toLocaleString('en-GB', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+function FilterChips<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string
+  value: T | 'all'
+  onChange: (v: T | 'all') => void
+  options: { key: T | 'all'; label: string }[]
+}) {
+  return (
+    <div className='flex items-center gap-1.5 flex-wrap'>
+      <span
+        className='text-[11px] font-medium uppercase tracking-wide mr-0.5'
+        style={{ color: '#8C9196' }}
+      >
+        {label}
+      </span>
+      {options.map((opt) => {
+        const active = value === opt.key
+        return (
+          <button
+            key={opt.key}
+            onClick={() => onChange(opt.key)}
+            className='px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap'
+            style={{
+              background: active ? '#008060' : '#FFFFFF',
+              color: active ? '#FFFFFF' : '#6D7175',
+              borderColor: active ? '#008060' : '#E1E3E5',
+            }}
+          >
+            {opt.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 export default function OrdersPage() {
   const authUser = useAuthStore((s) => s.user)
   const [showReturn, setShowReturn] = useState(false)
@@ -84,14 +170,19 @@ export default function OrdersPage() {
     null,
   )
   const [search, setSearch] = useState('')
+  const [sourceFilter, setSourceFilter] = useState<SourceKey | 'all'>('all')
+  const [payFilter, setPayFilter] = useState<PayKey | 'all'>('all')
   const [mounted, setMounted] = useState(false)
   const [completedOrders, setCompletedOrders] = useState<PosOrderRecord[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [totalCount, setTotalCount] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
   const loadOrders = useCallback(async () => {
     try {
       setLoadError(null)
-      const orders = await fetchPOSOrderHistory()
+      const { orders, count } = await fetchPOSOrderPage(0)
       setCompletedOrders(orders)
+      setTotalCount(count)
     } catch (err: unknown) {
       setLoadError(
         err instanceof Error ? err.message : 'Failed to load order history',
@@ -103,13 +194,31 @@ export default function OrdersPage() {
   useEffect(() => {
     loadOrders()
   }, [loadOrders])
+  const loadMore = async () => {
+    setLoadingMore(true)
+    try {
+      const { orders, count } = await fetchPOSOrderPage(completedOrders.length)
+      setCompletedOrders((prev) => {
+        const seen = new Set(prev.map((p) => p.medusaOrderId))
+        return [...prev, ...orders.filter((o) => !seen.has(o.medusaOrderId))]
+      })
+      setTotalCount(count)
+    } catch (err: unknown) {
+      setLoadError(
+        err instanceof Error ? err.message : 'Failed to load more orders',
+      )
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+  const hasMore = completedOrders.length < totalCount
   const isAdmin = authUser?.role === 'admin'
   // Order ID ("SR-35") barely needs any room, but Customer often holds a
   // full email address — give Order ID a small fixed share and Customer
   // the extra space instead of splitting all 6/7 columns equally.
   const ordersGridCols = isAdmin
-    ? '0.6fr 1.6fr 1fr 0.6fr 0.5fr 0.8fr 0.8fr'
-    : '0.6fr 1.9fr 0.6fr 0.5fr 0.8fr 0.8fr'
+    ? '0.6fr 1.3fr 0.9fr 0.7fr 0.95fr 0.85fr 0.45fr 0.75fr 0.8fr'
+    : '0.6fr 1.5fr 0.7fr 0.95fr 0.85fr 0.45fr 0.75fr 0.8fr'
   const isPendingPickup = (o: PosOrderRecord) =>
     o.isPickup &&
     !['fulfilled', 'delivered', 'partially_delivered'].includes(
@@ -135,10 +244,16 @@ export default function OrdersPage() {
       id: o.id,
       customer: o.customer?.name || 'Walk-in',
       cashier: o.cashier || '—',
-      time: new Date(o.completedAt).toLocaleTimeString('en-GB', {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
+      time:
+        new Date(o.completedAt).toLocaleDateString('en-GB', {
+          day: '2-digit',
+          month: 'short',
+        }) +
+        ', ' +
+        new Date(o.completedAt).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
       items: o.items.length,
       total: o.total,
       status: isPendingPickup(o)
@@ -149,16 +264,40 @@ export default function OrdersPage() {
             ? 'completed'
             : shipOrderStatus(o),
       isPickup: o.isPickup,
+      source: (o.source ?? 'website') as SourceKey,
+      payment: getPayment(o),
       live: true,
       raw: o,
     }))
   const filtered = allOrders.filter(
     (o) =>
-      !search ||
-      o.id.toLowerCase().includes(search.toLowerCase()) ||
-      o.customer.toLowerCase().includes(search.toLowerCase()) ||
-      o.cashier.toLowerCase().includes(search.toLowerCase()),
+      (sourceFilter === 'all' || o.source === sourceFilter) &&
+      (payFilter === 'all' || o.payment.key === payFilter) &&
+      (!search ||
+        o.id.toLowerCase().includes(search.toLowerCase()) ||
+        o.customer.toLowerCase().includes(search.toLowerCase()) ||
+        o.cashier.toLowerCase().includes(search.toLowerCase()) ||
+        o.payment.label.toLowerCase().includes(search.toLowerCase()) ||
+        SOURCE_LABEL[o.source].toLowerCase().includes(search.toLowerCase())),
   )
+  // Only offer "Dashboard" as a source filter when such orders exist.
+  const sourceOptions: { key: SourceKey | 'all'; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'website', label: 'Website' },
+    { key: 'pos', label: 'POS' },
+    ...(allOrders.some((o) => o.source === 'dashboard')
+      ? [{ key: 'dashboard' as const, label: 'Dashboard' }]
+      : []),
+  ]
+  const payOptions: { key: PayKey | 'all'; label: string }[] = [
+    { key: 'all', label: 'All' },
+    ...PAY_FILTERS,
+  ]
+  // Sum of what's currently shown (returned orders left out) — handy for
+  // matching the card machine / till totals at end of day.
+  const shownTotal = filtered
+    .filter((o) => o.status !== 'returned')
+    .reduce((sum, o) => sum + (Number(o.total) || 0), 0)
   const handleRowClick = (o: (typeof allOrders)[number]) => {
     if (o.live && o.raw) setSelectedOrder(o.raw)
   }
@@ -268,6 +407,29 @@ export default function OrdersPage() {
         </div>
 
         {}
+        <div className='flex flex-wrap items-center gap-x-5 gap-y-2 mb-3'>
+          <FilterChips
+            label='Source'
+            value={sourceFilter}
+            onChange={setSourceFilter}
+            options={sourceOptions}
+          />
+          <FilterChips
+            label='Payment'
+            value={payFilter}
+            onChange={setPayFilter}
+            options={payOptions}
+          />
+          {mounted && !loadError && (
+            <span className='text-xs sm:ml-auto' style={{ color: '#6D7175' }}>
+              {filtered.length} order{filtered.length === 1 ? '' : 's'} ·{' '}
+              {money(shownTotal)} · loaded {completedOrders.length} of{' '}
+              {totalCount}
+            </span>
+          )}
+        </div>
+
+        {}
         <div
           className='rounded-xl overflow-hidden'
           style={{
@@ -288,6 +450,8 @@ export default function OrdersPage() {
             <span>Order ID</span>
             <span>Customer</span>
             {isAdmin && <span>Staff</span>}
+            <span>Source</span>
+            <span>Payment</span>
             <span>Time</span>
             <span>Items</span>
             <span>Total</span>
@@ -403,6 +567,22 @@ export default function OrdersPage() {
                         {o.cashier}
                       </span>
                     )}
+                    <span>
+                      <span
+                        className='text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap'
+                        style={SOURCE_STYLE[o.source]}
+                      >
+                        {SOURCE_LABEL[o.source]}
+                      </span>
+                    </span>
+                    <span
+                      className='truncate min-w-0 text-[13px]'
+                      style={{
+                        color: '#202223',
+                      }}
+                    >
+                      {o.payment.label}
+                    </span>
                     <span
                       style={{
                         color: '#8C9196',
@@ -424,7 +604,7 @@ export default function OrdersPage() {
                         color: '#202223',
                       }}
                     >
-                      £{o.total.toLocaleString('en-GB')}
+                      {money(o.total)}
                     </span>
                     <span
                       className='text-[11px] px-2 py-0.5 rounded-full font-medium w-fit'
@@ -460,7 +640,7 @@ export default function OrdersPage() {
                           color: '#202223',
                         }}
                       >
-                        £{o.total.toLocaleString('en-GB')}
+                        {money(o.total)}
                       </span>
                     </div>
                     <div className='flex justify-between items-center'>
@@ -482,8 +662,9 @@ export default function OrdersPage() {
                             🏬
                           </span>
                         )}
-                        {isAdmin ? ` · ${o.cashier}` : ''} · {o.items} items ·{' '}
-                        {o.time}
+                        {isAdmin ? ` · ${o.cashier}` : ''} ·{' '}
+                        {SOURCE_LABEL[o.source]} · {o.payment.label} · {o.items}{' '}
+                        items · {o.time}
                       </span>
                       <span
                         className='text-[11px] px-2 py-0.5 rounded-full font-medium'
@@ -499,6 +680,27 @@ export default function OrdersPage() {
             })
           )}
         </div>
+
+        {mounted && !loadError && hasMore && (
+          <div className='flex flex-col items-center gap-1.5 py-4'>
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className='px-4 py-2 rounded-lg text-xs font-medium border transition-colors hover:border-[#008060] hover:text-[#008060] disabled:opacity-50'
+              style={{
+                borderColor: '#E1E3E5',
+                color: '#6D7175',
+                background: '#FFFFFF',
+              }}
+            >
+              {loadingMore ? 'Loading…' : 'Load more orders'}
+            </button>
+            <span className='text-[11px]' style={{ color: '#8C9196' }}>
+              Filters and search apply to the {completedOrders.length} loaded
+              orders. {totalCount - completedOrders.length} more on the server.
+            </span>
+          </div>
+        )}
       </div>
 
       {}

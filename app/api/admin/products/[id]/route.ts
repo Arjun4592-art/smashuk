@@ -210,6 +210,7 @@ export async function PATCH(
         { status: res.status },
       )
     }
+    const inventoryDebug: string[] = []
     if (res.ok && data.product?.id) {
       try {
         // Inventory sync starts with ONE deep read of the product (all
@@ -234,6 +235,9 @@ export async function PATCH(
           console.warn(
             '[PATCH product] No stock location found — inventory not set.',
           )
+          inventoryDebug.push(
+            'No stock location found in Medusa — stock NOT saved. Add one in Medusa → Settings → Locations.',
+          )
         } else {
           // stockQty is a fallback default when a variant has no
           // variant-specific quantity in the payload (e.g. single-variant edits).
@@ -252,6 +256,7 @@ export async function PATCH(
             for (const key of Object.keys(variantStocks)) {
               const hit = respVariants.find(
                 (v) =>
+                  v.id === key ||
                   (v.title ?? '') === key ||
                   (v.title ?? '').trim().toLowerCase() ===
                     key.trim().toLowerCase(),
@@ -269,7 +274,7 @@ export async function PATCH(
           lap(
             `inventory sync start (${onlyVariantIds ? `${onlyVariantIds.length} variant(s)` : 'all variants'})`,
           )
-          await syncVariantInventory(
+          const syncResult = await syncVariantInventory(
             data.product.id,
             authorization,
             locationId,
@@ -281,12 +286,19 @@ export async function PATCH(
               onlyVariantIds,
             },
           )
+          if (syncResult.error) {
+            inventoryDebug.push(`FAILED: ${syncResult.error}`)
+          }
+          inventoryDebug.push(...syncResult.notes)
         }
         lap('inventory sync done')
       } catch (invErr: any) {
         console.warn(
           '[PATCH product] Inventory set error (non-fatal):',
           invErr.message,
+        )
+        inventoryDebug.push(
+          `THREW: inventory sync crashed — ${invErr?.message ?? 'unknown error'} — stock may NOT be saved.`,
         )
       }
       // Product + inventory are written — make the shop rebuild its
@@ -303,6 +315,15 @@ export async function PATCH(
       // Dashboard list reflects this edit immediately.
       await upsertAdminProduct(data.product.id, authorization)
       lap('done')
+    }
+    // The edit form shows these under the Save button (it already looks for
+    // FAILED / SKIPPED / THREW). Without this, a stock write that failed was
+    // reported to the user as a normal successful save.
+    if (inventoryDebug.length > 0) {
+      return NextResponse.json(
+        { ...data, _inventoryDebug: inventoryDebug },
+        { status: res.status },
+      )
     }
     return NextResponse.json(data, {
       status: res.status,

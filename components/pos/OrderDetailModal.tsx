@@ -47,6 +47,7 @@ const fmt = (n: number) => CURRENCY_SYMBOL + (Number(n) || 0).toFixed(2)
 const PAY_LABELS: Record<string, string> = {
   cash: 'Cash',
   card: 'Card',
+  card_terminal: 'Card terminal',
   upi: 'UPI',
   split: 'Split payment',
 }

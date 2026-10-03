@@ -123,6 +123,7 @@ export async function getOrders(params?: {
       paymentMethod: (() => {
         const posMeta = o.metadata?.payment_method as string | undefined
         if (posMeta) {
+          if (posMeta === 'card_terminal') return 'Card terminal'
           return (
             posMeta.charAt(0).toUpperCase() + posMeta.slice(1).toLowerCase()
           )

@@ -90,7 +90,20 @@ function toPosOrderRecord(o: any) {
             postalCode: o.shipping_address.postal_code ?? '',
           }
         : null,
-    paymentMethod: o.metadata?.payment_method || 'cash',
+    source:
+      o.metadata?.source === 'pos'
+        ? 'pos'
+        : o.metadata?.source === 'dashboard'
+          ? 'dashboard'
+          : 'website',
+    // POS sales always record their method in metadata (cash/card/split/
+    // card_terminal). Website orders store the Stripe method type there too.
+    // Only an order with nothing recorded falls back — to 'cash' for POS
+    // (legacy behaviour), but NOT for website orders, which were wrongly
+    // shown as cash before.
+    paymentMethod:
+      o.metadata?.payment_method ||
+      (o.metadata?.source === 'pos' ? 'cash' : 'online'),
     note: o.metadata?.note || '',
     cashier: o.metadata?.cashier || '',
     completedAt: o.created_at,
@@ -116,13 +129,14 @@ export async function GET(req: NextRequest) {
   }
   const { searchParams } = new URL(req.url)
   const limit = Math.min(Number(searchParams.get('limit') ?? 150), 300)
+  const offset = Math.max(Number(searchParams.get('offset') ?? 0) || 0, 0)
   const fields =
     'id,display_id,email,subtotal,discount_total,shipping_total,gift_card_total,tax_total,total,status,' +
     'fulfillment_status,payment_status,created_at,*items,*customer,' +
     '*shipping_address,+metadata'
   try {
     const res = await medusaServiceFetch(
-      `/admin/orders?limit=${limit}&order=-created_at&fields=${encodeURIComponent(fields)}`,
+      `/admin/orders?limit=${limit}&offset=${offset}&order=-created_at&fields=${encodeURIComponent(fields)}`,
     )
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
@@ -139,6 +153,9 @@ export async function GET(req: NextRequest) {
     const orders = (data.orders ?? []).map(toPosOrderRecord)
     return NextResponse.json({
       orders,
+      // Total orders in Medusa (not just this page) so the UI can show
+      // "Loaded X of Y" and offer "Load more".
+      count: typeof data.count === 'number' ? data.count : orders.length,
     })
   } catch (err: any) {
     console.error('[API] POS orders GET error:', err)
@@ -986,7 +1003,9 @@ export async function POST(request: NextRequest) {
               split_payments
                 .filter(
                   (s: any) =>
-                    (s?.method === 'cash' || s?.method === 'card') &&
+                    (s?.method === 'cash' ||
+                      s?.method === 'card' ||
+                      s?.method === 'card_terminal') &&
                     Number(s?.amount) > 0,
                 )
                 .map((s: any) => ({

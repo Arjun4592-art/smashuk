@@ -57,6 +57,7 @@ import {
 const PAY_LABELS: Record<string, string> = {
   cash: 'Cash',
   card: 'Card',
+  card_terminal: 'Card terminal',
   upi: 'UPI',
   split: 'Split payment',
 }

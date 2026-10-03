@@ -1,10 +1,12 @@
 import { useState, useMemo } from 'react'
 import { CURRENCY_SYMBOL } from '@/lib/constants'
-import { collectCardPresentPayment } from '@/lib/pos-stripe-terminal'
-type PayMethod = 'cash' | 'card' | 'split'
+// 'card_terminal' = paid on the shop's separate card terminal (card machine).
+// Nothing is charged from here; it only records how the sale was paid.
+type PayMethod = 'cash' | 'card_terminal' | 'split'
 export interface SplitPayment {
-  method: 'cash' | 'card'
+  method: 'cash' | 'card_terminal'
   amount: number
+  /** Legacy (Stripe reader) — no longer set by this modal. */
   stripePaymentIntentId?: string
   stripePaymentAmount?: number
 }
@@ -47,9 +49,9 @@ const METHODS: {
     ),
   },
   {
-    id: 'card',
-    label: 'Stripe',
-    sub: 'Debit / Credit card',
+    id: 'card_terminal',
+    label: 'Card terminal',
+    sub: 'Card machine (in store)',
     icon: (
       <svg
         width='20'
@@ -60,8 +62,9 @@ const METHODS: {
         strokeWidth='1.8'
         strokeLinecap='round'
       >
-        <rect x='2' y='5' width='20' height='14' rx='2' />
-        <line x1='2' y1='10' x2='22' y2='10' />
+        <rect x='5' y='2' width='14' height='20' rx='2' />
+        <rect x='8' y='5' width='8' height='4' rx='1' />
+        <path d='M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01' />
       </svg>
     ),
   },
@@ -85,7 +88,7 @@ const METHODS: {
   },
 ]
 const SPLIT_METHODS: {
-  id: 'cash' | 'card'
+  id: 'cash' | 'card_terminal'
   label: string
 }[] = [
   {
@@ -93,23 +96,20 @@ const SPLIT_METHODS: {
     label: 'Cash',
   },
   {
-    id: 'card',
-    label: 'Stripe',
+    id: 'card_terminal',
+    label: 'Card terminal',
   },
 ]
 export default function PaymentModal({ total, onConfirm, onClose }: Props) {
   const [selected, setSelected] = useState<PayMethod>('cash')
   const [processing, setProcessing] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
-  const [terminalError, setTerminalError] = useState('')
-  const [useSimulatedReader, setUseSimulatedReader] = useState(true)
-  const [activeSplits, setActiveSplits] = useState<('cash' | 'card')[]>([
-    'cash',
-    'card',
-  ])
+  const [activeSplits, setActiveSplits] = useState<
+    ('cash' | 'card_terminal')[]
+  >(['cash', 'card_terminal'])
   const [splitAmounts, setSplitAmounts] = useState<Record<string, string>>({
     cash: String(Math.round(total / 2)),
-    card: String(total - Math.round(total / 2)),
+    card_terminal: String(total - Math.round(total / 2)),
   })
   const totalRounded = Math.round(total)
   const splitSum = useMemo(() => {
@@ -120,7 +120,7 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
   }, [activeSplits, splitAmounts])
   const remaining = totalRounded - splitSum
   const splitValid = remaining === 0 && activeSplits.length >= 2
-  const toggleSplitMethod = (id: 'cash' | 'card') => {
+  const toggleSplitMethod = (id: 'cash' | 'card_terminal') => {
     setActiveSplits((prev) => {
       if (prev.includes(id)) {
         if (prev.length <= 2) return prev
@@ -135,7 +135,7 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
       }
     })
   }
-  const rebalance = (methods: ('cash' | 'card')[]) => {
+  const rebalance = (methods: ('cash' | 'card_terminal')[]) => {
     const share = Math.floor(totalRounded / methods.length)
     const remainder = totalRounded - share * methods.length
     setSplitAmounts((prev) => {
@@ -148,14 +148,16 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
       return next
     })
   }
-  const handleSplitAmountChange = (id: 'cash' | 'card', value: string) => {
+  const handleSplitAmountChange = (
+    id: 'cash' | 'card_terminal',
+    value: string,
+  ) => {
     setSplitAmounts((prev) => ({
       ...prev,
       [id]: value,
     }))
   }
   const handleConfirm = async () => {
-    setTerminalError('')
     if (selected === 'split') {
       if (!splitValid) return
       const splits: SplitPayment[] = activeSplits.map((m) => ({
@@ -163,21 +165,6 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
         amount: parseInt(splitAmounts[m]) || 0,
       }))
       setProcessing(true)
-      const cardSplit = splits.find((s) => s.method === 'card')
-      if (cardSplit && cardSplit.amount > 0) {
-        const cardAmountPence = Math.round(cardSplit.amount * 100)
-        const result = await collectCardPresentPayment(cardAmountPence, {
-          simulated: useSimulatedReader,
-          onStatus: setStatusMsg,
-        })
-        if (!result.success) {
-          setProcessing(false)
-          setTerminalError(result.error ?? 'Card payment failed')
-          return
-        }
-        cardSplit.stripePaymentIntentId = result.paymentIntentId
-        cardSplit.stripePaymentAmount = cardAmountPence
-      }
       setStatusMsg('Recording sale…')
       await onConfirm({
         method: 'split',
@@ -186,27 +173,8 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
       setProcessing(false)
       return
     }
-    if (selected === 'card') {
-      setProcessing(true)
-      const cardAmountPence = Math.round(totalRounded * 100)
-      const result = await collectCardPresentPayment(cardAmountPence, {
-        simulated: useSimulatedReader,
-        onStatus: setStatusMsg,
-      })
-      if (!result.success) {
-        setProcessing(false)
-        setTerminalError(result.error ?? 'Card payment failed')
-        return
-      }
-      setStatusMsg('Recording sale…')
-      await onConfirm({
-        method: 'card',
-        stripePaymentIntentId: result.paymentIntentId,
-        stripePaymentAmount: cardAmountPence,
-      })
-      setProcessing(false)
-      return
-    }
+    // Cash and Card terminal only record how the sale was paid — nothing is
+    // charged from here (the card machine is operated separately).
     setProcessing(true)
     setStatusMsg('Recording sale…')
     await onConfirm({
@@ -331,43 +299,6 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
             })}
           </div>
 
-          {}
-          {(selected === 'card' ||
-            (selected === 'split' && activeSplits.includes('card'))) && (
-            <div className='px-4 pb-2 space-y-2'>
-              <label className='flex items-center gap-2 cursor-pointer'>
-                <input
-                  type='checkbox'
-                  checked={useSimulatedReader}
-                  onChange={(e) => setUseSimulatedReader(e.target.checked)}
-                  disabled={processing}
-                  className='accent-[#008060]'
-                />
-                <span
-                  className='text-xs'
-                  style={{
-                    color: '#6D7175',
-                  }}
-                >
-                  Use test/simulated reader (no physical hardware needed)
-                </span>
-              </label>
-
-              {terminalError && (
-                <div
-                  className='px-3 py-2 rounded-lg text-xs'
-                  style={{
-                    background: '#FFF4F4',
-                    color: '#D82C0D',
-                  }}
-                >
-                  {terminalError}
-                </div>
-              )}
-            </div>
-          )}
-
-          {}
           {processing && (
             <div className='px-4 pb-2'>
               <div

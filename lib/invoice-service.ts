@@ -99,6 +99,7 @@ async function uploadPdfToMedusa(
 function derivePaymentMethod(order: OrderForInvoice): string {
   const posMethod = order.metadata?.payment_method
   if (posMethod) {
+    if (posMethod === 'card_terminal') return 'Card terminal'
     return posMethod.charAt(0).toUpperCase() + posMethod.slice(1).toLowerCase()
   }
   const providerId =
