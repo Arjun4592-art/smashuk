@@ -305,6 +305,20 @@ export default function AddProductPage() {
       ),
     )
   }
+  const updateSwatchColor = (vid: string, value: string) =>
+    setVariants((prev) => {
+      const colourValueOf = (v: Variant) =>
+        v.options
+          .find((o) => /colou?r/i.test(o.name))
+          ?.value.trim()
+          .toLowerCase()
+      const target = colourValueOf(prev.find((v) => v.id === vid) as Variant)
+      return prev.map((v) =>
+        v.id === vid || (target && colourValueOf(v) === target)
+          ? { ...v, colorCode: value }
+          : v,
+      )
+    })
   const addOptionRow = (variantId: string) =>
     setVariants((prev) =>
       prev.map((v) =>
@@ -1970,11 +1984,7 @@ export default function AddProductPage() {
                               title='Swatch colour shown on the storefront'
                               value={variant.colorCode || '#ffffff'}
                               onChange={(e) =>
-                                updateVariant(
-                                  variant.id,
-                                  'colorCode',
-                                  e.target.value,
-                                )
+                                updateSwatchColor(variant.id, e.target.value)
                               }
                               className='w-10 h-8 p-1 border border-[#E1E3E5] rounded-lg cursor-pointer bg-white shrink-0'
                             />

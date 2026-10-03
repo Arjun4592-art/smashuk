@@ -5,25 +5,8 @@ import {
   resolveSpecFilterValue,
 } from '@/lib/spec-filters'
 import type { CatalogQuery } from './types'
+import { matchesGender } from './gender'
 
-/**
- * This is the filtering that used to live in ShopClient's `filtered` useMemo,
- * moved here so it can run on the server over the full catalogue instead of in
- * the browser over a catalogue the browser had to download first.
- *
- * The semantics are carried over deliberately unchanged, including the two
- * behaviours the original had explicit comments about:
- *
- *  - There is NO blanket `p.inStock` pre-filter. Out-of-stock products are only
- *    hidden by the `inStockOnly` toggle. The original comment explains why: an
- *    unconditional in-stock filter made that toggle a no-op and silently hid
- *    published, correctly-tagged products from search and browse entirely.
- *
- *  - A page-level `sport` / `category` / `badge` (from a collection route)
- *    always wins over the equivalent sidebar selection. It's the page's
- *    identity, not a togglable preference, so it can't be cleared by "Clear all
- *    filters" or by re-clicking the matching sidebar chip.
- */
 export function applyCatalogFilters(
   products: Product[],
   q: CatalogQuery,
@@ -36,10 +19,7 @@ export function applyCatalogFilters(
     result = result.filter(
       (p) => p.brand?.toLowerCase() === q.brand!.toLowerCase(),
     )
-  if (q.gender)
-    result = result.filter((p) =>
-      p.tags?.some((t) => t.toLowerCase() === q.gender!.toLowerCase()),
-    )
+  if (q.gender) result = result.filter((p) => matchesGender(p, q.gender!))
   if (q.level)
     result = result.filter((p) =>
       p.tags?.some((t) => t.toLowerCase() === q.level!.toLowerCase()),
@@ -85,15 +65,13 @@ export function applyCatalogFilters(
         ),
     )
 
-  if (q.brands.length)
-    result = result.filter((p) => q.brands.includes(p.brand))
+  if (q.brands.length) result = result.filter((p) => q.brands.includes(p.brand))
   if (q.badges.length)
     result = result.filter((p) =>
       q.badges.some((b) => matchesBadgeFilter(p, b)),
     )
   if (q.inStockOnly) result = result.filter((p) => p.inStock)
-  if (q.minRating)
-    result = result.filter((p) => p.rating >= q.minRating!)
+  if (q.minRating) result = result.filter((p) => p.rating >= q.minRating!)
 
   if (!opts.skipPrice)
     result = result.filter(

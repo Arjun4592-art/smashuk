@@ -1433,20 +1433,29 @@ export default function ProductDetailClient({
       )
     })
   const colorCodeMap = useMemo(() => {
-    const map: Record<string, string> = {}
+    // Several variants (one per size) share the same colour name, and the
+    // dashboard stores the swatch hex on each of them. Collect every hex per
+    // colour, then prefer one that is not plain white: the dashboard colour
+    // picker starts at #ffffff, so white is the "never changed" value and a
+    // deliberate pick (e.g. blue) must win over it.
+    const found: Record<string, string[]> = {}
     ;(product.variants ?? []).forEach((v: any) => {
-      const colorOpt = v.options?.find(
-        (o: any) =>
-          o.option?.title === 'Color' || o.option_id?.startsWith('opt_'),
+      const colorOpt = v.options?.find((o: any) =>
+        /colou?r/i.test(o.option?.title ?? ''),
       )
-      const colorName = colorOpt?.value?.toLowerCase()
+      const colorName = colorOpt?.value?.trim().toLowerCase()
       const hex = v.metadata?.color_code
-      if (colorName && hex) map[colorName] = hex
+      if (colorName && hex) (found[colorName] ??= []).push(String(hex))
+    })
+    const map: Record<string, string> = {}
+    Object.entries(found).forEach(([name, hexes]) => {
+      map[name] =
+        hexes.find((h) => h.trim().toLowerCase() !== '#ffffff') ?? hexes[0]
     })
     return map
   }, [product.variants])
   const swatchColor = (value: string) => {
-    const key = value.toLowerCase()
+    const key = value.trim().toLowerCase()
     return colorCodeMap[key] ?? key.replace(/\s+/g, '')
   }
   const [stringSelection, setStringSelection] =

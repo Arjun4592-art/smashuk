@@ -5,6 +5,7 @@ import {
   syncVariantInventory,
   getDefaultStockLocationId,
 } from '@/lib/api/inventory-sync'
+import { revalidatePath } from 'next/cache'
 import { invalidateCatalog } from '@/lib/catalog/source'
 import {
   upsertAdminProduct,
@@ -291,6 +292,14 @@ export async function PATCH(
       // Product + inventory are written — make the shop rebuild its
       // catalogue snapshot so status / price / stock changes show up now.
       invalidateCatalog()
+      // Product pages are statically cached (revalidate = 3600), so without
+      // this a changed swatch / price / stock keeps showing the old page for
+      // up to an hour after saving.
+      try {
+        revalidatePath('/shop/[slug]', 'page')
+      } catch (err) {
+        console.error('[PATCH product] revalidatePath failed:', err)
+      }
       // Dashboard list reflects this edit immediately.
       await upsertAdminProduct(data.product.id, authorization)
       lap('done')

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
+import { getNonUkDeliveryError } from '@/lib/api/uk-delivery-guard'
 import {
   notifyNewOrder,
   sendOrderConfirmationEmail,
@@ -69,6 +70,13 @@ export async function POST(req: NextRequest) {
         break
       }
       case 'payment-session': {
+        const ukErr = await getNonUkDeliveryError(cartId, MEDUSA_URL, h)
+        if (ukErr) {
+          return NextResponse.json(
+            { message: ukErr, error: ukErr },
+            { status: 400 },
+          )
+        }
         res = await fetch(`${MEDUSA_URL}/store/payment-collections`, {
           method: 'POST',
           headers: h,
@@ -79,6 +87,13 @@ export async function POST(req: NextRequest) {
         break
       }
       case 'complete': {
+        const ukErr = await getNonUkDeliveryError(cartId, MEDUSA_URL, h)
+        if (ukErr) {
+          return NextResponse.json(
+            { message: ukErr, error: ukErr },
+            { status: 400 },
+          )
+        }
         res = await fetch(`${MEDUSA_URL}/store/carts/${cartId}/complete`, {
           method: 'POST',
           headers: h,

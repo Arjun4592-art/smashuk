@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
+import { getNonUkDeliveryError } from '@/lib/api/uk-delivery-guard'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 const PUB_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
@@ -67,6 +68,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           payment_method: 'card',
         })
+      }
+    }
+    if (action === 'create-collection' || action === 'complete') {
+      const ukErr = await getNonUkDeliveryError(cartId, MEDUSA_URL, h)
+      if (ukErr) {
+        return NextResponse.json(
+          { message: ukErr, error: ukErr },
+          { status: 400 },
+        )
       }
     }
     if (action === 'create-collection') {

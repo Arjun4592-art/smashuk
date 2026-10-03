@@ -5,6 +5,7 @@ import {
   CHANNEL_ISLANDS_SHIPPING_COST,
   CHANNEL_ISLANDS_OPTION_RE,
 } from '@/lib/vat'
+import { isUkDeliveryPostcode, UK_ONLY_MESSAGE } from '@/lib/uk-shipping'
 import {
   useState,
   useEffect,
@@ -391,6 +392,10 @@ export default function CheckoutPage() {
     deliveryMode === 'ship'
       ? getVatDestination(form.pincode)
       : getVatDestination(null)
+  const showNonUkNotice =
+    deliveryMode === 'ship' &&
+    form.pincode.trim().length >= 3 &&
+    !isUkDeliveryPostcode(form.pincode)
   const isChannelIslandsDelivery =
     deliveryMode === 'ship' && vatDestination.vatExempt
 
@@ -536,6 +541,10 @@ export default function CheckoutPage() {
       deliveryMode === 'ship' && (!form.line1 || !form.city || !form.pincode)
     if (contactFieldsMissing || shipAddressFieldsMissing) {
       toast.error('Please fill all required fields.')
+      return
+    }
+    if (deliveryMode === 'ship' && !isUkDeliveryPostcode(form.pincode)) {
+      toast.error(UK_ONLY_MESSAGE)
       return
     }
     if (deliveryMode === 'pickup' && !storeContact) {
@@ -822,6 +831,20 @@ export default function CheckoutPage() {
                   </div>
                 ))}
               </div>
+
+              {showNonUkNotice && (
+                <div className='mt-4 rounded-xl border border-[#E8553A]/30 bg-[#E8553A]/5 px-4 py-3 text-sm text-[#0A1F44] font-lato'>
+                  We currently deliver within the UK only. If you&apos;re
+                  ordering from outside the UK, please{' '}
+                  <Link
+                    href='/contact'
+                    className='text-[#E8553A] font-semibold hover:underline'
+                  >
+                    contact us
+                  </Link>{' '}
+                  and we&apos;ll see what we can arrange.
+                </div>
+              )}
 
               {}
               {deliveryMode === 'pickup' && (
