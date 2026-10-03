@@ -76,7 +76,15 @@ function toOrderDetail(o: PosOrderRecord): OrderDetailData {
   }
 }
 type SourceKey = 'pos' | 'website' | 'dashboard'
-type PayKey = 'cash' | 'card' | 'card_terminal' | 'split' | 'other'
+type PayKey =
+  | 'cash'
+  | 'card'
+  | 'card_terminal'
+  | 'split'
+  | 'klarna'
+  | 'link'
+  | 'paypal'
+  | 'other'
 const SOURCE_LABEL: Record<SourceKey, string> = {
   pos: 'POS',
   website: 'Website',
@@ -92,28 +100,40 @@ const PAY_FILTERS: { key: PayKey; label: string }[] = [
   { key: 'card', label: 'Card (Stripe)' },
   { key: 'card_terminal', label: 'Card terminal' },
   { key: 'split', label: 'Split' },
+  { key: 'klarna', label: 'Klarna' },
+  { key: 'link', label: 'Link' },
+  { key: 'paypal', label: 'PayPal' },
   { key: 'other', label: 'Other' },
 ]
 // Maps the stored payment method to a filter bucket + a short display label.
 // 'card' on a POS sale is the Stripe card reader; on a website order it's an
-// online card payment.
+// online card payment. Website orders always read "From Website (<method>)".
 function getPayment(o: PosOrderRecord): { key: PayKey; label: string } {
   const m = (o.paymentMethod || '').toLowerCase()
-  if (m === 'cash') return { key: 'cash', label: 'Cash' }
+  const fromWebsite = (o.source ?? 'website') === 'website'
+  const tag = (name: string) => (fromWebsite ? `From Website (${name})` : name)
+  if (m === 'cash') return { key: 'cash', label: tag('Cash') }
   if (m === 'card_terminal')
-    return { key: 'card_terminal', label: 'Card terminal' }
-  if (m === 'split') return { key: 'split', label: 'Split' }
+    return { key: 'card_terminal', label: tag('Card terminal') }
+  if (m === 'split') return { key: 'split', label: tag('Split') }
   if (m === 'card')
     return {
       key: 'card',
-      label: o.source === 'pos' ? 'Card (Stripe)' : 'Card (online)',
+      label:
+        o.source === 'pos'
+          ? 'Card (Stripe)'
+          : fromWebsite
+            ? tag('Card')
+            : 'Card (online)',
     }
-  if (m === 'paypal') return { key: 'other', label: 'PayPal' }
-  if (!m || m === 'online') return { key: 'other', label: 'Online' }
+  if (m === 'klarna') return { key: 'klarna', label: tag('Klarna') }
+  if (m === 'link') return { key: 'link', label: tag('Link') }
+  if (m === 'paypal') return { key: 'paypal', label: tag('PayPal') }
+  if (!m || m === 'online') return { key: 'other', label: tag('Online') }
   const pretty = m.replace(/_/g, ' ')
   return {
     key: 'other',
-    label: pretty.charAt(0).toUpperCase() + pretty.slice(1),
+    label: tag(pretty.charAt(0).toUpperCase() + pretty.slice(1)),
   }
 }
 const money = (n: number) =>
@@ -122,42 +142,209 @@ const money = (n: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
-function FilterChips<T extends string>({
+type FilterOption = { key: string; label: string; count: number }
+
+function ChevronDownIcon() {
+  return (
+    <svg
+      width='14'
+      height='14'
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='2'
+      strokeLinecap='round'
+      strokeLinejoin='round'
+      aria-hidden='true'
+    >
+      <polyline points='6 9 12 15 18 9' />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      width='10'
+      height='10'
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='3'
+      strokeLinecap='round'
+      aria-hidden='true'
+    >
+      <line x1='6' y1='6' x2='18' y2='18' />
+      <line x1='18' y1='6' x2='6' y2='18' />
+    </svg>
+  )
+}
+
+const FILTER_LABEL_CLASS = 'text-[11px] font-medium uppercase tracking-wide'
+
+function ActiveChip({
   label,
-  value,
-  onChange,
-  options,
+  onRemove,
 }: {
   label: string
-  value: T | 'all'
-  onChange: (v: T | 'all') => void
-  options: { key: T | 'all'; label: string }[]
+  onRemove: () => void
 }) {
   return (
-    <div className='flex items-center gap-1.5 flex-wrap'>
-      <span
-        className='text-[11px] font-medium uppercase tracking-wide mr-0.5'
-        style={{ color: '#8C9196' }}
+    <span
+      className='inline-flex items-center gap-1 pl-2.5 pr-1 py-0.5 rounded-full text-[11px] font-medium'
+      style={{
+        background: '#E3F1EB',
+        color: '#008060',
+        border: '1px solid #BFE0D2',
+      }}
+    >
+      {label}
+      <button
+        onClick={onRemove}
+        aria-label={`Remove filter ${label}`}
+        className='flex items-center justify-center w-4 h-4 rounded-full transition-colors hover:bg-[#CDE8DC]'
       >
-        {label}
-      </span>
-      {options.map((opt) => {
-        const active = value === opt.key
-        return (
-          <button
-            key={opt.key}
-            onClick={() => onChange(opt.key)}
-            className='px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap'
-            style={{
-              background: active ? '#008060' : '#FFFFFF',
-              color: active ? '#FFFFFF' : '#6D7175',
-              borderColor: active ? '#008060' : '#E1E3E5',
-            }}
+        <CloseIcon />
+      </button>
+    </span>
+  )
+}
+
+function FilterBar({
+  sourceValue,
+  sourceOptions,
+  onSource,
+  payValue,
+  payOptions,
+  onPay,
+  summary,
+}: {
+  sourceValue: string
+  sourceOptions: FilterOption[]
+  onSource: (v: string) => void
+  payValue: string
+  payOptions: FilterOption[]
+  onPay: (v: string) => void
+  summary: React.ReactNode
+}) {
+  const sourceActive = sourceOptions.find((o) => o.key === sourceValue)
+  const payActive = payOptions.find((o) => o.key === payValue)
+  const hasActive = sourceValue !== 'all' || payValue !== 'all'
+  return (
+    <div
+      className='rounded-xl mb-3 px-3.5 py-3'
+      style={{ background: '#FFFFFF', border: '1px solid #E1E3E5' }}
+    >
+      <div className='flex flex-wrap items-center gap-x-5 gap-y-2.5'>
+        <div className='flex items-center gap-2'>
+          <span className={FILTER_LABEL_CLASS} style={{ color: '#8C9196' }}>
+            Source
+          </span>
+          <div
+            className='inline-flex p-0.5 rounded-lg'
+            style={{ background: '#F1F2F3' }}
+            role='tablist'
+            aria-label='Order source'
           >
-            {opt.label}
-          </button>
-        )
-      })}
+            {sourceOptions.map((opt) => {
+              const active = sourceValue === opt.key
+              return (
+                <button
+                  key={opt.key}
+                  role='tab'
+                  aria-selected={active}
+                  onClick={() => onSource(opt.key)}
+                  className='flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap'
+                  style={{
+                    background: active ? '#FFFFFF' : 'transparent',
+                    color: active ? '#008060' : '#6D7175',
+                    boxShadow: active ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                  }}
+                >
+                  {opt.label}
+                  <span
+                    className='text-[10px] px-1.5 rounded-full'
+                    style={{
+                      background: active ? '#E3F1EB' : '#E1E3E5',
+                      color: active ? '#008060' : '#6D7175',
+                    }}
+                  >
+                    {opt.count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className='flex items-center gap-2'>
+          <span className={FILTER_LABEL_CLASS} style={{ color: '#8C9196' }}>
+            Payment
+          </span>
+          <div className='relative' style={{ color: '#8C9196' }}>
+            <select
+              value={payValue}
+              onChange={(e) => onPay(e.target.value)}
+              aria-label='Payment method'
+              className='appearance-none pl-3 pr-8 py-1.5 rounded-lg border bg-white text-xs font-medium outline-none cursor-pointer transition-colors hover:border-[#008060] focus:border-[#008060]'
+              style={{ borderColor: '#E1E3E5', color: '#202223' }}
+            >
+              {payOptions.map((opt) => (
+                <option key={opt.key} value={opt.key}>
+                  {opt.label} ({opt.count})
+                </option>
+              ))}
+            </select>
+            <span className='pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2'>
+              <ChevronDownIcon />
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {(hasActive || summary) && (
+        <div
+          className='flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mt-3 pt-3'
+          style={{ borderTop: '1px solid #F1F2F3' }}
+        >
+          <div className='flex flex-wrap items-center gap-1.5'>
+            {hasActive && (
+              <>
+                <span className='text-xs' style={{ color: '#6D7175' }}>
+                  Filters:
+                </span>
+                {sourceValue !== 'all' && sourceActive && (
+                  <ActiveChip
+                    label={`Source: ${sourceActive.label}`}
+                    onRemove={() => onSource('all')}
+                  />
+                )}
+                {payValue !== 'all' && payActive && (
+                  <ActiveChip
+                    label={`Payment: ${payActive.label}`}
+                    onRemove={() => onPay('all')}
+                  />
+                )}
+                <button
+                  onClick={() => {
+                    onSource('all')
+                    onPay('all')
+                  }}
+                  className='ml-1 text-xs font-medium hover:underline'
+                  style={{ color: '#008060' }}
+                >
+                  Clear all
+                </button>
+              </>
+            )}
+          </div>
+          {summary && (
+            <span className='text-xs' style={{ color: '#6D7175' }}>
+              {summary}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -281,17 +468,29 @@ export default function OrdersPage() {
         SOURCE_LABEL[o.source].toLowerCase().includes(search.toLowerCase())),
   )
   // Only offer "Dashboard" as a source filter when such orders exist.
-  const sourceOptions: { key: SourceKey | 'all'; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'website', label: 'Website' },
-    { key: 'pos', label: 'POS' },
-    ...(allOrders.some((o) => o.source === 'dashboard')
-      ? [{ key: 'dashboard' as const, label: 'Dashboard' }]
+  const countSource = (k: SourceKey) =>
+    allOrders.filter((o) => o.source === k).length
+  const sourceOptions: FilterOption[] = [
+    { key: 'all', label: 'All', count: allOrders.length },
+    { key: 'website', label: 'Website', count: countSource('website') },
+    { key: 'pos', label: 'POS', count: countSource('pos') },
+    ...(countSource('dashboard') > 0
+      ? [
+          {
+            key: 'dashboard',
+            label: 'Dashboard',
+            count: countSource('dashboard'),
+          },
+        ]
       : []),
   ]
-  const payOptions: { key: PayKey | 'all'; label: string }[] = [
-    { key: 'all', label: 'All' },
-    ...PAY_FILTERS,
+  // Only list payment methods that actually appear in the loaded orders.
+  const payOptions: FilterOption[] = [
+    { key: 'all', label: 'All methods', count: allOrders.length },
+    ...PAY_FILTERS.map((f) => ({
+      ...f,
+      count: allOrders.filter((o) => o.payment.key === f.key).length,
+    })).filter((f) => f.count > 0 || f.key === payFilter),
   ]
   // Sum of what's currently shown (returned orders left out) — handy for
   // matching the card machine / till totals at end of day.
@@ -407,27 +606,26 @@ export default function OrdersPage() {
         </div>
 
         {}
-        <div className='flex flex-wrap items-center gap-x-5 gap-y-2 mb-3'>
-          <FilterChips
-            label='Source'
-            value={sourceFilter}
-            onChange={setSourceFilter}
-            options={sourceOptions}
-          />
-          <FilterChips
-            label='Payment'
-            value={payFilter}
-            onChange={setPayFilter}
-            options={payOptions}
-          />
-          {mounted && !loadError && (
-            <span className='text-xs sm:ml-auto' style={{ color: '#6D7175' }}>
-              {filtered.length} order{filtered.length === 1 ? '' : 's'} ·{' '}
-              {money(shownTotal)} · loaded {completedOrders.length} of{' '}
-              {totalCount}
-            </span>
-          )}
-        </div>
+        <FilterBar
+          sourceValue={sourceFilter}
+          sourceOptions={sourceOptions}
+          onSource={(v) => setSourceFilter(v as SourceKey | 'all')}
+          payValue={payFilter}
+          payOptions={payOptions}
+          onPay={(v) => setPayFilter(v as PayKey | 'all')}
+          summary={
+            mounted && !loadError ? (
+              <>
+                <strong style={{ color: '#202223' }}>{filtered.length}</strong>{' '}
+                order{filtered.length === 1 ? '' : 's'} ·{' '}
+                <strong style={{ color: '#202223' }}>
+                  {money(shownTotal)}
+                </strong>{' '}
+                · loaded {completedOrders.length} of {totalCount}
+              </>
+            ) : null
+          }
+        />
 
         {}
         <div

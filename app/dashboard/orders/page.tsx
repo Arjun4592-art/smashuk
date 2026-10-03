@@ -9,6 +9,11 @@ import { useOrders, useAbandonedCheckouts } from '@/hooks/useDashboard'
 import { updateOrderStatus, getOrder } from '@/lib/api/dashboard'
 import { printReceiptOnLabel } from '@/lib/printer/label-print'
 import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
+import {
+  ClearFiltersButton,
+  FilterSelect,
+  SegmentedControl,
+} from '@/components/dashboard/FilterControls'
 interface CartLine {
   id: string
   title: string
@@ -110,6 +115,12 @@ const SOURCE_LABELS: Record<string, string> = {
   pos: 'POS',
   dashboard: 'Dashboard',
 }
+// Website orders read "From Website (Klarna)"; POS / dashboard sales just show
+// the payment method.
+const paymentDisplay = (o: { source?: string; paymentMethod?: string }) =>
+  o.source === 'website'
+    ? `From Website (${o.paymentMethod || 'Online'})`
+    : o.paymentMethod || '—'
 const ALL_STATUSES = [
   'All',
   'Pending',
@@ -216,6 +227,8 @@ function OrdersPageContent() {
         : 'all'
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
+  const [sourceFilter, setSourceFilter] = useState('') // '' = all sources
+  const [payFilter, setPayFilter] = useState('') // '' = all payment methods
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [page, setPage] = useState(1)
   const pageSize = 10
@@ -276,8 +289,39 @@ function OrdersPageContent() {
       o.customer.toLowerCase().includes(search.toLowerCase())
     const matchStatus =
       statusFilter === 'All' || o.status === statusFilter.toLowerCase()
-    return matchSearch && matchStatus
+    const matchSource = !sourceFilter || o.source === sourceFilter
+    const matchPay = !payFilter || o.paymentMethod === payFilter
+    return matchSearch && matchStatus && matchSource && matchPay
   })
+  const sourceCount = (k: string) => {
+    let n = 0
+    for (const o of orders) if (o.source === k) n++
+    return n
+  }
+  const sourceOptions = [
+    { value: '', label: 'All', count: orders.length },
+    { value: 'website', label: 'Website', count: sourceCount('website') },
+    { value: 'pos', label: 'POS', count: sourceCount('pos') },
+    ...(sourceCount('dashboard') > 0
+      ? [
+          {
+            value: 'dashboard',
+            label: 'Dashboard',
+            count: sourceCount('dashboard'),
+          },
+        ]
+      : []),
+  ]
+  // Payment methods that actually occur in the loaded orders, with counts.
+  const payCounts = new Map<string, number>()
+  for (const o of orders) {
+    const k: string = o.paymentMethod || ''
+    if (k) payCounts.set(k, (payCounts.get(k) ?? 0) + 1)
+  }
+  const payOptions: [string, number][] = Array.from(payCounts).sort(
+    (a, b) => b[1] - a[1],
+  )
+  const activeFilterCount = [sourceFilter, payFilter].filter(Boolean).length
   const totalPages = Math.ceil(filtered.length / pageSize)
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
   const toggleSelect = (id: string) =>
@@ -512,18 +556,40 @@ function OrdersPageContent() {
                   </button>
                 )}
               </div>
-              <select
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value)
+              <SegmentedControl
+                ariaLabel='Order source'
+                value={sourceFilter}
+                options={sourceOptions}
+                onChange={(v) => {
+                  setSourceFilter(v)
                   setPage(1)
                 }}
-                className='px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none cursor-pointer hover:border-[#8C9196] transition-colors'
+              />
+              <FilterSelect
+                ariaLabel='Payment method'
+                value={payFilter}
+                onChange={(v) => {
+                  setPayFilter(v)
+                  setPage(1)
+                }}
               >
-                {ALL_STATUSES.map((s) => (
-                  <option key={s}>{s}</option>
+                <option value=''>All payment methods</option>
+                {payOptions.map(([method, n]) => (
+                  <option key={method} value={method}>
+                    {method} ({n})
+                  </option>
                 ))}
-              </select>
+              </FilterSelect>
+              {activeFilterCount > 0 && (
+                <ClearFiltersButton
+                  count={activeFilterCount}
+                  onClick={() => {
+                    setSourceFilter('')
+                    setPayFilter('')
+                    setPage(1)
+                  }}
+                />
+              )}
             </div>
 
             {}
@@ -729,7 +795,7 @@ function OrdersPageContent() {
                             {order.paymentStatus}
                           </span>
                           <p className='text-[10.5px] text-[#8C9196] mt-0.5'>
-                            {order.paymentMethod}
+                            {paymentDisplay(order)}
                           </p>
                         </td>
                         <td className='px-4 py-3'>

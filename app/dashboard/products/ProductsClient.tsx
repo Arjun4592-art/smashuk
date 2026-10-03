@@ -15,6 +15,13 @@ import {
   type ProductListFilters,
   type ProductListResult,
 } from '@/lib/api/dashboard'
+import {
+  ClearFiltersButton,
+  CloseIcon,
+  FilterSelect,
+  GridViewIcon,
+  ListViewIcon,
+} from '@/components/dashboard/FilterControls'
 const STATUS_STYLES: Record<string, string> = {
   active: 'bg-[#008060]/10 text-[#008060]',
   draft: 'bg-[#6D7175]/10 text-[#6D7175]',
@@ -1459,38 +1466,33 @@ export default function ProductsClient({
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className='text-[#8C9196] hover:text-[#202223] bg-transparent border-none cursor-pointer text-sm'
+                aria-label='Clear search'
+                className='flex items-center justify-center w-5 h-5 rounded-full text-[#8C9196] hover:text-[#202223] hover:bg-[#E1E3E5] bg-transparent border-none cursor-pointer transition-colors'
               >
-                ✕
+                <CloseIcon size={10} />
               </button>
             )}
           </div>
-          <select
-            value={selectedStatus}
-            onChange={(e) => {
-              setSelectedStatus(e.target.value)
-              changePage(1)
-            }}
-            className='px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none cursor-pointer hover:border-[#8C9196] transition-colors'
+          <div
+            role='group'
+            aria-label='Product view'
+            className='inline-flex p-0.5 rounded-lg bg-[#F1F2F3] ml-auto'
           >
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s === 'All' ? 'All Statuses' : s}
-              </option>
-            ))}
-          </select>
-          <div className='flex items-center border border-[#E1E3E5] rounded-lg overflow-hidden ml-auto'>
             <button
               onClick={() => setView('table')}
-              className={`px-3 py-2 text-[13px] transition-colors border-none cursor-pointer ${view === 'table' ? 'bg-[#008060] text-white' : 'bg-white text-[#6D7175] hover:bg-[#F6F6F7]'}`}
+              aria-label='List view'
+              aria-pressed={view === 'table'}
+              className={`flex items-center justify-center w-9 h-8 rounded-md border-none cursor-pointer transition-all ${view === 'table' ? 'bg-white text-[#008060] shadow-[0_1px_2px_rgba(0,0,0,0.1)]' : 'bg-transparent text-[#6D7175] hover:text-[#202223]'}`}
             >
-              ☰
+              <ListViewIcon />
             </button>
             <button
               onClick={() => setView('grid')}
-              className={`px-3 py-2 text-[13px] transition-colors border-none cursor-pointer ${view === 'grid' ? 'bg-[#008060] text-white' : 'bg-white text-[#6D7175] hover:bg-[#F6F6F7]'}`}
+              aria-label='Grid view'
+              aria-pressed={view === 'grid'}
+              className={`flex items-center justify-center w-9 h-8 rounded-md border-none cursor-pointer transition-all ${view === 'grid' ? 'bg-white text-[#008060] shadow-[0_1px_2px_rgba(0,0,0,0.1)]' : 'bg-transparent text-[#6D7175] hover:text-[#202223]'}`}
             >
-              ⊞
+              <GridViewIcon />
             </button>
           </div>
         </div>
@@ -1498,16 +1500,16 @@ export default function ProductsClient({
         {}
         <div className='flex items-center gap-2 px-4 py-3 border-b border-[#E1E3E5] flex-wrap'>
           {(() => {
-            const sel =
-              'px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none cursor-pointer hover:border-[#8C9196] transition-colors max-w-[220px]'
-            const num =
-              'w-24 px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none focus:border-[#008060]'
+            const priceActive =
+              filterPriceMin.trim() !== '' || filterPriceMax.trim() !== ''
+            const priceInput =
+              'w-16 h-full px-2 bg-transparent text-[13px] text-[#202223] placeholder-[#8C9196] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
             return (
               <>
-                <select
+                <FilterSelect
+                  ariaLabel='Category'
                   value={filterCategory}
-                  onChange={(e) => setFilterCategory(e.target.value)}
-                  className={sel}
+                  onChange={setFilterCategory}
                 >
                   <option value=''>All categories</option>
                   {categoryOptions.map((c) => (
@@ -1515,11 +1517,11 @@ export default function ProductsClient({
                       {c.label}
                     </option>
                   ))}
-                </select>
-                <select
+                </FilterSelect>
+                <FilterSelect
+                  ariaLabel='Brand'
                   value={filterBrand}
-                  onChange={(e) => setFilterBrand(e.target.value)}
-                  className={sel}
+                  onChange={setFilterBrand}
                 >
                   <option value=''>All brands</option>
                   {brandOptions.map((b) => (
@@ -1527,11 +1529,11 @@ export default function ProductsClient({
                       {b}
                     </option>
                   ))}
-                </select>
-                <select
+                </FilterSelect>
+                <FilterSelect
+                  ariaLabel='Sport'
                   value={filterSport}
-                  onChange={(e) => setFilterSport(e.target.value)}
-                  className={sel}
+                  onChange={setFilterSport}
                 >
                   <option value=''>All sports</option>
                   {sportOptions.map((b) => (
@@ -1539,46 +1541,54 @@ export default function ProductsClient({
                       {b}
                     </option>
                   ))}
-                </select>
-                <select
+                </FilterSelect>
+                <FilterSelect
+                  ariaLabel='Stock level'
                   value={filterStock}
-                  onChange={(e) =>
-                    setFilterStock(e.target.value as '' | 'in' | 'low' | 'out')
+                  onChange={(v) =>
+                    setFilterStock(v as '' | 'in' | 'low' | 'out')
                   }
-                  className={sel}
                 >
                   <option value=''>Any stock</option>
                   <option value='in'>In stock</option>
                   <option value='low'>Low stock (1–5)</option>
                   <option value='out'>Out of stock</option>
-                </select>
-                <div className='flex items-center gap-1.5'>
-                  <span className='text-[12.5px] text-[#6D7175]'>£</span>
+                </FilterSelect>
+                <div
+                  role='group'
+                  aria-label='Price range'
+                  className={`inline-flex items-center h-9 rounded-lg border transition-colors focus-within:border-[#008060] focus-within:ring-2 focus-within:ring-[#008060]/15 ${
+                    priceActive
+                      ? 'border-[#008060] bg-[#E3F1EB]/60'
+                      : 'border-[#E1E3E5] bg-white hover:border-[#8C9196]'
+                  }`}
+                >
+                  <span className='pl-3 text-[13px] text-[#8C9196]'>£</span>
                   <input
                     type='number'
                     min={0}
                     placeholder='Min'
+                    aria-label='Minimum price'
                     value={filterPriceMin}
                     onChange={(e) => setFilterPriceMin(e.target.value)}
-                    className={num}
+                    className={priceInput}
                   />
-                  <span className='text-[12.5px] text-[#6D7175]'>–</span>
+                  <span className='text-[13px] text-[#8C9196]'>–</span>
                   <input
                     type='number'
                     min={0}
                     placeholder='Max'
+                    aria-label='Maximum price'
                     value={filterPriceMax}
                     onChange={(e) => setFilterPriceMax(e.target.value)}
-                    className={num}
+                    className={priceInput}
                   />
                 </div>
                 {activeFilterCount > 0 && (
-                  <button
+                  <ClearFiltersButton
+                    count={activeFilterCount}
                     onClick={clearFilters}
-                    className='text-[12.5px] text-[#008060] font-medium underline bg-transparent border-none cursor-pointer'
-                  >
-                    Clear filters ({activeFilterCount})
-                  </button>
+                  />
                 )}
               </>
             )
