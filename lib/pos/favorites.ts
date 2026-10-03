@@ -17,9 +17,9 @@ export function isFavoriteTabId(value: unknown): value is FavoriteTabId {
 }
 
 export function emptyFavorites(): FavoritesMap {
-  return Object.fromEntries(
-    FAVORITE_TABS.map((t) => [t.id, []]),
-  ) as FavoritesMap
+  const result = {} as FavoritesMap
+  for (const tab of FAVORITE_TABS) result[tab.id] = []
+  return result
 }
 
 export function sanitizeFavorites(raw: unknown): FavoritesMap {
