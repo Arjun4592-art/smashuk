@@ -1,6 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { SPORTS } from '@/lib/constants'
@@ -30,10 +37,13 @@ import {
   TrustEditor,
 } from '@/components/dashboard/home/SimpleBlockEditors'
 import {
+  Button,
+  Chip,
+  DeleteButton,
+  Icon,
+  IconButton,
+  PageHeader,
   Toggle,
-  dangerBtn,
-  ghostBtn,
-  iconBtn,
   primaryOutlineBtn,
 } from '@/components/dashboard/home/ui'
 
@@ -83,15 +93,15 @@ const VIEWS: Record<HomeView, ViewConfig> = {
   },
 }
 
-const BLOCK_EMOJI: Record<HomeBlockType, string> = {
-  hero: '🖼',
-  trust: '✅',
-  categories: '🗂',
-  products: '🛍',
-  promo: '🏷',
-  brands: '🏢',
-  reviews: '⭐',
-  newsletter: '✉️',
+const BLOCK_ICON: Record<HomeBlockType, (p: { size?: number }) => ReactNode> = {
+  hero: (p) => <Icon.Image {...p} />,
+  trust: (p) => <Icon.Shield {...p} />,
+  categories: (p) => <Icon.Grid {...p} />,
+  products: (p) => <Icon.Bag {...p} />,
+  promo: (p) => <Icon.Tag {...p} />,
+  brands: (p) => <Icon.Building {...p} />,
+  reviews: (p) => <Icon.Star {...p} />,
+  newsletter: (p) => <Icon.Mail {...p} />,
 }
 
 const optionLabel = (list: { value: string; label: string }[], value: string) =>
@@ -224,6 +234,7 @@ export default function HomeLayoutManager({ view }: { view: HomeView }) {
   })
   const [openId, setOpenId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
   const scrollToId = useRef<string | null>(null)
 
   useEffect(() => {
@@ -381,10 +392,6 @@ export default function HomeLayoutManager({ view }: { view: HomeView }) {
     })
 
   const remove = (block: HomeBlock) => {
-    if (
-      !window.confirm(`Delete “${blockTitle(block)}”? (Applies when you Save.)`)
-    )
-      return
     setBlocks((all) => all.filter((b) => b.id !== block.id))
     if (openId === block.id) setOpenId(null)
   }
@@ -410,14 +417,9 @@ export default function HomeLayoutManager({ view }: { view: HomeView }) {
   }
 
   const resetToDefault = () => {
-    if (
-      !window.confirm(
-        'Put the homepage back to the original layout (all original sections and text)? Your changes are only lost if you Save.',
-      )
-    )
-      return
     setBlocks(buildDefaultHomeLayout().blocks)
     setOpenId(null)
+    setConfirmReset(false)
   }
 
   const handleSave = async () => {
@@ -450,6 +452,19 @@ export default function HomeLayoutManager({ view }: { view: HomeView }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  const openAndScroll = (id: string) => {
+    scrollToId.current = id
+    setOpenId(id)
+    // blocks did not change, so scroll right away
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`home-block-${id}`)
+      if (el) {
+        scrollToId.current = null
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
   }
 
   const renderEditor = (block: HomeBlock) => {
@@ -530,206 +545,158 @@ export default function HomeLayoutManager({ view }: { view: HomeView }) {
     }
   }
 
+  const enabledCount = shown.filter((b) => b.enabled).length
+
   return (
-    <div className='space-y-5 max-w-[980px]'>
-      <div className='flex items-start justify-between gap-4 flex-wrap'>
-        <div>
-          <h1 className='font-sora text-[22px] font-semibold text-[#202223]'>
-            {cfg.title}
-          </h1>
-          <p className='text-[13px] text-[#6D7175] mt-0.5 max-w-[560px]'>
-            {cfg.description}
-          </p>
-        </div>
-        <div className='flex items-center gap-2'>
-          {dirty && (
-            <span className='text-[12px] text-[#B98900] font-medium'>
-              Unsaved changes
-            </span>
-          )}
-          <Link
-            href='/'
-            target='_blank'
-            className='px-3 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] text-[#202223] font-medium rounded-lg no-underline'
-          >
-            View homepage
-          </Link>
-          <button
-            type='button'
-            onClick={handleSave}
-            disabled={saving || loading}
-            className='px-4 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 border-none cursor-pointer'
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </div>
-      </div>
+    <div className='w-full'>
+      <PageHeader
+        icon={<Icon.Layout size={20} />}
+        title={cfg.title}
+        description={
+          loading
+            ? cfg.description
+            : isCustom
+              ? 'Using your custom homepage.'
+              : 'Showing the original homepage.'
+        }
+        status={loading ? null : dirty ? 'dirty' : 'saved'}
+      >
+        <a
+          href='/'
+          target='_blank'
+          rel='noreferrer'
+          className='inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#D2D5D8] bg-white px-3.5 text-[12.5px] font-semibold text-[#202223] no-underline transition-colors hover:bg-[#F6F6F7]'
+        >
+          <Icon.External size={14} /> View homepage
+        </a>
+        {view === 'all' &&
+          (confirmReset ? (
+            <Button onClick={resetToDefault}>
+              <span className='text-[#D72C0D]'>Confirm reset?</span>
+            </Button>
+          ) : (
+            <Button onClick={() => setConfirmReset(true)} disabled={loading}>
+              <Icon.Reset size={14} /> Reset to original
+            </Button>
+          ))}
+        <Button
+          variant='primary'
+          onClick={handleSave}
+          disabled={saving || loading || !dirty}
+        >
+          {saving ? <Icon.Spinner size={14} /> : <Icon.Save size={14} />}
+          {saving ? 'Saving…' : 'Save changes'}
+        </Button>
+      </PageHeader>
 
       {loading ? (
-        <div className='bg-white border border-[#E1E3E5] rounded-xl p-6 text-[13px] text-[#6D7175]'>
-          Loading...
+        <div className='space-y-3'>
+          {[0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className='h-[66px] animate-pulse rounded-xl border border-[#E1E3E5] bg-[#F6F7F8]'
+            />
+          ))}
         </div>
       ) : (
-        <>
+        <div className='space-y-6 pb-10'>
           {!isCustom && (
-            <div className='bg-[#F1F8F5] border border-[#B7DCCB] rounded-xl px-4 py-3 text-[12.5px] text-[#1F5F48]'>
-              You’re looking at the original homepage. Nothing changes on the
-              website until you edit something and click <b>Save</b>.
-            </div>
-          )}
-
-          {shown.length === 0 && (
-            <div className='bg-white border border-dashed border-[#C9CCCF] rounded-xl p-6 text-[13px] text-[#6D7175] text-center'>
-              {cfg.emptyText}
-            </div>
-          )}
-
-          <ol className='m-0 p-0 list-none space-y-3'>
-            {shown.map((block, i) => {
-              const open = openId === block.id
-              return (
-                <li
-                  key={block.id}
-                  id={`home-block-${block.id}`}
-                  className={`bg-white border rounded-xl ${
-                    block.enabled ? 'border-[#E1E3E5]' : 'border-[#F5C26B]'
-                  }`}
-                >
-                  <div className='flex items-center gap-3 p-3.5 flex-wrap'>
-                    <Toggle
-                      on={block.enabled}
-                      onClick={() =>
-                        update(block.id, { enabled: !block.enabled })
-                      }
-                      label={`Show ${blockTitle(block)}`}
-                    />
-                    <button
-                      type='button'
-                      onClick={() => setOpenId(open ? null : block.id)}
-                      className='flex-1 min-w-[200px] text-left bg-transparent border-none cursor-pointer p-0 flex items-center gap-3'
-                      aria-expanded={open}
-                    >
-                      <span className='text-[20px] leading-none'>
-                        {BLOCK_EMOJI[block.type]}
-                      </span>
-                      <span className='min-w-0'>
-                        <span className='block text-[14px] font-semibold text-[#202223] truncate'>
-                          {blockTitle(block)}
-                        </span>
-                        <span className='block text-[11.5px] text-[#6D7175] truncate'>
-                          {HOME_BLOCK_LABELS[block.type]} ·{' '}
-                          {block.enabled ? (
-                            blockSubtitle(block)
-                          ) : (
-                            <span className='text-[#B98900] font-medium'>
-                              Hidden on the website
-                            </span>
-                          )}
-                        </span>
-                      </span>
-                    </button>
-                    <div className='flex items-center gap-1.5'>
-                      <button
-                        type='button'
-                        className={iconBtn}
-                        onClick={() => move(block.id, -1)}
-                        disabled={i === 0}
-                        title='Move up'
-                        aria-label='Move section up'
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type='button'
-                        className={iconBtn}
-                        onClick={() => move(block.id, 1)}
-                        disabled={i === shown.length - 1}
-                        title='Move down'
-                        aria-label='Move section down'
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type='button'
-                        className={ghostBtn}
-                        onClick={() => setOpenId(open ? null : block.id)}
-                      >
-                        {open ? 'Close' : 'Edit'}
-                      </button>
-                      {HOME_REPEATABLE_TYPES.includes(block.type) && (
-                        <button
-                          type='button'
-                          className={dangerBtn}
-                          onClick={() => remove(block)}
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {open && (
-                    <div className='border-t border-[#E1E3E5] p-4'>
-                      {renderEditor(block)}
-                    </div>
-                  )}
-                </li>
-              )
-            })}
-          </ol>
-
-          <div className='bg-white border border-[#E1E3E5] rounded-xl p-4 space-y-3'>
-            <div className='flex items-center gap-3 flex-wrap'>
-              <button
-                type='button'
-                onClick={() => setAddOpen((v) => !v)}
-                className={primaryOutlineBtn}
-              >
-                {addOpen ? '− Close' : '+ Add'}
-              </button>
-              {view === 'all' && (
-                <button
-                  type='button'
-                  onClick={resetToDefault}
-                  className={ghostBtn}
-                >
-                  Reset to original homepage
-                </button>
-              )}
-              <span className='text-[12px] text-[#8C9196]'>
-                Changes go live when you click Save
-                {view !== 'all' && (
-                  <>
-                    {' · '}
-                    <Link
-                      href='/dashboard/settings/home-page'
-                      className='text-[#008060] no-underline hover:underline'
-                    >
-                      Change where things sit on the page
-                    </Link>
-                  </>
-                )}
+            <div className='flex items-start gap-2 rounded-xl border border-[#B7DCCB] bg-[#F1F8F5] px-4 py-3 text-[12.5px] text-[#1F5F48]'>
+              <span className='mt-0.5 shrink-0'>
+                <Icon.Info size={15} />
+              </span>
+              <span>
+                You’re looking at the original homepage. Nothing changes on the
+                website until you edit something and click <b>Save changes</b>.
               </span>
             </div>
+          )}
+
+          {shown.length > 0 && (
+            <div className='rounded-xl border border-[#E1E3E5] bg-white p-4'>
+              <div className='mb-2.5 flex items-center justify-between'>
+                <p className='text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6D7175]'>
+                  Page outline
+                </p>
+                <p className='text-[11.5px] text-[#8C9196]'>
+                  Top to bottom as visitors see it · click a section to edit
+                </p>
+              </div>
+              <div className='flex flex-wrap items-center gap-1.5 rounded-lg border border-[#F1F2F3] bg-[#FAFAFA] p-2'>
+                {shown.map((b, i) => (
+                  <button
+                    key={b.id}
+                    type='button'
+                    onClick={() => openAndScroll(b.id)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium cursor-pointer transition-colors ${
+                      b.enabled
+                        ? 'border-[#E1E3E5] bg-white text-[#202223] hover:border-[#008060] hover:text-[#008060]'
+                        : 'border-dashed border-[#C9CCCF] bg-transparent text-[#8C9196] line-through'
+                    }`}
+                  >
+                    <span className='text-[10.5px] font-semibold text-[#8C9196] no-underline'>
+                      {i + 1}
+                    </span>
+                    {blockTitle(b)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <section className='space-y-3'>
+            <div className='flex items-end justify-between gap-3'>
+              <div>
+                <h2 className='text-[15px] font-semibold text-[#202223]'>
+                  Sections
+                </h2>
+                <p className='text-[12.5px] text-[#6D7175]'>
+                  {cfg.description}{' '}
+                  <span className='text-[#8C9196]'>
+                    ({enabledCount} of {shown.length} visible)
+                  </span>
+                </p>
+              </div>
+              <Button onClick={() => setAddOpen((v) => !v)}>
+                {addOpen ? (
+                  <>
+                    <Icon.Close size={14} /> Close
+                  </>
+                ) : (
+                  <>
+                    <Icon.Plus size={14} /> Add section
+                  </>
+                )}
+              </Button>
+            </div>
+
             {addOpen && (
-              <div className='space-y-3'>
+              <div className='space-y-4 rounded-xl border border-[#E1E3E5] bg-[#FAFBFB] p-4'>
                 {cfg.canAddProductRows && (
                   <div>
-                    <p className='text-[11.5px] font-semibold text-[#6D7175] uppercase tracking-wide mb-2'>
+                    <p className='mb-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6D7175]'>
                       Product row
                     </p>
-                    <div className='flex flex-wrap gap-2'>
+                    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'>
                       {PRODUCT_PRESETS.map((p) => (
                         <button
                           key={p.key}
                           type='button'
-                          className={`${ghostBtn} text-left`}
+                          className='flex items-start gap-2.5 rounded-lg border border-[#E1E3E5] bg-white p-3 text-left cursor-pointer transition-colors hover:border-[#008060] hover:bg-[#F1F8F5]'
                           onClick={() =>
                             addBlock(p.make() as HomeProductsBlock)
                           }
                         >
-                          <span className='block font-semibold'>{p.label}</span>
-                          <span className='block text-[11px] text-[#6D7175] font-normal'>
-                            {p.hint}
+                          <span className='mt-0.5 text-[#008060]'>
+                            <Icon.Bag size={16} />
+                          </span>
+                          <span className='min-w-0'>
+                            <span className='block text-[13px] font-semibold text-[#202223]'>
+                              {p.label}
+                            </span>
+                            <span className='block text-[11.5px] text-[#6D7175]'>
+                              {p.hint}
+                            </span>
                           </span>
                         </button>
                       ))}
@@ -738,35 +705,45 @@ export default function HomeLayoutManager({ view }: { view: HomeView }) {
                 )}
                 {(cfg.canAddPromo || cfg.canAddTiles) && (
                   <div>
-                    <p className='text-[11.5px] font-semibold text-[#6D7175] uppercase tracking-wide mb-2'>
+                    <p className='mb-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6D7175]'>
                       Banner
                     </p>
-                    <div className='flex flex-wrap gap-2'>
+                    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'>
                       {cfg.canAddPromo && (
                         <button
                           type='button'
-                          className={`${ghostBtn} text-left`}
+                          className='flex items-start gap-2.5 rounded-lg border border-[#E1E3E5] bg-white p-3 text-left cursor-pointer transition-colors hover:border-[#008060] hover:bg-[#F1F8F5]'
                           onClick={() => addBlock(newPromoBlock())}
                         >
-                          <span className='block font-semibold'>
-                            Discount banner
+                          <span className='mt-0.5 text-[#008060]'>
+                            <Icon.Tag size={16} />
                           </span>
-                          <span className='block text-[11px] text-[#6D7175] font-normal'>
-                            Offer with code and button
+                          <span className='min-w-0'>
+                            <span className='block text-[13px] font-semibold text-[#202223]'>
+                              Discount banner
+                            </span>
+                            <span className='block text-[11.5px] text-[#6D7175]'>
+                              Offer with code and button
+                            </span>
                           </span>
                         </button>
                       )}
                       {cfg.canAddTiles && (
                         <button
                           type='button'
-                          className={`${ghostBtn} text-left`}
+                          className='flex items-start gap-2.5 rounded-lg border border-[#E1E3E5] bg-white p-3 text-left cursor-pointer transition-colors hover:border-[#008060] hover:bg-[#F1F8F5]'
                           onClick={() => addBlock(newCategoriesBlock())}
                         >
-                          <span className='block font-semibold'>
-                            Photo tiles
+                          <span className='mt-0.5 text-[#008060]'>
+                            <Icon.Grid size={16} />
                           </span>
-                          <span className='block text-[11px] text-[#6D7175] font-normal'>
-                            Another “browse by” row
+                          <span className='min-w-0'>
+                            <span className='block text-[13px] font-semibold text-[#202223]'>
+                              Photo tiles
+                            </span>
+                            <span className='block text-[11.5px] text-[#6D7175]'>
+                              Another “browse by” row
+                            </span>
                           </span>
                         </button>
                       )}
@@ -775,8 +752,143 @@ export default function HomeLayoutManager({ view }: { view: HomeView }) {
                 )}
               </div>
             )}
-          </div>
-        </>
+
+            {shown.length === 0 && (
+              <div className='rounded-xl border border-dashed border-[#C9CCCF] py-8 text-center text-[13px] text-[#8C9196]'>
+                {cfg.emptyText}
+              </div>
+            )}
+
+            <ol className='m-0 list-none space-y-3 p-0'>
+              {shown.map((block, i) => {
+                const open = openId === block.id
+                return (
+                  <li
+                    key={block.id}
+                    id={`home-block-${block.id}`}
+                    className={`scroll-mt-24 rounded-xl border transition-shadow ${
+                      open
+                        ? 'border-[#B8BCC0] shadow-[0_2px_10px_rgba(0,0,0,0.06)]'
+                        : 'border-[#E1E3E5]'
+                    } ${block.enabled ? 'bg-white' : 'bg-[#FAFBFB]'}`}
+                  >
+                    <div className='flex items-center gap-3 px-4 py-3'>
+                      <button
+                        type='button'
+                        onClick={() => setOpenId(open ? null : block.id)}
+                        aria-expanded={open}
+                        className='flex min-w-0 flex-1 items-center gap-3 border-none bg-transparent p-0 text-left cursor-pointer'
+                      >
+                        <span
+                          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
+                            block.enabled
+                              ? 'border-[#E1E3E5] bg-[#F6F7F8] text-[#4A4F55]'
+                              : 'border-dashed border-[#C9CCCF] bg-white text-[#8C9196] opacity-60'
+                          }`}
+                        >
+                          {BLOCK_ICON[block.type]({ size: 18 })}
+                        </span>
+                        <span className='min-w-0'>
+                          <span
+                            className={`block truncate text-[14px] font-semibold ${
+                              block.enabled
+                                ? 'text-[#202223]'
+                                : 'text-[#8C9196]'
+                            }`}
+                          >
+                            {blockTitle(block)}
+                          </span>
+                          <span className='mt-0.5 flex flex-wrap items-center gap-1.5'>
+                            <Chip>{HOME_BLOCK_LABELS[block.type]}</Chip>
+                            <span className='truncate text-[11.5px] text-[#6D7175]'>
+                              {blockSubtitle(block)}
+                            </span>
+                            {!block.enabled && (
+                              <Chip tone='amber'>Hidden on website</Chip>
+                            )}
+                          </span>
+                        </span>
+                      </button>
+
+                      <div className='flex shrink-0 items-center gap-1'>
+                        <span className='mr-1.5 hidden items-center gap-2 sm:flex'>
+                          <span className='text-[12px] text-[#6D7175]'>
+                            {block.enabled ? 'Visible' : 'Hidden'}
+                          </span>
+                          <Toggle
+                            on={block.enabled}
+                            onClick={() =>
+                              update(block.id, { enabled: !block.enabled })
+                            }
+                            label={`Show ${blockTitle(block)}`}
+                          />
+                        </span>
+                        <span className='sm:hidden'>
+                          <Toggle
+                            on={block.enabled}
+                            onClick={() =>
+                              update(block.id, { enabled: !block.enabled })
+                            }
+                            label={`Show ${blockTitle(block)}`}
+                          />
+                        </span>
+                        <span className='mx-1 h-5 w-px bg-[#E1E3E5]' />
+                        <IconButton
+                          label='Move section up'
+                          disabled={i === 0}
+                          onClick={() => move(block.id, -1)}
+                        >
+                          <Icon.Up size={15} />
+                        </IconButton>
+                        <IconButton
+                          label='Move section down'
+                          disabled={i === shown.length - 1}
+                          onClick={() => move(block.id, 1)}
+                        >
+                          <Icon.Down size={15} />
+                        </IconButton>
+                        {HOME_REPEATABLE_TYPES.includes(block.type) && (
+                          <DeleteButton
+                            label='Delete section'
+                            onConfirm={() => remove(block)}
+                          />
+                        )}
+                        <IconButton
+                          label={open ? 'Collapse' : 'Edit section'}
+                          onClick={() => setOpenId(open ? null : block.id)}
+                        >
+                          <Icon.Chevron
+                            size={16}
+                            className={`transition-transform duration-200 ${
+                              open ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </IconButton>
+                      </div>
+                    </div>
+                    {open && (
+                      <div className='border-t border-[#E1E3E5] px-5 py-5'>
+                        {renderEditor(block)}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ol>
+
+            {view !== 'all' && (
+              <p className='text-[12px] text-[#8C9196]'>
+                Want to change where things sit on the page?{' '}
+                <Link
+                  href='/dashboard/settings/home-page'
+                  className='font-medium text-[#008060] no-underline hover:underline'
+                >
+                  Open All Sections & Order
+                </Link>
+              </p>
+            )}
+          </section>
+        </div>
       )}
     </div>
   )

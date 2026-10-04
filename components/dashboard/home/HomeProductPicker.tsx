@@ -1,5 +1,7 @@
 'use client'
 
+import { Icon } from './ui'
+
 import { useEffect, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/error-message'
 import type { HomePickedProduct } from '@/lib/home-layout-shared'
@@ -103,7 +105,7 @@ export default function HomeProductPicker({
             onClick={onClose}
             className='w-7 h-7 rounded-full text-[#6D7175] hover:bg-[#F1F1F1] text-sm border-none bg-transparent cursor-pointer'
           >
-            ✕
+            <Icon.Close size={15} />
           </button>
         </div>
 

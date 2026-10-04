@@ -21,6 +21,7 @@ import {
   type LegacyPromoBanner,
 } from '@/lib/home-layout-shared'
 import {
+  Icon,
   ToggleRow,
   dangerBtn,
   ghostBtn,
@@ -307,7 +308,7 @@ export function CategoriesEditor({
                     onClick={() => moveTile(i, -1)}
                     aria-label='Move tile up'
                   >
-                    ↑
+                    <Icon.Up size={15} />
                   </button>
                   <button
                     type='button'
@@ -316,7 +317,7 @@ export function CategoriesEditor({
                     onClick={() => moveTile(i, 1)}
                     aria-label='Move tile down'
                   >
-                    ↓
+                    <Icon.Down size={15} />
                   </button>
                   <button
                     type='button'

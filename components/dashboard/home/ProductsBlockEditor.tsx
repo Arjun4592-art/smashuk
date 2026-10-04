@@ -13,6 +13,7 @@ import {
 } from '@/lib/home-layout-shared'
 import HomeProductPicker from './HomeProductPicker'
 import {
+  Icon,
   ToggleRow,
   ghostBtn,
   hintCls,
@@ -346,7 +347,7 @@ export default function ProductsBlockEditor({
                     onClick={() => movePick(i, -1)}
                     aria-label='Move product up'
                   >
-                    ↑
+                    <Icon.Up size={15} />
                   </button>
                   <button
                     type='button'
@@ -355,7 +356,7 @@ export default function ProductsBlockEditor({
                     onClick={() => movePick(i, 1)}
                     aria-label='Move product down'
                   >
-                    ↓
+                    <Icon.Down size={15} />
                   </button>
                   <button
                     type='button'
@@ -363,7 +364,7 @@ export default function ProductsBlockEditor({
                     onClick={() => removePick(p.id)}
                     aria-label='Remove product'
                   >
-                    ✕
+                    <Icon.Close size={15} />
                   </button>
                 </li>
               ))}
