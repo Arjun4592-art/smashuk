@@ -32,7 +32,7 @@ import {
 } from '@/lib/api/store'
 import { useAuthStore } from '@/store/authStore'
 import { trackBeginCheckout } from '@/lib/analytics-events'
-import { displayRows } from '@/lib/cart-links'
+import { displayRows, itemKey } from '@/lib/cart-links'
 import {
   FREE_SHIPPING_THRESHOLD,
   STANDARD_SHIPPING_COST,
@@ -58,7 +58,7 @@ const DELIVERY_INFO_SECTIONS: {
 }[] = [
   {
     heading: '',
-    body: 'We offer a 2-5 working day delivery on most goods purchased to a UK address, excluding Northern Ireland, Isle of Man, Scottish Islands and the Channel Islands, which may take up to 7 days to deliver.',
+    body: 'We offer a 1-3 working day delivery on most goods purchased to a UK address, excluding Northern Ireland, Isle of Man, Scottish Islands and the Channel Islands, which may take up to 7 days to deliver.',
   },
   {
     heading: '1. General Information',
@@ -1035,7 +1035,7 @@ export default function CheckoutPage() {
               <div className='space-y-3 mb-5 max-h-48 overflow-y-auto'>
                 {displayRows(items).map(({ item, stringAddon }) => (
                   <div
-                    key={`${item.product.id}-${item.variant?.id}`}
+                    key={`${item.product.id}-${item.variant?.id}-${itemKey(item)}`}
                     className='flex items-center gap-3'
                   >
                     <div className='w-12 h-12 rounded-lg overflow-hidden bg-gray-50 shrink-0 border border-gray-100'>

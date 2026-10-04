@@ -202,3 +202,51 @@ export function pickStringingServices<T extends Record<string, any>>(
   }
   return { matched, debug }
 }
+
+export const STRING_TYPES = [
+  { value: 'polyester', label: 'Polyester' },
+  { value: 'multifilament', label: 'Multifilament' },
+  { value: 'hybrid', label: 'Hybrid' },
+  { value: 'natural-gut', label: 'Natural Gut' },
+  { value: 'synthetic-gut', label: 'Synthetic Gut' },
+] as const
+
+export const OTHER_STRING_TYPE_LABEL = 'Other'
+
+export function stringTypeLabel(value?: string | null): string {
+  const v = (value ?? '').trim()
+  if (!v) return ''
+  const known = STRING_TYPES.find((t) => t.value === v.toLowerCase())
+  return known ? known.label : v
+}
+
+export function detectStringType(input: {
+  explicit?: unknown
+  title?: string | null
+  specType?: string | null
+}): string {
+  if (typeof input.explicit === 'string' && input.explicit.trim())
+    return stringTypeLabel(input.explicit)
+  const t = `${input.title ?? ''} ${input.specType ?? ''}`.toLowerCase()
+  if (/multi-?\s?filament/.test(t)) return 'Multifilament'
+  if (/\bhybrid\b/.test(t)) return 'Hybrid'
+  if (/natural\s+gut/.test(t)) return 'Natural Gut'
+  if (/synthetic\s+gut/.test(t)) return 'Synthetic Gut'
+  if (/\bpoly(ester)?\b|co-?poly/.test(t)) return 'Polyester'
+  if (
+    /\b(rpm|hurricane|rpm blast|tour bite|luxilon|alu power|hyper-?g|polytour|poly tour|rip control|pro hurricane)\b/.test(
+      t,
+    )
+  )
+    return 'Polyester'
+  if (/\b(nxt|xcel|x-?one biphase|velocity mlt|tecnifibre x-one)\b/.test(t))
+    return 'Multifilament'
+  if (/\b(vs touch|vs team|natural gut)\b/.test(t)) return 'Natural Gut'
+  return ''
+}
+
+export function stringTypeOrder(label: string): number {
+  if (!label) return 1000
+  const i = STRING_TYPES.findIndex((t) => t.label === label)
+  return i >= 0 ? i : 500
+}

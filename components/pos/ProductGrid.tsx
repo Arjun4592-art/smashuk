@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { CURRENCY_SYMBOL } from '@/lib/constants'
 import { usePOSStore } from '@/store/posStore'
 export interface POSProduct {
@@ -29,6 +30,8 @@ interface Props {
   pinnedIds?: Set<string>
   onTogglePin?: (product: POSProduct) => void
   emptyMessage?: string
+  /** Dense layout: small thumbnail beside the text so more items fit on screen. */
+  compact?: boolean
 }
 export default function ProductGrid({
   products,
@@ -37,8 +40,13 @@ export default function ProductGrid({
   pinnedIds,
   onTogglePin,
   emptyMessage,
+  compact = false,
 }: Props) {
   const showStockCount = usePOSStore((s) => s.showStockCount)
+  // Compact tiles group the text beside the thumbnail; the normal tile keeps
+  // its original flat markup (no wrapper) so other POS screens are unchanged.
+  const TextWrap = ({ children }: { children: ReactNode }) =>
+    compact ? <div className='min-w-0 flex-1'>{children}</div> : <>{children}</>
   if (isLoading && products.length === 0) {
     return (
       <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2'>
@@ -115,7 +123,11 @@ export default function ProductGrid({
                   : `${p.name}${p.size ? ` — ${p.size}` : ''}`
               }
               disabled={p.pricePending}
-              className='flex flex-col flex-1 min-w-0 p-3 rounded-lg border text-left transition-all'
+              className={
+                compact
+                  ? 'flex flex-row items-center gap-2 flex-1 min-w-0 p-2 pr-9 rounded-lg border text-left transition-all'
+                  : 'flex flex-col flex-1 min-w-0 p-3 rounded-lg border text-left transition-all'
+              }
               style={{
                 background: '#FFFFFF',
                 borderColor: '#E1E3E5',
@@ -132,7 +144,11 @@ export default function ProductGrid({
             >
               {}
               <div
-                className='w-full aspect-square rounded-md flex items-center justify-center mb-2 overflow-hidden'
+                className={
+                  compact
+                    ? 'w-10 h-10 shrink-0 rounded-md flex items-center justify-center overflow-hidden'
+                    : 'w-full aspect-square rounded-md flex items-center justify-center mb-2 overflow-hidden'
+                }
                 style={{
                   background: '#F6F6F7',
                 }}
@@ -167,100 +183,106 @@ export default function ProductGrid({
                 </svg>
               </div>
 
-              {}
-              <p
-                className='text-xs font-medium leading-tight line-clamp-2 mb-0.5'
-                style={{
-                  color: '#202223',
-                }}
-              >
-                {p.name}
-              </p>
-
-              {}
-              <div className='flex items-center gap-1 mb-1.5'>
+              <TextWrap>
+                {}
                 <p
-                  className='text-[11px]'
+                  className='text-xs font-medium leading-tight line-clamp-2 mb-0.5'
                   style={{
-                    color: '#8C9196',
+                    color: '#202223',
                   }}
                 >
-                  {p.brand}
+                  {p.name}
                 </p>
-                {p.size && (
-                  <span
-                    className='text-[10px] font-semibold px-1.5 py-[1px] rounded'
+
+                {}
+                <div className='flex items-center gap-1 mb-1.5'>
+                  <p
+                    className='text-[11px]'
                     style={{
-                      background: '#F2F7F5',
-                      color: '#008060',
+                      color: '#8C9196',
                     }}
                   >
-                    {p.size}
-                  </span>
-                )}
-                {!p.size &&
-                  p.variantCountOverride &&
-                  p.variantCountOverride > 1 && (
+                    {p.brand}
+                  </p>
+                  {p.size && (
                     <span
                       className='text-[10px] font-semibold px-1.5 py-[1px] rounded'
                       style={{
-                        background: '#F0F1F2',
-                        color: '#6D7175',
+                        background: '#F2F7F5',
+                        color: '#008060',
                       }}
                     >
-                      {p.variantCountOverride} sizes
+                      {p.size}
                     </span>
                   )}
-              </div>
-
-              {}
-              <p
-                className='text-sm font-semibold mb-1'
-                style={{
-                  color: p.pricePending ? '#8C9196' : '#202223',
-                }}
-              >
-                {p.pricePending ? (
-                  '…'
-                ) : (
-                  <>
-                    {CURRENCY_SYMBOL}
-                    {p.price.toLocaleString('en-GB')}
-                  </>
-                )}
-              </p>
-
-              {}
-              {(showStockCount || isOut) && (
-                <div className='flex items-center gap-1'>
-                  <div
-                    className='w-1.5 h-1.5 rounded-full shrink-0'
-                    style={{
-                      background: isOut
-                        ? '#D82C0D'
-                        : isLow
-                          ? '#FFC453'
-                          : '#008060',
-                    }}
-                  />
-                  <p
-                    className='text-[10px]'
-                    style={{
-                      color: isOut ? '#D82C0D' : isLow ? '#B7791F' : '#6D7175',
-                    }}
-                  >
-                    {p.pricePending
-                      ? ''
-                      : isOut
-                        ? 'Out of stock'
-                        : showStockCount
-                          ? isLow
-                            ? `Only ${p.stock} left`
-                            : `${p.stock} in stock`
-                          : ''}
-                  </p>
+                  {!p.size &&
+                    p.variantCountOverride &&
+                    p.variantCountOverride > 1 && (
+                      <span
+                        className='text-[10px] font-semibold px-1.5 py-[1px] rounded'
+                        style={{
+                          background: '#F0F1F2',
+                          color: '#6D7175',
+                        }}
+                      >
+                        {p.variantCountOverride} sizes
+                      </span>
+                    )}
                 </div>
-              )}
+
+                {}
+                <p
+                  className='text-sm font-semibold mb-1'
+                  style={{
+                    color: p.pricePending ? '#8C9196' : '#202223',
+                  }}
+                >
+                  {p.pricePending ? (
+                    '…'
+                  ) : (
+                    <>
+                      {CURRENCY_SYMBOL}
+                      {p.price.toLocaleString('en-GB')}
+                    </>
+                  )}
+                </p>
+
+                {}
+                {(showStockCount || isOut) && (
+                  <div className='flex items-center gap-1'>
+                    <div
+                      className='w-1.5 h-1.5 rounded-full shrink-0'
+                      style={{
+                        background: isOut
+                          ? '#D82C0D'
+                          : isLow
+                            ? '#FFC453'
+                            : '#008060',
+                      }}
+                    />
+                    <p
+                      className='text-[10px]'
+                      style={{
+                        color: isOut
+                          ? '#D82C0D'
+                          : isLow
+                            ? '#B7791F'
+                            : '#6D7175',
+                      }}
+                    >
+                      {p.pricePending
+                        ? ''
+                        : isOut
+                          ? 'Out of stock'
+                          : showStockCount
+                            ? isLow
+                              ? `Only ${p.stock} left`
+                              : `${p.stock} in stock`
+                            : ''}
+                    </p>
+                  </div>
+                )}
+              </TextWrap>
             </button>
             {onTogglePin && (
               <button
@@ -271,7 +293,11 @@ export default function ProductGrid({
                 }}
                 aria-label={isPinned ? 'Edit favorites' : 'Add to favorites'}
                 title={isPinned ? 'Favorite — tap to edit' : 'Add to favorites'}
-                className='absolute top-1.5 right-1.5 w-7 h-7 flex items-center justify-center rounded-full'
+                className={
+                  compact
+                    ? 'absolute top-1/2 -translate-y-1/2 right-1.5 w-6 h-6 flex items-center justify-center rounded-full'
+                    : 'absolute top-1.5 right-1.5 w-7 h-7 flex items-center justify-center rounded-full'
+                }
                 style={{
                   background: 'rgba(255,255,255,0.92)',
                   border: '1px solid #E1E3E5',

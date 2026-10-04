@@ -448,6 +448,7 @@ export default function FavoritesPage() {
 
       <div className='flex-1 min-h-0 overflow-y-auto'>
         <ProductGrid
+          compact
           products={gridProducts}
           isLoading={indexLoading}
           pinnedIds={new Set(pinnedForTab)}

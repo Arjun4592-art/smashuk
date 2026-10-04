@@ -660,6 +660,16 @@ export default function BillingPage() {
     },
     [removeItem],
   )
+  const handleItemDiscount = useCallback(
+    (lineId: string, amountOff: number) => {
+      const item = findByLineId(lineId)
+      if (item)
+        usePOSStore
+          .getState()
+          .setItemDiscount(item.product.id, amountOff, item.variant?.id)
+    },
+    [],
+  )
   const handleOpenReturn = async () => {
     try {
       const { fetchPOSOrderHistory } = await import('@/lib/api/pos')
@@ -1271,6 +1281,7 @@ export default function BillingPage() {
               onIncrease={handleIncrease}
               onDecrease={handleDecrease}
               onRemove={handleRemove}
+              onItemDiscount={handleItemDiscount}
               onDiscountPercentChange={(percent) =>
                 usePOSStore.getState().applyPercentageDiscount(percent)
               }
@@ -1565,6 +1576,7 @@ export default function BillingPage() {
             onIncrease={handleIncrease}
             onDecrease={handleDecrease}
             onRemove={handleRemove}
+            onItemDiscount={handleItemDiscount}
             onDiscountPercentChange={(percent) =>
               usePOSStore.getState().applyPercentageDiscount(percent)
             }

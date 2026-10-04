@@ -10,6 +10,20 @@ import type { CartItem } from '@/store/cartStore'
  * is treated as a normal single product.
  */
 
+export function configKeyOf(metadata?: Record<string, any> | null): string {
+  const m = metadata ?? {}
+  return [
+    m.string_choice ?? '',
+    m.string_tension ?? '',
+    m.grip_choice ?? '',
+    m.linked_config ?? '',
+  ].join('|')
+}
+
+export function itemKey(item: CartItem): string {
+  return configKeyOf(item.metadata)
+}
+
 export function isStringAddon(item: CartItem): boolean {
   const m = item.metadata
   return !!(m?.linked_product && m?.string_choice && !m?.grip_choice)
@@ -26,7 +40,10 @@ export function findParentItem(
     if (m.linked_product_id) {
       return (
         i.product.id === m.linked_product_id &&
-        (m.linked_variant_id ? i.variant?.id === m.linked_variant_id : true)
+        (m.linked_variant_id ? i.variant?.id === m.linked_variant_id : true) &&
+        (typeof m.linked_config === 'string'
+          ? configKeyOf(i.metadata) === m.linked_config
+          : true)
       )
     }
     // Older carts (saved before the ids were stored) fall back to the name.
@@ -38,7 +55,9 @@ export function getLinkedItems(
   parent: CartItem,
   items: CartItem[],
 ): CartItem[] {
-  return items.filter((i) => i !== parent && findParentItem(i, items) === parent)
+  return items.filter(
+    (i) => i !== parent && findParentItem(i, items) === parent,
+  )
 }
 
 export function getStringAddon(

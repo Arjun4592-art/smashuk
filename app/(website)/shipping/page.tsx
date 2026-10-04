@@ -24,7 +24,7 @@ export default function DeliveryPage() {
 
       <h2>Delivery times</h2>
       <ul className='list-disc pl-5 space-y-1'>
-        <li>Standard delivery: 2–5 working days</li>
+        <li>Standard delivery: 1–3 working days</li>
       </ul>
       <p>
         Orders placed after 2pm are processed the next working day. If your

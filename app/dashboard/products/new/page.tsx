@@ -1101,10 +1101,22 @@ export default function AddProductPage() {
                               )
                               setAddingBrand(false)
                             } else if (e.key === 'Escape') {
+                              ;(e.target as HTMLInputElement).value = ''
                               setAddingBrand(false)
                             }
                           }}
-                          onBlur={() => setAddingBrand(false)}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim()
+                            if (val) {
+                              updateForm('brand', val)
+                              setBrandOptions((prev) =>
+                                prev.includes(val)
+                                  ? prev
+                                  : [...prev, val].sort(),
+                              )
+                            }
+                            setAddingBrand(false)
+                          }}
                         />
                       ) : (
                         <select
@@ -1151,10 +1163,22 @@ export default function AddProductPage() {
                               )
                               setAddingSport(false)
                             } else if (e.key === 'Escape') {
+                              ;(e.target as HTMLInputElement).value = ''
                               setAddingSport(false)
                             }
                           }}
-                          onBlur={() => setAddingSport(false)}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim()
+                            if (val) {
+                              updateForm('sport', val)
+                              setSportOptions((prev) =>
+                                prev.includes(val)
+                                  ? prev
+                                  : [...prev, val].sort(),
+                              )
+                            }
+                            setAddingSport(false)
+                          }}
                         />
                       ) : (
                         <select

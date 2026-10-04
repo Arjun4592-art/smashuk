@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useCartStore } from '@/store/cartStore'
 import { formatCurrency } from '@/lib/utils'
-import { displayRows, findParentItem } from '@/lib/cart-links'
+import { displayRows, findParentItem, itemKey } from '@/lib/cart-links'
 import {
   CloseIcon,
   TrashIcon,
@@ -156,7 +156,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
               const parentItem = findParentItem(item, items)
               return (
                 <div
-                  key={`${item.product.id}-${item.variant?.id}`}
+                  key={`${item.product.id}-${item.variant?.id}-${itemKey(item)}`}
                   className='bg-white rounded-2xl p-3.5 border border-[#E5E7EB] hover:border-[#E8553A]/30 hover:shadow-sm transition-all duration-200'
                 >
                   <div className='flex gap-3'>
@@ -190,7 +190,11 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                             ? ` · ${item.metadata.string_tension}`
                             : ''}
                           {stringAddon
-                            ? ` · +${formatCurrency(stringAddon.product.price)}`
+                            ? ` · +${formatCurrency(stringAddon.product.price)}${
+                                stringAddon.quantity > 1
+                                  ? ` × ${stringAddon.quantity}`
+                                  : ''
+                              }`
                             : ''}
                         </p>
                       )}
@@ -211,7 +215,11 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                     ) : (
                       <button
                         onClick={() =>
-                          removeItem(item.product.id, item.variant?.id)
+                          removeItem(
+                            item.product.id,
+                            item.variant?.id,
+                            itemKey(item),
+                          )
                         }
                         aria-label='Remove item'
                         className='w-7 h-7 rounded-lg bg-[#F2F4F7] hover:bg-red-50 hover:text-red-500 text-[#9CA3AF] flex items-center justify-center transition-colors shrink-0'
@@ -239,6 +247,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                             item.product.id,
                             item.quantity - 1,
                             item.variant?.id,
+                            itemKey(item),
                           )
                         }
                         aria-label='Decrease quantity'
@@ -255,6 +264,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                             item.product.id,
                             item.quantity + 1,
                             item.variant?.id,
+                            itemKey(item),
                           )
                         }
                         aria-label='Increase quantity'

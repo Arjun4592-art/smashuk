@@ -1,9 +1,11 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import {
   STRINGING_SPORTS,
   STRINGING_SPORT_LABEL,
+  STRING_TYPES,
   detectStringingSport,
   isStringingCategoryHandle,
   looksLikeStringing,
@@ -29,6 +31,8 @@ interface Props {
   categories: Cat[]
   categoryId: string
   stringingType: StringingKind
+  stringType?: string
+  onChangeStringType?: (v: string) => void
   onSelectCategory: (id: string) => void
   onChangeSport: (sport: string) => void
   onChangeType: (t: StringingKind) => void
@@ -52,10 +56,79 @@ export default function StringingCategoryHint({
   categories,
   categoryId,
   stringingType,
+  stringType = '',
+  onChangeStringType,
   onSelectCategory,
   onChangeSport,
   onChangeType,
 }: Props) {
+  // Owner-added string types (saved in store settings). The built-in ones
+  // come from STRING_TYPES; custom ones are stored and saved on the product
+  // as their label text.
+  const ADD_NEW = '__add_new__'
+  const [customTypes, setCustomTypes] = useState<string[]>([])
+  const [adding, setAdding] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/admin/string-types', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && Array.isArray(d?.custom)) setCustomTypes(d.custom)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  const saveType = async (action: 'add' | 'remove', label: string) => {
+    setBusy(true)
+    try {
+      const res = await fetch('/api/admin/string-types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ action, label }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Could not save string type')
+      setCustomTypes(data.custom ?? [])
+      return data as { custom: string[]; added?: string }
+    } catch (err: any) {
+      toast.error(err.message ?? 'Could not save string type')
+      return null
+    } finally {
+      setBusy(false)
+    }
+  }
+  const addType = async () => {
+    const label = newName.trim()
+    if (!label) return
+    const data = await saveType('add', label)
+    if (!data?.added) return
+    onChangeStringType?.(data.added)
+    setNewName('')
+    setAdding(false)
+    toast.success(`“${data.added}” added to string types`)
+  }
+  const removeType = async (label: string) => {
+    if (
+      !window.confirm(
+        `Remove “${label}” from the list? Products already using it keep it.`,
+      )
+    )
+      return
+    const data = await saveType('remove', label)
+    if (data) {
+      onChangeStringType?.('')
+      toast.success(`“${label}” removed`)
+    }
+  }
+  const isCustomSelected = customTypes.some(
+    (c) => c.toLowerCase() === stringType.toLowerCase(),
+  )
+
   const selected = categories.find((c) => c.id === categoryId)
   const isStringingCat =
     !!selected && isStringingCategoryHandle(selected.handle)
@@ -135,6 +208,99 @@ export default function StringingCategoryHint({
           <option value='reel'>Reel — string sold on its own</option>
         </select>
       </div>
+
+      {stringingType === 'service' && onChangeStringType && (
+        <div>
+          <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
+            String type (heading in the dropdown)
+          </label>
+          <select
+            value={adding ? ADD_NEW : stringType}
+            onChange={(e) => {
+              if (e.target.value === ADD_NEW) {
+                setAdding(true)
+                return
+              }
+              setAdding(false)
+              onChangeStringType(e.target.value)
+            }}
+            className='w-full px-3.5 py-2.5 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all bg-white cursor-pointer'
+          >
+            <option value=''>Not set (shown under “Other”)</option>
+            {STRING_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+            {customTypes.map((c) => (
+              <option key={`custom-${c}`} value={c}>
+                {c}
+              </option>
+            ))}
+            {stringType &&
+              !STRING_TYPES.some((t) => t.value === stringType) &&
+              !customTypes.some(
+                (c) => c.toLowerCase() === stringType.toLowerCase(),
+              ) && <option value={stringType}>{stringType}</option>}
+            <option value={ADD_NEW}>＋ Add new string type…</option>
+          </select>
+          {adding && (
+            <div className='mt-2 flex items-center gap-2'>
+              <input
+                autoFocus
+                type='text'
+                value={newName}
+                maxLength={40}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void addType()
+                  }
+                  if (e.key === 'Escape') {
+                    setAdding(false)
+                    setNewName('')
+                  }
+                }}
+                placeholder='e.g. Textured Polyester'
+                className='flex-1 px-3.5 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all bg-white'
+              />
+              <button
+                type='button'
+                onClick={() => void addType()}
+                disabled={busy || !newName.trim()}
+                className='px-3.5 py-2 rounded-lg bg-[#008060] hover:bg-[#006e52] text-white text-[12.5px] font-semibold border-none cursor-pointer disabled:opacity-50'
+              >
+                {busy ? 'Adding…' : 'Add'}
+              </button>
+              <button
+                type='button'
+                onClick={() => {
+                  setAdding(false)
+                  setNewName('')
+                }}
+                className='px-3 py-2 rounded-lg border border-[#E1E3E5] bg-white text-[12.5px] text-[#202223] cursor-pointer hover:bg-[#F6F6F7]'
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          {isCustomSelected && !adding && (
+            <button
+              type='button'
+              onClick={() => void removeType(stringType)}
+              disabled={busy}
+              className='mt-1.5 text-[11.5px] text-[#D72C0D] bg-transparent border-none p-0 cursor-pointer underline disabled:opacity-50'
+            >
+              Remove “{stringType}” from the list
+            </button>
+          )}
+          <p className='mt-1 text-[11.5px] text-[#8C9196]'>
+            Racket pages group the String Selection dropdown by this, e.g. all
+            Polyester services under one “Polyester” heading.
+          </p>
+        </div>
+      )}
 
       {stringingType === 'reel' ? (
         <div className={`${box} border-[#E1E3E5] bg-[#F6F6F7] text-[#4A4F55]`}>

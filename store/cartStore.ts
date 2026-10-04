@@ -12,7 +12,13 @@ import {
 } from '@/lib/api/store'
 import { GIFT_CARD_PRODUCT_HANDLE } from '@/lib/constants'
 import { trackAddToCart } from '@/lib/analytics-events'
-import { getLinkedItems, isMergedStringAddon } from '@/lib/cart-links'
+import {
+  configKeyOf,
+  getLinkedItems,
+  isMergedStringAddon,
+  isStringAddon,
+  itemKey,
+} from '@/lib/cart-links'
 export interface CartItem {
   product: Product
   quantity: number
@@ -49,11 +55,16 @@ interface CartState {
     metadata?: Record<string, any>,
     discountPerUnit?: number,
   ) => void
-  removeItem: (productId: string, variantId?: string) => void
+  removeItem: (
+    productId: string,
+    variantId?: string,
+    configKey?: string,
+  ) => void
   updateQuantity: (
     productId: string,
     quantity: number,
     variantId?: string,
+    configKey?: string,
   ) => void
   applyCoupon: (code: string) => Promise<{
     success: boolean
@@ -67,6 +78,18 @@ interface CartState {
   removeGiftCard: (code: string) => Promise<void>
   clearCart: () => void
   syncFromMedusa: (medusaCart: any) => void
+}
+function findMedusaLine(
+  medusaCart: any,
+  variantId: string,
+  metadata?: Record<string, any> | null,
+) {
+  const lines: any[] = (medusaCart?.items ?? []).filter(
+    (li: any) => li.variant_id === variantId,
+  )
+  if (lines.length <= 1) return lines[0]
+  const want = configKeyOf(metadata)
+  return lines.find((li: any) => configKeyOf(li.metadata) === want) ?? lines[0]
 }
 const FREE_SHIPPING_THRESHOLD = 80
 const SHIPPING_COST = 4.99
@@ -142,8 +165,12 @@ export const useCartStore = create<CartState>()(
         })),
       addItem: (product, quantity = 1, variant, metadata, discountPerUnit) => {
         set((state) => {
+          const incomingKey = configKeyOf(metadata)
           const existingIndex = state.items.findIndex(
-            (i) => i.product.id === product.id && i.variant?.id === variant?.id,
+            (i) =>
+              i.product.id === product.id &&
+              i.variant?.id === variant?.id &&
+              itemKey(i) === incomingKey,
           )
           let newItems: CartItem[]
           if (existingIndex >= 0) {
@@ -206,27 +233,33 @@ export const useCartStore = create<CartState>()(
           })()
         }
       },
-      removeItem: (productId, variantId) => {
+      removeItem: (productId, variantId, configKey) => {
         const state0 = get()
         const removedItem = state0.items.find(
-          (i) => i.product.id === productId && i.variant?.id === variantId,
+          (i) =>
+            i.product.id === productId &&
+            i.variant?.id === variantId &&
+            (configKey === undefined || itemKey(i) === configKey),
         )
         // A string service that belongs to a racket cannot be removed on its
         // own: it goes away only when its racket is removed.
-        if (removedItem && isMergedStringAddon(removedItem, state0.items)) return
+        if (removedItem && isMergedStringAddon(removedItem, state0.items))
+          return
         const linked = removedItem
           ? getLinkedItems(removedItem, state0.items)
           : []
         const targets = removedItem ? [removedItem, ...linked] : []
-        const variantIdsToRemove = targets
-          .map((t) => t.variant?.id ?? (t.product as any)?.variants?.[0]?.id)
-          .filter(Boolean) as string[]
-        set((state) => {
-          const newItems = state.items.filter(
-            (i) =>
-              !targets.includes(i) &&
-              !(i.product.id === productId && i.variant?.id === variantId),
+        const toRemove = targets
+          .map((t) => ({
+            variantId: (t.variant?.id ??
+              (t.product as any)?.variants?.[0]?.id) as string | undefined,
+            metadata: t.metadata,
+          }))
+          .filter(
+            (t): t is { variantId: string; metadata: any } => !!t.variantId,
           )
+        set((state) => {
+          const newItems = state.items.filter((i) => !targets.includes(i))
           return {
             items: newItems,
             ...computeTotals(
@@ -238,13 +271,15 @@ export const useCartStore = create<CartState>()(
           }
         })
         const cartId = get().cartId
-        if (cartId && variantIdsToRemove.length > 0) {
+        if (cartId && toRemove.length > 0) {
           ;(async () => {
             try {
               const medusaCart = await getCart(cartId)
-              for (const vid of variantIdsToRemove) {
-                const lineItem = (medusaCart?.items ?? []).find(
-                  (li: any) => li.variant_id === vid,
+              for (const t of toRemove) {
+                const lineItem = findMedusaLine(
+                  medusaCart,
+                  t.variantId,
+                  t.metadata,
                 )
                 if (lineItem) {
                   await removeFromCart(cartId, lineItem.id)
@@ -259,14 +294,17 @@ export const useCartStore = create<CartState>()(
           })()
         }
       },
-      updateQuantity: (productId, quantity, variantId) => {
+      updateQuantity: (productId, quantity, variantId, configKey) => {
         if (quantity <= 0) {
-          get().removeItem(productId, variantId)
+          get().removeItem(productId, variantId, configKey)
           return
         }
         const state0 = get()
         const targetItem = state0.items.find(
-          (i) => i.product.id === productId && i.variant?.id === variantId,
+          (i) =>
+            i.product.id === productId &&
+            i.variant?.id === variantId &&
+            (configKey === undefined || itemKey(i) === configKey),
         )
         // A merged string service follows its racket's quantity.
         if (targetItem && isMergedStringAddon(targetItem, state0.items)) return
@@ -278,25 +316,38 @@ export const useCartStore = create<CartState>()(
             ? quantity / targetItem.quantity
             : 1
         const linkedQty = new Map(
-          linked.map((l) => [l, Math.max(1, Math.round(l.quantity * ratio))]),
+          linked.map((l) => [
+            l,
+            isStringAddon(l)
+              ? quantity
+              : Math.max(1, Math.round(l.quantity * ratio)),
+          ]),
         )
-        const backendUpdates: { variantId: string; quantity: number }[] = []
+        const backendUpdates: {
+          variantId: string
+          quantity: number
+          metadata?: Record<string, any>
+        }[] = []
         const effectiveVariantId =
           variantId ?? (targetItem?.product as any)?.variants?.[0]?.id
         if (effectiveVariantId)
-          backendUpdates.push({ variantId: effectiveVariantId, quantity })
+          backendUpdates.push({
+            variantId: effectiveVariantId,
+            quantity,
+            metadata: targetItem?.metadata,
+          })
         linked.forEach((l) => {
           const vid = l.variant?.id ?? (l.product as any)?.variants?.[0]?.id
           if (vid)
             backendUpdates.push({
               variantId: vid,
               quantity: linkedQty.get(l) as number,
+              metadata: l.metadata,
             })
         })
         set((state) => {
           const newItems = state.items.map((i) => {
-            if (i.product.id === productId && i.variant?.id === variantId)
-              return { ...i, quantity }
+            if (i === targetItem) return { ...i, quantity }
             const lq = linkedQty.get(i)
             return lq !== undefined ? { ...i, quantity: lq } : i
           })
@@ -316,8 +367,10 @@ export const useCartStore = create<CartState>()(
             try {
               const medusaCart = await getCart(cartId)
               for (const u of backendUpdates) {
-                const lineItem = (medusaCart?.items ?? []).find(
-                  (li: any) => li.variant_id === u.variantId,
+                const lineItem = findMedusaLine(
+                  medusaCart,
+                  u.variantId,
+                  u.metadata,
                 )
                 if (lineItem) {
                   await updateCartItem(cartId, lineItem.id, u.quantity)

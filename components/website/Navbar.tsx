@@ -23,31 +23,20 @@ import {
 import { useAuthStore } from '@/store/authStore'
 import { useWishlistStore } from '@/store/wishlistStore'
 import { useMedusaProducts } from '@/hooks/useProducts'
-import { MEGA_MENUS, type MegaMenuKey } from '@/lib/mega-menu-data'
-const NAV_LINKS = [
-  {
-    label: 'New Arrivals',
-    href: '/shop?badge=NEW',
-  },
-  {
-    label: 'Sale 🔥',
-    href: '/shop?badge=SALE',
-    highlight: true,
-  },
-  {
-    label: 'Gift Cards',
-    href: '/gift-cards',
-  },
-  {
-    label: 'Blog',
-    href: '/blog',
-  },
-]
+import { MEGA_MENUS } from '@/lib/mega-menu-data'
+import {
+  DEFAULT_NAV_LINKS,
+  type MegaMenu,
+  type NavLinkEntry,
+} from '@/lib/mega-menu-config'
+type MegaMenuKey = string
 interface MegaMenuBlogLink {
   label: string
   href: string
 }
-function useMegaMenuBlogLinks(): Record<string, MegaMenuBlogLink[]> {
+function useMegaMenuBlogLinks(
+  menus: Record<string, MegaMenu>,
+): Record<string, MegaMenuBlogLink[]> {
   const [posts, setPosts] = useState<
     {
       slug: string
@@ -84,8 +73,8 @@ function useMegaMenuBlogLinks(): Record<string, MegaMenuBlogLink[]> {
   }, [])
   const MAX_BLOGS_PER_MENU = 4
   const byMenuKey: Record<string, MegaMenuBlogLink[]> = {}
-  for (const key of Object.keys(MEGA_MENUS)) {
-    const menu = MEGA_MENUS[key as MegaMenuKey]
+  for (const key of Object.keys(menus)) {
+    const menu = menus[key]
     const matches = posts
       .filter((p) => p.category.toLowerCase() === menu.label.toLowerCase())
       .sort(
@@ -106,10 +95,15 @@ function useMegaMenuBlogLinks(): Record<string, MegaMenuBlogLink[]> {
 export default function Navbar({
   promoCode = 'SMASH10',
   promoDiscountLabel = '10% off',
+  menus = MEGA_MENUS as unknown as Record<string, MegaMenu>,
+  navLinks = DEFAULT_NAV_LINKS,
 }: {
   promoCode?: string
   promoDiscountLabel?: string
+  menus?: Record<string, MegaMenu>
+  navLinks?: NavLinkEntry[]
 } = {}) {
+  const NAV_LINKS = navLinks
   const [isScrolled, setIsScrolled] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mobileExpanded, setMobileExpanded] = useState<string | null>(null)
@@ -124,7 +118,7 @@ export default function Navbar({
   const user = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const wishlistCount = useWishlistStore((s) => s.items.length)
-  const megaMenuBlogLinks = useMegaMenuBlogLinks()
+  const megaMenuBlogLinks = useMegaMenuBlogLinks(menus)
   useEffect(() => {
     fetch('/api/admin/store-settings')
       .then((res) => (res.ok ? res.json() : null))
@@ -181,7 +175,7 @@ export default function Navbar({
       setSearchQuery('')
     }
   }
-  const menuKeys = Object.keys(MEGA_MENUS) as MegaMenuKey[]
+  const menuKeys = Object.keys(menus) as MegaMenuKey[]
   return (
     <>
       {}
@@ -346,7 +340,7 @@ export default function Navbar({
           <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
             <div className='flex items-center justify-center gap-0.5 h-11'>
               {menuKeys.map((key) => {
-                const menu = MEGA_MENUS[key]
+                const menu = menus[key]
                 const isActive = activeMegaMenu === key
                 const blogLinks = megaMenuBlogLinks[key]
                 const displayColumns = blogLinks
@@ -488,7 +482,7 @@ export default function Navbar({
         >
           <div className='px-4 py-4 space-y-1 max-h-[80vh] overflow-y-auto'>
             {menuKeys.map((key) => {
-              const menu = MEGA_MENUS[key]
+              const menu = menus[key]
               const isExpanded = mobileExpanded === key
               const blogLinks = megaMenuBlogLinks[key]
               const displayColumns = blogLinks
@@ -656,7 +650,7 @@ export default function Navbar({
               </p>
               <div className='flex flex-wrap gap-2 mb-5'>
                 {menuKeys.map((key) => {
-                  const menu = MEGA_MENUS[key]
+                  const menu = menus[key]
                   return (
                     <Link
                       key={key}

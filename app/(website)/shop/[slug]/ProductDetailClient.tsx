@@ -29,6 +29,12 @@ import ProductReviews from '@/components/website/ProductReviews'
 import SizeGuideModal from '@/components/website/SizeGuideModal'
 import NotifyStockForm from '@/components/website/NotifyStockForm'
 import { recordRecentlyViewed } from '@/lib/recently-viewed'
+import { configKeyOf } from '@/lib/cart-links'
+import {
+  OTHER_STRING_TYPE_LABEL,
+  detectStringType,
+  stringTypeOrder,
+} from '@/lib/stringing'
 import { trackViewItem } from '@/lib/analytics-events'
 import type { CrossSellProduct, Product } from '@/types'
 
@@ -167,6 +173,7 @@ interface StringOption {
   price: number
   productId: string
   variantId: string
+  stringType: string
 }
 interface RacketGripOption {
   id: string
@@ -268,9 +275,20 @@ async function resolveStringOptions(sport?: string): Promise<StringOption[]> {
           price: priceAmount,
           productId: match.id,
           variantId: variant.id,
+          stringType: detectStringType({
+            explicit: match.metadata?.string_type,
+            title: match.title,
+            specType: findSpecValue(match.metadata?.specs, 'string type'),
+          }),
         }
       })
       .filter((r: StringOption | null): r is StringOption => r !== null)
+      .sort(
+        (a: StringOption, b: StringOption) =>
+          stringTypeOrder(a.stringType) - stringTypeOrder(b.stringType) ||
+          a.stringType.localeCompare(b.stringType) ||
+          `${a.brand} ${a.name}`.localeCompare(`${b.brand} ${b.name}`),
+      )
   } catch {
     return []
   }
@@ -916,6 +934,18 @@ function StringUpgrade({
   }, [sport, upgradeType])
   const selectedString =
     stringOptions.find((o) => o.id === selectedStringId) ?? stringOptions[0]
+  const stringOptionGroups = useMemo(() => {
+    if (!stringOptions.some((o) => o.stringType))
+      return [{ label: null as string | null, options: stringOptions }]
+    const groups: { label: string | null; options: StringOption[] }[] = []
+    for (const o of stringOptions) {
+      const label = o.stringType || OTHER_STRING_TYPE_LABEL
+      const g = groups.find((x) => x.label === label)
+      if (g) g.options.push(o)
+      else groups.push({ label, options: [o] })
+    }
+    return groups
+  }, [stringOptions])
   const [tension, setTension] = useState(
     Math.round((tensionMin + tensionMax) / 2),
   )
@@ -1191,12 +1221,21 @@ function StringUpgrade({
                 }}
                 className={`w-full appearance-none px-3.5 py-3 pr-9 rounded-xl border-2 border-gray-100 bg-gray-50 text-sm font-montserrat font-bold text-[#0A1F44] focus:outline-none focus:border-[#E8553A] transition-colors cursor-pointer disabled:opacity-60 ${stringsLoading ? 'disabled:cursor-wait' : 'disabled:cursor-not-allowed'}`}
               >
-                {stringOptions.map((opt) => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.brand} {opt.name}{' '}
-                    {opt.price > 0 ? `— +£${opt.price.toFixed(2)}` : '— Free'}
-                  </option>
-                ))}
+                {stringOptionGroups.map((group) => {
+                  const options = group.options.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.brand} {opt.name}{' '}
+                      {opt.price > 0 ? `— +£${opt.price.toFixed(2)}` : '— Free'}
+                    </option>
+                  ))
+                  return group.label === null ? (
+                    options
+                  ) : (
+                    <optgroup key={group.label} label={group.label}>
+                      {options}
+                    </optgroup>
+                  )
+                })}
               </select>
               <span className='pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400'>
                 <svg
@@ -1567,6 +1606,7 @@ export default function ProductDetailClient({
               string_upgrade: 'No Thanks',
             }
           : undefined
+      const racketConfig = configKeyOf(racketMetadata)
       const sizeGroup = optionGroups.find((g: any) => /size/i.test(g.title))
       const colorGroup = optionGroups.find((g: any) => /colou?r/i.test(g.title))
       addItem(
@@ -1613,6 +1653,7 @@ export default function ProductDetailClient({
             linked_product: product.name,
             linked_product_id: product.id,
             linked_variant_id: variant.id,
+            linked_config: racketConfig,
             grip_choice: selectedGrip.name,
           },
         )
@@ -1647,6 +1688,7 @@ export default function ProductDetailClient({
             linked_product: product.name,
             linked_product_id: product.id,
             linked_variant_id: variant.id,
+            linked_config: racketConfig,
             string_choice: `${stringSelection.string.brand} ${stringSelection.string.name}`,
             string_tension: `${stringSelection.tension} lbs`,
           },
@@ -2076,7 +2118,7 @@ export default function ProductDetailClient({
                       {[
                         'Free shipping on all orders exceeding £80.',
                         'Standard shipping orders are dispatched via Parcel2Go.',
-                        'Usual shipping duration for UK customers is 2–5 working days.',
+                        'Usual shipping duration for UK customers is 1–3 working days.',
                         'Opted for our racket restringing service? Add an extra day to the shipping time.',
                       ].map((line) => (
                         <div key={line} className='flex gap-3'>

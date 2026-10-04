@@ -24,7 +24,12 @@ import { getRecentlyViewedIds } from '@/lib/recently-viewed'
 import { trackViewCart } from '@/lib/analytics-events'
 import ProductCard from '@/components/website/ProductCard'
 import type { Product } from '@/types'
-import { displayRows, findParentItem, lineTotal } from '@/lib/cart-links'
+import {
+  displayRows,
+  findParentItem,
+  itemKey,
+  lineTotal,
+} from '@/lib/cart-links'
 export default function CartPage() {
   const {
     items,
@@ -232,7 +237,7 @@ export default function CartPage() {
                 const parentItem = findParentItem(item, items)
                 return (
                   <div
-                    key={`${item.product.id}-${item.variant?.id}`}
+                    key={`${item.product.id}-${item.variant?.id}-${itemKey(item)}`}
                     className='grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-4 sm:gap-6 py-6 items-start sm:items-center'
                   >
                     {}
@@ -273,7 +278,14 @@ export default function CartPage() {
                               ? ` · ${item.metadata.string_tension}`
                               : ''}
                             {stringAddon
-                              ? ` · +${formatCurrency(stringAddon.product.price)}`
+                              ? ` · +${formatCurrency(stringAddon.product.price)}${
+                                  stringAddon.quantity > 1
+                                    ? ` × ${stringAddon.quantity}`
+                                    : ''
+                                }`
+                              : ''}
+                            {stringAddon && stringAddon.quantity < item.quantity
+                              ? ` (for ${stringAddon.quantity} of ${item.quantity} rackets)`
                               : ''}
                           </p>
                         ) : (
@@ -335,7 +347,11 @@ export default function CartPage() {
                         ) : (
                           <button
                             onClick={() =>
-                              removeItem(item.product.id, item.variant?.id)
+                              removeItem(
+                                item.product.id,
+                                item.variant?.id,
+                                itemKey(item),
+                              )
                             }
                             className='inline-flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 font-lato mt-2 transition-colors'
                           >
@@ -354,6 +370,7 @@ export default function CartPage() {
                               item.product.id,
                               item.quantity - 1,
                               item.variant?.id,
+                              itemKey(item),
                             )
                           }
                           className='w-9 h-9 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'
@@ -369,6 +386,7 @@ export default function CartPage() {
                               item.product.id,
                               item.quantity + 1,
                               item.variant?.id,
+                              itemKey(item),
                             )
                           }
                           className='w-9 h-9 flex items-center justify-center text-[#0A1F44] hover:bg-gray-50 transition-colors'

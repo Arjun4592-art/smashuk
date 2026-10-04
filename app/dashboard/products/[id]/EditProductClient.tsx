@@ -131,6 +131,7 @@ export default function EditProductClient({
     stringUpgrade: false,
     stringUpgradeType: 'free' as 'free' | 'paid',
     stringingType: 'service' as 'service' | 'reel',
+    stringType: '',
     metaTitle: '',
     metaDescription: '',
     metaKeywords: '',
@@ -284,6 +285,10 @@ export default function EditProductClient({
               !/\bservice\b/i.test(p.title ?? ''))
               ? 'reel'
               : 'service',
+          stringType:
+            typeof p.metadata?.string_type === 'string'
+              ? p.metadata.string_type
+              : '',
           category: p.categories?.[0]?.id ?? '',
           categoryName: p.categories?.[0]?.name ?? '',
           sku: firstVariant?.sku ?? '',
@@ -932,7 +937,13 @@ export default function EditProductClient({
       title: form.name,
       description: form.description || undefined,
       status: saveStatus,
-      selling_channel: sellingChannel,
+      selling_channel:
+        form.stringingType === 'service' &&
+        isStringingCategoryHandle(
+          categories.find((c) => c.id === form.category)?.handle,
+        )
+          ? 'both'
+          : sellingChannel,
       thumbnail: uploadedImages[0]?.url ?? undefined,
       images: uploadedImages.length > 0 ? uploadedImages : undefined,
       categories: [
@@ -967,6 +978,12 @@ export default function EditProductClient({
         )
           ? form.stringingType
           : undefined,
+        string_type:
+          isStringingCategoryHandle(
+            categories.find((c) => c.id === form.category)?.handle,
+          ) && form.stringingType === 'service'
+            ? form.stringType || undefined
+            : undefined,
         string_upgrade_available: form.stringUpgrade,
         string_upgrade_type: form.stringUpgrade
           ? form.stringUpgradeType
@@ -1978,6 +1995,17 @@ export default function EditProductClient({
                       Website = smashuk.co only · Store = POS (in-store) only ·
                       Both = shows everywhere
                     </p>
+                    {form.stringingType === 'service' &&
+                      isStringingCategoryHandle(
+                        categories.find((c) => c.id === form.category)?.handle,
+                      ) &&
+                      sellingChannel !== 'both' && (
+                        <p className='mt-1.5 text-[11.5px] text-[#8A6116]'>
+                          Stringing services are always saved to <b>Both</b>, so
+                          they can appear in the String Selection dropdown on
+                          the website and still be sold at the POS.
+                        </p>
+                      )}
                   </div>
 
                   <div>
@@ -2015,10 +2043,22 @@ export default function EditProductClient({
                               )
                               setAddingBrand(false)
                             } else if (e.key === 'Escape') {
+                              ;(e.target as HTMLInputElement).value = ''
                               setAddingBrand(false)
                             }
                           }}
-                          onBlur={() => setAddingBrand(false)}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim()
+                            if (val) {
+                              updateForm('brand', val)
+                              setBrandOptions((prev) =>
+                                prev.includes(val)
+                                  ? prev
+                                  : [...prev, val].sort(),
+                              )
+                            }
+                            setAddingBrand(false)
+                          }}
                         />
                       ) : (
                         <select
@@ -2069,10 +2109,22 @@ export default function EditProductClient({
                               )
                               setAddingSport(false)
                             } else if (e.key === 'Escape') {
+                              ;(e.target as HTMLInputElement).value = ''
                               setAddingSport(false)
                             }
                           }}
-                          onBlur={() => setAddingSport(false)}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim()
+                            if (val) {
+                              updateForm('sport', val)
+                              setSportOptions((prev) =>
+                                prev.includes(val)
+                                  ? prev
+                                  : [...prev, val].sort(),
+                              )
+                            }
+                            setAddingSport(false)
+                          }}
                         />
                       ) : (
                         <select
@@ -2134,6 +2186,8 @@ export default function EditProductClient({
                     categories={categories}
                     categoryId={form.category}
                     stringingType={form.stringingType}
+                    stringType={form.stringType}
+                    onChangeStringType={(v) => updateForm('stringType', v)}
                     onSelectCategory={(id) => {
                       const c = categories.find((x) => x.id === id)
                       updateForm('category', id)
