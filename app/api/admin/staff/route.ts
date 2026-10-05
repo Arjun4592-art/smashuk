@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
 import { getAdminAuthHeader, getManagerAuthHeader } from '@/lib/api/admin-auth'
 import { sendMail } from '@/lib/email'
 import { staffInviteEmail } from '@/lib/email-templates'
@@ -56,6 +58,7 @@ export async function GET(req: NextRequest) {
           ? u.metadata.role
           : 'staff',
       hasPin: Boolean(u.metadata?.pin),
+      dashboardAccess: u.metadata?.role === 'admin',
       shift: u.metadata?.shift ?? '',
       isActive: u.metadata?.isActive !== false,
       totalSales: 0,
@@ -125,6 +128,27 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const { name, email, phone, role, pin, shift, isActive } = body
+    const dashboardAccess = body.dashboardAccess === true
+    const dashboardPassword: string =
+      typeof body.password === 'string' ? body.password : ''
+    if (dashboardAccess) {
+      // Dashboard access is full admin. Only someone signed in to the
+      // DASHBOARD may grant it - a POS manager must not be able to promote
+      // themselves (the POS session carries the shared owner token).
+      const cookieStore = await cookies()
+      if (!cookieStore.get(SURFACE_COOKIES.dashboard.tokenCookie)?.value) {
+        return NextResponse.json(
+          { error: 'Only a dashboard admin can give dashboard access.' },
+          { status: 403 },
+        )
+      }
+      if (dashboardPassword.length < 8) {
+        return NextResponse.json(
+          { error: 'Dashboard password must be at least 8 characters.' },
+          { status: 400 },
+        )
+      }
+    }
     if (role !== undefined && role !== 'staff' && role !== 'admin') {
       return NextResponse.json(
         {
@@ -146,7 +170,11 @@ export async function POST(req: NextRequest) {
       )
     }
     const [firstName, ...rest] = (name ?? email).split(' ')
-    const password = `Pos@${pin}${Date.now()}`
+    // Staff who only use the POS never log in with a password, so they get an
+    // unguessable random one. Dashboard admins get the password you typed.
+    const password = dashboardAccess
+      ? dashboardPassword
+      : `Pos@${pin}${Date.now()}`
     const inviteRes = await fetch(`${MEDUSA_URL}/admin/invites`, {
       method: 'POST',
       headers: {
@@ -218,7 +246,7 @@ export async function POST(req: NextRequest) {
     }
     const u = acceptData.user
     if (u?.id) {
-      await fetch(`${MEDUSA_URL}/admin/users/${u.id}`, {
+      const metaRes = await fetch(`${MEDUSA_URL}/admin/users/${u.id}`, {
         method: 'POST',
         headers: {
           Authorization: authorization,
@@ -228,6 +256,8 @@ export async function POST(req: NextRequest) {
           metadata: {
             phone: phone ?? '',
             posRole: role ?? 'staff',
+            // metadata.role === 'admin' is what the dashboard login checks.
+            ...(dashboardAccess ? { role: 'admin' } : {}),
             pin: await hashPin(pin),
             shift: shift ?? '',
             isActive: isActive ?? true,
@@ -235,7 +265,16 @@ export async function POST(req: NextRequest) {
             totalOrders: 0,
           },
         }),
-      }).catch(() => {})
+      }).catch(() => null)
+      if (dashboardAccess && !metaRes?.ok) {
+        return NextResponse.json(
+          {
+            error:
+              'The account was created but dashboard access could not be saved. Open Edit on this person and turn on Dashboard access.',
+          },
+          { status: 500 },
+        )
+      }
     }
     const inviteEmail = staffInviteEmail({ firstName, role, shift })
     const emailResult = await sendMail({
@@ -261,6 +300,7 @@ export async function POST(req: NextRequest) {
           email,
           phone: phone ?? '',
           role: role ?? 'staff',
+          dashboardAccess,
           pin,
           shift: shift ?? '',
           isActive: isActive ?? true,

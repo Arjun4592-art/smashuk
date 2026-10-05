@@ -152,6 +152,7 @@ export async function getOrders(params?: {
         month: 'short',
         year: 'numeric',
       }),
+      createdAt: o.created_at as string,
       city: o.shipping_address?.city ?? '',
     })),
     count: data.count,

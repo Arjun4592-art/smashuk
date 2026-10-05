@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getChannelIds, channelRule } from '@/lib/api/sales-channels'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { safeJson } from '@/lib/api/safe-json'
 const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
@@ -45,6 +46,16 @@ export async function POST(req: NextRequest) {
     let campaignId: string | undefined
     if (body.campaign) {
       const { id: _ignored, ...campaignFields } = body.campaign // strip any accidental id
+      // Medusa 2.x requires a unique campaign_identifier when creating a
+      // campaign, otherwise: "Invalid request: Field 'campaign_identifier' is required".
+      if (!campaignFields.campaign_identifier) {
+        campaignFields.campaign_identifier = `${String(
+          campaignFields.name ?? body.code ?? 'campaign',
+        )
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '')}-${Date.now()}`
+      }
       const campaignRes = await fetch(`${MEDUSA_URL}/admin/campaigns`, {
         method: 'POST',
         headers: {
@@ -75,7 +86,26 @@ export async function POST(req: NextRequest) {
       is_automatic: body.is_automatic ?? false,
       application_method: body.application_method,
     }
-    if (body.rules?.length > 0) promotionPayload.rules = body.rules
+    const createRules: any[] = [...(body.rules ?? [])]
+    if (body.applies_to === 'online' || body.applies_to === 'store') {
+      const ids = await getChannelIds((path) =>
+        fetch(`${MEDUSA_URL}${path}`, {
+          headers: { Authorization: authorization },
+        }),
+      )
+      const rule = channelRule(body.applies_to, ids)
+      if (!rule) {
+        return NextResponse.json(
+          {
+            error:
+              'Could not find the Website / Store sales channel to limit this discount to.',
+          },
+          { status: 400 },
+        )
+      }
+      createRules.push(rule)
+    }
+    if (createRules.length > 0) promotionPayload.rules = createRules
     if (campaignId) promotionPayload.campaign_id = campaignId
 
     const res = await fetch(`${MEDUSA_URL}/admin/promotions`, {

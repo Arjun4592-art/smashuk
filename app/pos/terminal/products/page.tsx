@@ -200,7 +200,7 @@ export default function ProductsPage() {
                       color: '#202223',
                     }}
                   >
-                    {p.size ?? '—'}
+                    {p.variantLabel ?? p.size ?? '—'}
                   </span>
                   <span
                     className='font-medium'
@@ -262,7 +262,9 @@ export default function ProductsPage() {
                       }}
                     >
                       {p.brand} · {p.sku}
-                      {p.size ? ` · ${p.size}` : ''}
+                      {(p.variantLabel ?? p.size)
+                        ? ` · ${p.variantLabel ?? p.size}`
+                        : ''}
                     </p>
                   </div>
                   <div className='text-right shrink-0'>

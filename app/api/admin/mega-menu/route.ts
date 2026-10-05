@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        metadata: { ...currentMetadata, megaMenu },
+        metadata: { megaMenu },
       }),
     })
     const data = await safeJson(res)

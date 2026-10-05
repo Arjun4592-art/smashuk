@@ -93,6 +93,15 @@ export default function FavoritesPage() {
       .catch(() => toast.error('Could not load Favorites'))
   }, [])
 
+  // Pin/unpin requests are sent ONE AT A TIME, in click order. Firing them in
+  // parallel made the server's saves overwrite each other (lost pins), and
+  // late responses overwrote newer taps on screen.
+  const queueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const pendingRef = useRef(0)
+  const flushQueue = useCallback(async () => {
+    await queueRef.current.catch(() => undefined)
+  }, [])
+
   const toggleFavorite = useCallback(
     async (tab: FavoriteTabId, productId: string) => {
       const current = favoritesRef.current
@@ -112,23 +121,34 @@ export default function FavoritesPage() {
       const optimistic = apply(current, !wasPinned)
       favoritesRef.current = optimistic
       setFavorites(optimistic)
-      try {
-        const saved = await updatePOSFavorites({
-          action: wasPinned ? 'unpin' : 'pin',
-          tab,
-          productId,
+      pendingRef.current += 1
+      queueRef.current = queueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            const saved = await updatePOSFavorites({
+              action: wasPinned ? 'unpin' : 'pin',
+              tab,
+              productId,
+            })
+            // Only sync to the server snapshot once the queue is drained,
+            // otherwise it would wipe taps that are still waiting to send.
+            if (pendingRef.current === 1) {
+              favoritesRef.current = saved.favorites
+              setFavorites(saved.favorites)
+              setTabs(saved.tabs)
+            }
+          } catch (err: unknown) {
+            const reverted = apply(favoritesRef.current, wasPinned)
+            favoritesRef.current = reverted
+            setFavorites(reverted)
+            toast.error(
+              err instanceof Error ? err.message : 'Could not save favorite',
+            )
+          } finally {
+            pendingRef.current -= 1
+          }
         })
-        favoritesRef.current = saved.favorites
-        setFavorites(saved.favorites)
-        setTabs(saved.tabs)
-      } catch (err: unknown) {
-        const reverted = apply(favoritesRef.current, wasPinned)
-        favoritesRef.current = reverted
-        setFavorites(reverted)
-        toast.error(
-          err instanceof Error ? err.message : 'Could not save favorite',
-        )
-      }
     },
     [],
   )
@@ -137,6 +157,7 @@ export default function FavoritesPage() {
   const pinnedForTab = favorites[activeTab.id] ?? []
 
   const createTab = useCallback(async (label: string) => {
+    await flushQueue()
     const saved = await updatePOSFavorites({ action: 'addTab', label })
     favoritesRef.current = saved.favorites
     setFavorites(saved.favorites)
@@ -148,6 +169,7 @@ export default function FavoritesPage() {
   const renameActiveTab = useCallback(
     async (label: string) => {
       if (!activeTab.custom) return
+      await flushQueue()
       const saved = await updatePOSFavorites({
         action: 'renameTab',
         tab: activeTab.id,
@@ -165,6 +187,7 @@ export default function FavoritesPage() {
     if (!activeTab.custom) return
     setDeletingTab(true)
     try {
+      await flushQueue()
       const saved = await updatePOSFavorites({
         action: 'deleteTab',
         tab: activeTab.id,
@@ -254,6 +277,7 @@ export default function FavoritesPage() {
         variantId: entry.variantId,
         size: first?.value,
         sizeOptionTitle: first?.title,
+        variantLabel: entry.variantLabel,
         pricePending: !detail,
       }
     },
@@ -279,6 +303,7 @@ export default function FavoritesPage() {
           ? {
               ...representative,
               size: undefined,
+              variantLabel: undefined,
               variantCountOverride: group.length,
             }
           : representative
@@ -313,11 +338,12 @@ export default function FavoritesPage() {
         1,
         {
           id: p.variantId,
-          title: p.size,
+          title: p.variantLabel ?? p.size,
         } as any,
       )
       if (soundOnScan) playScanBeep()
-      toast.success(`Added ${p.name}${p.size ? ` — ${p.size}` : ''}`, {
+      const addedLabel = p.variantLabel ?? p.size
+      toast.success(`Added ${p.name}${addedLabel ? ` — ${addedLabel}` : ''}`, {
         duration: 1200,
       })
     },

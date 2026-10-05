@@ -8,7 +8,7 @@ import { formatPrice } from '@/lib/api/store'
 import { SITE_URL } from '@/lib/constants'
 import ProductGrid from '@/components/website/ProductGrid'
 import ProductImageZoom from '@/components/website/ProductImageZoom'
-import CrossSellSuggestions from '@/components/website/CrossSellSuggestions'
+import FrequentlyBoughtTogether from '@/components/website/FrequentlyBoughtTogether'
 import {
   StarIcon,
   HeartIcon,
@@ -2294,6 +2294,9 @@ export default function ProductDetailClient({
               </button>
             </div>
 
+            {/* Cross-sell panel: sits under Add to Cart in the buy box */}
+            <FrequentlyBoughtTogether products={crossSellProducts} />
+
             <p className='order-8 lg:order-7 text-xs text-gray-400 font-lato mb-6'>
               SKU: <span className='font-semibold'>{product.sku}</span>
             </p>
@@ -2376,8 +2379,6 @@ export default function ProductDetailClient({
             initialCount={product.reviewCount}
           />
         </div>
-
-        <CrossSellSuggestions products={crossSellProducts} />
 
         {related.length > 0 && (
           <div className='mt-20'>

@@ -1,85 +1,114 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { SURFACE_COOKIES } from '@/lib/api/auth-cookie';
-import { safeJson } from '@/lib/api/safe-json';
-const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000';
-const PUB_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? '';
+import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
+import { safeJson } from '@/lib/api/safe-json'
+import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
+import { getChannelIds } from '@/lib/api/sales-channels'
+const MEDUSA_URL =
+  process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
+const PUB_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
 function storeHeaders(token?: string) {
   const h: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-publishable-api-key': PUB_KEY
-  };
-  if (token) h['Authorization'] = `Bearer ${token}`;
-  return h;
+    'x-publishable-api-key': PUB_KEY,
+  }
+  if (token) h['Authorization'] = `Bearer ${token}`
+  return h
 }
 async function getCustomerToken() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SURFACE_COOKIES.website.tokenCookie)?.value;
-  if (!token || token.startsWith('nextauth:')) return undefined;
-  return token;
+  const cookieStore = await cookies()
+  const token = cookieStore.get(SURFACE_COOKIES.website.tokenCookie)?.value
+  if (!token || token.startsWith('nextauth:')) return undefined
+  return token
 }
 export async function GET(req: NextRequest) {
-  const cartId = req.nextUrl.searchParams.get('id');
-  if (!cartId) return NextResponse.json({
-    error: 'Cart ID required'
-  }, {
-    status: 400
-  });
-  const token = await getCustomerToken();
+  const cartId = req.nextUrl.searchParams.get('id')
+  if (!cartId)
+    return NextResponse.json(
+      {
+        error: 'Cart ID required',
+      },
+      {
+        status: 400,
+      },
+    )
+  const token = await getCustomerToken()
   const res = await fetch(`${MEDUSA_URL}/store/carts/${cartId}`, {
-    headers: storeHeaders(token)
-  });
-  const data = await safeJson(res, 'app/api/store/cart/route.ts');
+    headers: storeHeaders(token),
+  })
+  const data = await safeJson(res, 'app/api/store/cart/route.ts')
   return NextResponse.json(data, {
-    status: res.status
-  });
+    status: res.status,
+  })
 }
 export async function POST(req: NextRequest) {
-  const token = await getCustomerToken();
+  const token = await getCustomerToken()
   const regRes = await fetch(`${MEDUSA_URL}/store/regions?limit=1`, {
-    headers: storeHeaders()
-  });
-  const regData = await safeJson(regRes, 'app/api/store/cart/route.ts (regions)');
-  const regionId = regData.regions?.[0]?.id;
+    headers: storeHeaders(),
+  })
+  const regData = await safeJson(
+    regRes,
+    'app/api/store/cart/route.ts (regions)',
+  )
+  const regionId = regData.regions?.[0]?.id
   if (!regionId) {
-    console.error('[/api/store/cart] POST — no region available from Medusa:', regData);
-    return NextResponse.json({
-      error: 'Store is not configured with a region — cannot create cart.'
-    }, {
-      status: 503
-    });
+    console.error(
+      '[/api/store/cart] POST — no region available from Medusa:',
+      regData,
+    )
+    return NextResponse.json(
+      {
+        error: 'Store is not configured with a region — cannot create cart.',
+      },
+      {
+        status: 503,
+      },
+    )
   }
-  const res = await fetch(`${MEDUSA_URL}/store/carts`, {
-    method: 'POST',
-    headers: storeHeaders(token),
-    body: JSON.stringify({
-      region_id: regionId
+  // Tag the cart with the Website sales channel so "Online only" / "In-store
+  // only" discounts are applied correctly. If that is not possible (channel
+  // missing, or not allowed for this API key) fall back to the old behaviour.
+  const channelIds = await getChannelIds((path) => medusaServiceFetch(path))
+  const createCart = (withChannel: boolean) =>
+    fetch(`${MEDUSA_URL}/store/carts`, {
+      method: 'POST',
+      headers: storeHeaders(token),
+      body: JSON.stringify({
+        region_id: regionId,
+        ...(withChannel && channelIds.online
+          ? {
+              sales_channel_id: channelIds.online,
+            }
+          : {}),
+      }),
     })
-  });
-  const data = await safeJson(res, 'app/api/store/cart/route.ts');
+  let res = await createCart(true)
+  if (!res.ok && channelIds.online) res = await createCart(false)
+  const data = await safeJson(res, 'app/api/store/cart/route.ts')
   return NextResponse.json(data, {
-    status: res.status
-  });
+    status: res.status,
+  })
 }
 export async function PATCH(req: NextRequest) {
-  const body = await req.json();
-  const {
-    cartId,
-    ...rest
-  } = body;
-  if (!cartId) return NextResponse.json({
-    error: 'Cart ID required'
-  }, {
-    status: 400
-  });
-  const token = await getCustomerToken();
+  const body = await req.json()
+  const { cartId, ...rest } = body
+  if (!cartId)
+    return NextResponse.json(
+      {
+        error: 'Cart ID required',
+      },
+      {
+        status: 400,
+      },
+    )
+  const token = await getCustomerToken()
   const res = await fetch(`${MEDUSA_URL}/store/carts/${cartId}`, {
     method: 'POST',
     headers: storeHeaders(token),
-    body: JSON.stringify(rest)
-  });
-  const data = await safeJson(res, 'app/api/store/cart/route.ts');
+    body: JSON.stringify(rest),
+  })
+  const data = await safeJson(res, 'app/api/store/cart/route.ts')
   return NextResponse.json(data, {
-    status: res.status
-  });
+    status: res.status,
+  })
 }

@@ -74,7 +74,6 @@ export async function POST(req: NextRequest) {
       : {}
     const payload = {
       metadata: {
-        ...currentMetadata,
         promoBanner: {
           enabled: promoBanner?.enabled !== false,
           eyebrow: promoBanner?.eyebrow?.trim() ?? '',

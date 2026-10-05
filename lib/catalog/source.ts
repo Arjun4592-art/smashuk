@@ -2,6 +2,7 @@ import 'server-only'
 import type { Product } from '@/types'
 import { STORE_PRODUCT_LISTING_FIELDS, normalizeProduct } from '@/lib/api/store'
 import { safeJson } from '@/lib/api/safe-json'
+import { isStringingServiceProduct } from '@/lib/stringing'
 
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
@@ -14,33 +15,6 @@ const STORE_HEADERS = {
 const PAGE_SIZE = 100
 const CONCURRENCY = 5
 
-/**
- * The full normalised catalogue, held on the server.
- *
- * Previously every visitor's browser fetched the entire catalogue and filtered
- * it in JavaScript. Now it is built once per REFRESH_MS on the server and
- * shared by everyone; the browser receives one page of results plus facets.
- *
- * CACHING (read before changing):
- *   - This module-level snapshot is the ONLY server-side cache layer. The page
- *     fetches below use `cache: 'no-store'` on purpose. They used to carry
- *     `next: { revalidate: 300 }` as well, but Next's Data Cache is
- *     stale-while-revalidate too, so a rebuild could re-read an already-stale
- *     copy and stamp it as "fresh" for another REFRESH_MS. Two stacked caches
- *     made a dashboard change take 5-15 minutes to appear on the shop.
- *   - The state lives on `globalThis`, so every route handler / dev-mode
- *     module reload sees the SAME snapshot. A plain module variable can be
- *     duplicated per bundle, which would make invalidateCatalog() clear one
- *     copy while /api/store/catalog keeps serving another.
- *   - invalidateCatalog() is called by the admin product / inventory routes
- *     after every write. It bumps `generation`; getCatalog() refuses to serve a
- *     snapshot built for an older generation, so the very next shop request
- *     after an admin change gets fresh data (it waits for the rebuild instead
- *     of being handed the stale copy).
- *   - Changes that do NOT go through our admin routes (a customer checkout
- *     reducing stock, edits made directly in Medusa admin) are picked up by
- *     the normal REFRESH_MS timer.
- */
 const REFRESH_MS = 2 * 60 * 1000
 const STALE_MS = 30 * 60 * 1000
 
@@ -119,7 +93,10 @@ async function rebuild(): Promise<void> {
       )
       for (const r of results) raw.push(...r.products)
     }
-    state.snapshot = raw.map(normalizeProduct)
+    // In-store-only stringing services are never listed online.
+    state.snapshot = raw
+      .filter((p) => !isStringingServiceProduct(p))
+      .map(normalizeProduct)
     state.snapshotAt = Date.now()
     state.builtGeneration = startedGeneration
   } catch (err) {

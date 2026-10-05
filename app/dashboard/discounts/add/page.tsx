@@ -527,6 +527,7 @@ function buildPromotionPayload(
     code: form.code,
     type: form.type === 'buy_x_get_y' ? 'buyget' : 'standard',
     is_automatic: isAutomatic,
+    applies_to: form.appliesTo ?? 'both',
     status: form.isActive ? 'active' : 'inactive',
     application_method: applicationMethod,
     ...(dedupedRules.length > 0
@@ -568,6 +569,7 @@ function AddDiscountPageContent() {
     isActive: true,
     customerEligibility: 'all' as CustomerEligibility,
     combineWithOther: false,
+    appliesTo: 'both' as 'online' | 'store' | 'both',
   })
   const [pendingGroupMembers, setPendingGroupMembers] = useState<
     {
@@ -844,6 +846,10 @@ function AddDiscountPageContent() {
           description: p.campaign?.description ?? '',
           isActive: p.status === 'active',
           customerEligibility: customerGroupRule ? 'specific' : 'all',
+          appliesTo:
+            p.applies_to === 'online' || p.applies_to === 'store'
+              ? p.applies_to
+              : 'both',
         }))
         setAutoEnabled(!!p.is_automatic)
         setMinReqType(
@@ -1984,7 +1990,58 @@ function AddDiscountPageContent() {
             </div>
           )}
 
-          {}
+          <div className='bg-white border border-[#E1E3E5] rounded-2xl p-5 shadow-sm'>
+            <h3 className='font-sora text-[14px] font-semibold text-[#202223] mb-4'>
+              Applies to
+            </h3>
+            <div className='space-y-2'>
+              {[
+                {
+                  value: 'both',
+                  label: 'Online + In-store',
+                  desc: 'Website and POS',
+                },
+                {
+                  value: 'online',
+                  label: 'Online only',
+                  desc: 'Website checkout only',
+                },
+                {
+                  value: 'store',
+                  label: 'In-store only',
+                  desc: 'POS sales only',
+                },
+              ].map((opt) => {
+                const isChecked = form.appliesTo === opt.value
+                return (
+                  <label
+                    key={opt.value}
+                    className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-150 ${isChecked ? 'border-[#008060]/30 bg-[#F2F7F5]' : 'border-[#E1E3E5] hover:bg-[#FAFAFA]'}`}
+                  >
+                    <input
+                      type='radio'
+                      name='appliesTo'
+                      checked={isChecked}
+                      onChange={() =>
+                        setForm((f) => ({
+                          ...f,
+                          appliesTo: opt.value as 'online' | 'store' | 'both',
+                        }))
+                      }
+                      className='mt-0.5 accent-[#008060]'
+                    />
+                    <div>
+                      <p className='text-[13px] font-semibold text-[#202223]'>
+                        {opt.label}
+                      </p>
+                      <p className='text-[11.5px] text-[#6D7175]'>{opt.desc}</p>
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+
           <div className='bg-white border border-[#E1E3E5] rounded-2xl p-5 shadow-sm'>
             <h3 className='font-sora text-[14px] font-semibold text-[#202223] mb-4'>
               Status

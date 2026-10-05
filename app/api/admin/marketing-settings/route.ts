@@ -134,7 +134,6 @@ export async function POST(req: NextRequest) {
       : {}
     const payload = {
       metadata: {
-        ...currentMetadata,
         ga_measurement_id: marketing?.gaMeasurementId?.trim() ?? '',
         google_ads_id: marketing?.googleAdsId?.trim() ?? '',
         google_ads_conversion_label:

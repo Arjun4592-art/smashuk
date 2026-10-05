@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
 import { getManagerAuthHeader } from '@/lib/api/admin-auth'
 import { hashPin } from '@/lib/api/pin-hash'
 import { safeJson } from '@/lib/api/safe-json'
@@ -30,6 +32,10 @@ export async function PATCH(
     const { name, phone, role, pin, shift, isActive, totalSales, totalOrders } =
       body
     const [firstName, ...rest] = (name ?? '').split(' ')
+    const dashboardAccess: boolean | undefined =
+      typeof body.dashboardAccess === 'boolean'
+        ? body.dashboardAccess
+        : undefined
     if (role !== undefined && role !== 'staff' && role !== 'admin') {
       return NextResponse.json(
         {
@@ -49,6 +55,32 @@ export async function PATCH(
         totalSales,
         totalOrders,
       },
+    }
+    if (dashboardAccess !== undefined) {
+      // Only a dashboard session may change dashboard access (a POS manager's
+      // session carries the shared owner token and must not escalate itself).
+      const cookieStore = await cookies()
+      if (!cookieStore.get(SURFACE_COOKIES.dashboard.tokenCookie)?.value) {
+        return NextResponse.json(
+          { error: 'Only a dashboard admin can change dashboard access.' },
+          { status: 403 },
+        )
+      }
+      if (dashboardAccess === false) {
+        // Never let an admin lock themselves out of the dashboard.
+        const meRes = await fetch(`${MEDUSA_URL}/admin/users/me`, {
+          headers: { Authorization: authorization },
+        })
+        const me = meRes.ok ? await meRes.json().catch(() => null) : null
+        if (me?.user?.id === id) {
+          return NextResponse.json(
+            { error: "You can't remove your own dashboard access." },
+            { status: 400 },
+          )
+        }
+      }
+      // Medusa merges metadata; an empty string removes the key.
+      updatePayload.metadata.role = dashboardAccess ? 'admin' : ''
     }
     if (typeof pin === 'string' && pin.length > 0) {
       updatePayload.metadata.pin = await hashPin(pin)
@@ -91,6 +123,7 @@ export async function PATCH(
             ? u.metadata.role
             : 'staff',
         hasPin: Boolean(u.metadata?.pin),
+        dashboardAccess: u.metadata?.role === 'admin',
         shift: u.metadata?.shift ?? '',
         isActive: u.metadata?.isActive !== false,
         createdAt: u.created_at,

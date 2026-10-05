@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next'
+import { isStringingServiceProduct } from '@/lib/stringing'
 import { SITE_URL } from '@/lib/constants'
 import { getAllCollectionHandles } from '@/lib/collections-data'
 import { discoverStaticPages } from '@/lib/discover-pages'
@@ -44,6 +45,7 @@ async function getAllProductPages(): Promise<MetadataRoute.Sitemap> {
       const products = data.products ?? []
       for (const p of products) {
         if (!p.handle) continue
+        if (isStringingServiceProduct(p)) continue
         pages.push({
           url: `${SITE_URL}/shop/${p.handle}`,
           lastModified: new Date(p.updated_at ?? Date.now()),

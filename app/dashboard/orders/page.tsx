@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Papa from 'papaparse'
 import { toast } from 'sonner'
+import DateRangeFilter from '@/components/ui/DateRangeFilter'
 import { useOrders, useAbandonedCheckouts } from '@/hooks/useDashboard'
 import { updateOrderStatus, getOrder } from '@/lib/api/dashboard'
 import { printReceiptOnLabel } from '@/lib/printer/label-print'
@@ -219,6 +220,14 @@ function OrdersPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const statusParam = searchParams.get('status')
+  // Notification bell links look like /dashboard/orders?id=<orderId>; open
+  // that order's detail page instead of just landing on the list.
+  const linkedOrderId = searchParams.get('id')
+  useEffect(() => {
+    if (linkedOrderId) {
+      router.replace(`/dashboard/orders/${encodeURIComponent(linkedOrderId)}`)
+    }
+  }, [linkedOrderId, router])
   const view =
     statusParam === 'draft'
       ? 'draft'
@@ -229,6 +238,9 @@ function OrdersPageContent() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [sourceFilter, setSourceFilter] = useState('') // '' = all sources
   const [payFilter, setPayFilter] = useState('') // '' = all payment methods
+  // Date range filter (YYYY-MM-DD, shop's local time). '' = no limit.
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [page, setPage] = useState(1)
   const pageSize = 10
@@ -283,6 +295,25 @@ function OrdersPageContent() {
       cancelled = true
     }
   }, [])
+  const toLocalYMD = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const matchesDate = (o: any) => {
+    if (!dateFrom && !dateTo) return true
+    if (!o.createdAt) return false
+    const day = toLocalYMD(new Date(o.createdAt))
+    if (dateFrom && day < dateFrom) return false
+    if (dateTo && day > dateTo) return false
+    return true
+  }
+  // Orders inside the chosen date range / source / payment filters. The four
+  // stat cards at the top are calculated from THIS set, so picking "Today"
+  // shows today's revenue and order count, not the all-time totals.
+  const scopedOrders = orders.filter(
+    (o: any) =>
+      matchesDate(o) &&
+      (!sourceFilter || o.source === sourceFilter) &&
+      (!payFilter || o.paymentMethod === payFilter),
+  )
   const filtered = orders.filter((o: any) => {
     const matchSearch =
       o.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
@@ -291,7 +322,9 @@ function OrdersPageContent() {
       statusFilter === 'All' || o.status === statusFilter.toLowerCase()
     const matchSource = !sourceFilter || o.source === sourceFilter
     const matchPay = !payFilter || o.paymentMethod === payFilter
-    return matchSearch && matchStatus && matchSource && matchPay
+    return (
+      matchSearch && matchStatus && matchSource && matchPay && matchesDate(o)
+    )
   })
   const sourceCount = (k: string) => {
     let n = 0
@@ -321,7 +354,11 @@ function OrdersPageContent() {
   const payOptions: [string, number][] = Array.from(payCounts).sort(
     (a, b) => b[1] - a[1],
   )
-  const activeFilterCount = [sourceFilter, payFilter].filter(Boolean).length
+  const activeFilterCount = [
+    sourceFilter,
+    payFilter,
+    dateFrom || dateTo,
+  ].filter(Boolean).length
   const totalPages = Math.ceil(filtered.length / pageSize)
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
   const toggleSelect = (id: string) =>
@@ -394,7 +431,7 @@ function OrdersPageContent() {
       `Exported ${rows.length} order${rows.length !== 1 ? 's' : ''}`,
     )
   }
-  const totalRevenue = orders.reduce(
+  const totalRevenue = scopedOrders.reduce(
     (s: number, o: any) =>
       s +
       (o.paymentStatus === 'captured' ||
@@ -403,7 +440,9 @@ function OrdersPageContent() {
         : 0),
     0,
   )
-  const pendingCount = orders.filter((o: any) => o.status === 'pending').length
+  const pendingCount = scopedOrders.filter(
+    (o: any) => o.status === 'pending',
+  ).length
   function setTab(tab: string) {
     setSearch('')
     setSelectedIds([])
@@ -438,7 +477,7 @@ function OrdersPageContent() {
     },
     {
       label: 'Total Orders',
-      value: orders.length,
+      value: scopedOrders.length,
       color: 'text-[#2C6ECB]',
       bg: 'bg-[#2C6ECB]/10',
       icon: <OrdersStatIcon />,
@@ -452,7 +491,9 @@ function OrdersPageContent() {
     },
     {
       label: 'Avg Order Value',
-      value: orders.length ? formatCurrency(totalRevenue / orders.length) : '—',
+      value: scopedOrders.length
+        ? formatCurrency(totalRevenue / scopedOrders.length)
+        : '—',
       color: 'text-[#202223]',
       bg: 'bg-[#F6F6F7]',
       icon: <AvgOrderStatIcon />,
@@ -580,12 +621,23 @@ function OrdersPageContent() {
                   </option>
                 ))}
               </FilterSelect>
+              <DateRangeFilter
+                from={dateFrom}
+                to={dateTo}
+                onChange={(f, t) => {
+                  setDateFrom(f)
+                  setDateTo(t)
+                  setPage(1)
+                }}
+              />
               {activeFilterCount > 0 && (
                 <ClearFiltersButton
                   count={activeFilterCount}
                   onClick={() => {
                     setSourceFilter('')
                     setPayFilter('')
+                    setDateFrom('')
+                    setDateTo('')
                     setPage(1)
                   }}
                 />

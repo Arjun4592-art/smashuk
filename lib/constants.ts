@@ -185,6 +185,10 @@ export const DASHBOARD_NAV = [
         href: '/dashboard/sales?view=reports',
       },
       {
+        label: 'Profit & Margin',
+        href: '/dashboard/sales?view=profit',
+      },
+      {
         label: 'Live View',
         href: '/dashboard/sales?view=live',
       },

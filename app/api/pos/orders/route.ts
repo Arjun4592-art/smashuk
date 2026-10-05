@@ -1,12 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { cookies } from 'next/headers'
 import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
+import { getChannelIds } from '@/lib/api/sales-channels'
 import { getRemainingReturnableQty } from '@/lib/api/medusa-returns'
 import { fulfillOrder } from '@/lib/api/medusa-fulfillment'
 import { getPublicFreeShippingThreshold } from '@/lib/shipping-settings'
 import { requireStripe } from '@/lib/stripe-server'
-import { notifyOwner } from '@/lib/email'
+import { notifyOwner, posOrderNotifyRecipient } from '@/lib/email'
 import { adminNewOrderEmail } from '@/lib/email-templates'
 import { sendOrderConfirmationEmail } from '@/lib/api/order-notifications'
 import { signOrderTrackToken } from '@/lib/api/order-track-token'
@@ -410,13 +411,23 @@ export async function POST(request: NextRequest) {
     if (!cartEmail) {
       cartEmail = (customer_email || 'walkin@smashuk.co.uk').toLowerCase()
     }
-    const cartRes = await storeFetch('/store/carts', {
-      method: 'POST',
-      body: JSON.stringify({
-        region_id,
-        email: cartEmail,
-      }),
-    })
+    // Tag the cart with the Store sales channel so "In-store only" / "Online
+    // only" discounts apply correctly. Falls back to an untagged cart if the
+    // channel is missing or not allowed for this API key.
+    const channelIds = await getChannelIds((path) => medusaServiceFetch(path))
+    const createPosCart = (withChannel: boolean) =>
+      storeFetch('/store/carts', {
+        method: 'POST',
+        body: JSON.stringify({
+          region_id,
+          email: cartEmail,
+          ...(withChannel && channelIds.store
+            ? { sales_channel_id: channelIds.store }
+            : {}),
+        }),
+      })
+    let cartRes = await createPosCart(true)
+    if (!cartRes.ok && channelIds.store) cartRes = await createPosCart(false)
     const cartData = await safeJson(cartRes, 'cart create')
     if (!cartRes.ok) {
       console.error(
@@ -1098,64 +1109,86 @@ export async function POST(request: NextRequest) {
     } catch (captureErr) {
       console.warn('[POS orders] auto-capture failed:', captureErr)
     }
-    try {
-      const invoiceOrderRes = await medusaServiceFetch(
-        `/admin/orders/${order.id}?fields=id,display_id,created_at,currency_code,metadata,*items,*shipping_methods,*payment_collections.payments,customer.first_name,customer.last_name,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
-      )
-      if (invoiceOrderRes.ok) {
-        const { order: fullOrderForInvoice } = await invoiceOrderRes.json()
-        const { generateInvoiceForOrder } =
-          await import('@/lib/invoice-service')
-        await generateInvoiceForOrder({
-          ...fullOrderForInvoice,
-          channel: 'pos',
-        })
-      }
-    } catch (invoiceErr) {
-      console.warn('[POS orders] invoice generation failed:', invoiceErr)
-    }
-    try {
-      const orderRes = await medusaServiceFetch(
-        `/admin/orders/${order.id}?fields=id,display_id,email,total,metadata,*items,customer.first_name,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
-      )
-      if (orderRes.ok) {
-        const { order: fullOrder } = await orderRes.json()
-        const orderNumber = fullOrder?.display_id
-          ? `#${fullOrder.display_id}`
-          : order.id
-        // Notify the store owner of every POS sale, and — separately —
-        // send the customer their own order-confirmation email (same
-        // template/behaviour as a website order) whenever we have a real
-        // address on file. This used to be admin-only, relying on the
-        // cashier manually hitting "Email Receipt" on the POS receipt
-        // screen, but that step was easy to forget/skip, so it's now sent
-        // automatically here too. "Email Receipt" still exists for a
-        // manual resend if the customer needs another copy.
-        const { html, text, resendTemplate } = adminNewOrderEmail(
-          fullOrder ?? order,
-          'pos',
+    // SPEED: invoice generation + the owner/customer emails used to run
+    // BEFORE the response, so every sale waited on several extra Medusa
+    // round-trips, a PDF/invoice build and two email API calls ("Recording
+    // sales is very slow"). None of it changes what the till needs back, so
+    // it now runs after the response is sent (next/server `after`). Failures
+    // are still logged exactly as before.
+    after(async () => {
+      try {
+        const invoiceOrderRes = await medusaServiceFetch(
+          `/admin/orders/${order.id}?fields=id,display_id,created_at,currency_code,metadata,*items,*shipping_methods,*payment_collections.payments,customer.first_name,customer.last_name,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
         )
-        notifyOwner({
-          subject: `New POS order ${orderNumber}`,
-          html,
-          text,
-          resendTemplate,
-          customerEmail: !isSyntheticEmail(fullOrder?.email)
-            ? fullOrder?.email
-            : undefined,
-        }).catch(() => {})
-        if (!isSyntheticEmail(fullOrder?.email)) {
-          sendOrderConfirmationEmail(fullOrder ?? order).catch((err) => {
-            console.error(
-              '[POS orders] customer order-confirmation email failed:',
-              err,
-            )
+        if (invoiceOrderRes.ok) {
+          const { order: fullOrderForInvoice } = await invoiceOrderRes.json()
+          const { generateInvoiceForOrder } =
+            await import('@/lib/invoice-service')
+          await generateInvoiceForOrder({
+            ...fullOrderForInvoice,
+            channel: 'pos',
           })
         }
+      } catch (invoiceErr) {
+        console.warn('[POS orders] invoice generation failed:', invoiceErr)
       }
-    } catch (notifyErr) {
-      console.error('[POS orders] order-placed notification failed:', notifyErr)
-    }
+      try {
+        const orderRes = await medusaServiceFetch(
+          `/admin/orders/${order.id}?fields=id,display_id,email,total,metadata,*items,customer.first_name,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
+        )
+        if (orderRes.ok) {
+          const { order: fullOrder } = await orderRes.json()
+          const orderNumber = fullOrder?.display_id
+            ? `#${fullOrder.display_id}`
+            : order.id
+          // Notify the store owner of every POS sale, and — separately —
+          // send the customer their own order-confirmation email (same
+          // template/behaviour as a website order) whenever we have a real
+          // address on file. This used to be admin-only, relying on the
+          // cashier manually hitting "Email Receipt" on the POS receipt
+          // screen, but that step was easy to forget/skip, so it's now sent
+          // automatically here too. "Email Receipt" still exists for a
+          // manual resend if the customer needs another copy.
+          const { html, text, resendTemplate } = adminNewOrderEmail(
+            fullOrder ?? order,
+            'pos',
+          )
+          // POS alerts go to their own inbox (info@smashuk.co by default) so
+          // frequent walk-in sales don't flood sales@ — see
+          // posOrderNotifyRecipient() in lib/email.ts.
+          const posNotifyTo = posOrderNotifyRecipient()
+          if (posNotifyTo) {
+            notifyOwner({
+              to: posNotifyTo,
+              subject: `New POS order ${orderNumber}${
+                typeof customer_name === 'string' && customer_name.trim()
+                  ? ` — ${customer_name.trim()}`
+                  : ''
+              }`,
+              html,
+              text,
+              resendTemplate,
+              customerEmail: !isSyntheticEmail(fullOrder?.email)
+                ? fullOrder?.email
+                : undefined,
+            }).catch(() => {})
+          }
+          if (!isSyntheticEmail(fullOrder?.email)) {
+            sendOrderConfirmationEmail(fullOrder ?? order).catch((err) => {
+              console.error(
+                '[POS orders] customer order-confirmation email failed:',
+                err,
+              )
+            })
+          }
+        }
+      } catch (notifyErr) {
+        console.error(
+          '[POS orders] order-placed notification failed:',
+          notifyErr,
+        )
+      }
+    })
     const isCashPickup =
       fulfillmentType === 'pickup' && payment_method === 'cash'
     let fulfilled = false

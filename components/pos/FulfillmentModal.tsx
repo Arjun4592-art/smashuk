@@ -30,6 +30,8 @@ export default function FulfillmentModal({ onClose, onSave }: Props) {
     shippingAddress,
     shippingSpeed,
     customer,
+    customerName,
+    setCustomer,
     setFulfillmentType,
     setShippingAddress,
     setShippingSpeed,
@@ -39,6 +41,8 @@ export default function FulfillmentModal({ onClose, onSave }: Props) {
     'standard', // Express is discontinued
   )
   const [step, setStep] = useState<Step>('choose')
+  // Optional walk-in name for "Take now" sales (shown on the POS order alert).
+  const [walkInName, setWalkInName] = useState(customerName ?? '')
   const [type, setType] = useState(fulfillmentType)
   const [addr, setAddr] = useState(
     shippingAddress ?? {
@@ -58,6 +62,10 @@ export default function FulfillmentModal({ onClose, onSave }: Props) {
   const handleChoose = (chosen: 'pickup' | 'ship') => {
     setType(chosen)
     if (chosen === 'pickup') {
+      // Walk-in: no customer details needed. If staff typed a name, keep it
+      // (without clobbering a customer they already selected).
+      const typed = walkInName.trim()
+      if (typed && !customer) setCustomer(typed, '')
       setFulfillmentType('pickup')
       onClose()
       onSave?.()
@@ -151,6 +159,17 @@ export default function FulfillmentModal({ onClose, onSave }: Props) {
         </div>
 
         {}
+        {step === 'choose' && !customer && (
+          <div className='px-5 pt-5'>
+            <input
+              placeholder='Customer name (optional)'
+              value={walkInName}
+              onChange={(e) => setWalkInName(e.target.value)}
+              className='w-full px-3 py-2 rounded-lg border text-sm outline-none focus:border-[#008060]'
+              style={{ borderColor: '#E1E3E5' }}
+            />
+          </div>
+        )}
         {step === 'choose' && (
           <div className='p-5 grid grid-cols-2 gap-3'>
             <button

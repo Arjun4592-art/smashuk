@@ -13,34 +13,6 @@ async function requirePosSession(): Promise<boolean> {
   return Boolean(posToken || dashboardToken)
 }
 
-// ARCHITECTURE — why this route exists, and why it's built this way.
-//
-// This is the "search server-side" rework of the billing screen. It exists
-// because of a real, confirmed limitation, not a guess:
-//
-//   Medusa's GET /admin/products?q= does NOT search variant SKU — only
-//   title/subtitle/description (github.com/medusajs/medusa/issues/15239,
-//   an open regression vs Medusa v1). Barcode scanning on this screen
-//   matches almost entirely on SKU. Building server-side search directly on
-//   Medusa's own q= param would have made every SKU-based scan silently
-//   fail to find its product — at a till, mid-sale. That is not an
-//   acceptable risk to take on an assumption, so this was verified against
-//   Medusa's own issue tracker before writing a line of this route.
-//
-// The fix: this route returns a TINY per-variant index — sku, name,
-// category, size — with NO price and NO stock. Search, scan-matching, and
-// category/size filtering all run over this index, using the exact same
-// matching logic the billing page already used (name substring, SKU exact
-// then substring, category equality, size+sizeOptionTitle equality) — just
-// moved here so the browser never has to hold or filter the FULL product
-// objects (price rows, options, inventory) to answer "which items match".
-//
-// Price and live stock for whatever the index-search actually narrows down
-// to are fetched separately, only for that narrowed set — see
-// /api/pos/details. That split is what makes this fast: the expensive part
-// was never search logic, it was the field weight (prices, options,
-// inventory joins) carried by every one of ~1700 products on every load.
-// An index entry carries none of that.
 const INDEX_FIELDS =
   'id,title,+metadata,*categories,variants.id,variants.sku,variants.ean,variants.barcode,*variants.options,variants.options.value,*variants.options.option,variants.options.option.title,*sales_channels'
 const PAGE_SIZE = 200
@@ -62,16 +34,6 @@ async function fetchPage(offset: number, cacheInit: RequestInit) {
   }
 }
 
-// Ported verbatim from lib/api/store.ts's pickCategory (the storefront's
-// proven fix for a known Medusa data issue): products can end up linked to
-// BOTH a generic "Rackets" category AND their real, specific one (e.g.
-// "Badminton Rackets") — a stale leftover from an earlier re-categorising
-// pass. Medusa returns `categories` in no guaranteed order, so picking
-// categories[0] blindly (what this route did before) put a large chunk of
-// racket products under a generic "Rackets" bucket instead of their sport-
-// specific one — exactly the bug that made "Badminton Rackets"/"Tennis"/
-// "Squash" appear empty in POS while the website (which already had this
-// fix) showed them fine.
 const SPORT_CATEGORY_SLUGS = new Set([
   'badminton',
   'tennis',
@@ -119,6 +81,21 @@ function extractSizes(variant: any): POSSizeDimension[] {
     }))
 }
 
+/**
+ * Human-readable label for a variant covering EVERY option it has (colour,
+ * size, etc.), e.g. "White / S". extractSizes() deliberately only keeps
+ * size-like dimensions (it drives the size filter), which meant colour was
+ * invisible in the POS: a sock sold in White/Black x S/M/L showed as
+ * "S S M M L L" and staff had to guess which was which.
+ */
+function buildVariantLabel(variant: any): string | undefined {
+  const options = variant?.options
+  if (!Array.isArray(options)) return undefined
+  const parts = options
+    .map((o: any) => (o?.value ? normalizeSizeLabel(String(o.value)) : ''))
+    .filter((v: string) => v && v.toLowerCase() !== 'default')
+  return parts.length > 0 ? parts.join(' / ') : undefined
+}
 export interface POSIndexEntry {
   productId: string
   variantId: string
@@ -131,6 +108,8 @@ export interface POSIndexEntry {
   category: string
   /** Every size-like dimension this variant has — usually one, sometimes more. */
   sizes: POSSizeDimension[]
+  /** All option values joined (colour + size etc.) so variants can be told apart. */
+  variantLabel?: string
 }
 
 export async function GET() {
@@ -172,6 +151,7 @@ export async function GET() {
           brand: p.metadata?.brand ?? 'Unknown',
           category,
           sizes: extractSizes(variant),
+          variantLabel: buildVariantLabel(variant),
         })
       }
     }

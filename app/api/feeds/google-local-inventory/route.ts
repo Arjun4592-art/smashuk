@@ -22,7 +22,7 @@ import {
 export const dynamic = 'force-dynamic'
 
 const FIELDS =
-  'id,status,+metadata,*sales_channels,*variants,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels'
+  'id,title,status,+metadata,*categories,*sales_channels,*variants,*variants.prices,*variants.inventory_items,*variants.inventory_items.inventory.location_levels'
 
 async function resolveLocationId(): Promise<string | null> {
   if (process.env.GOOGLE_STORE_LOCATION_ID) {

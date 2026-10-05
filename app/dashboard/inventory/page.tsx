@@ -541,8 +541,8 @@ export default function InventoryPage() {
       'Low Stock Threshold': i.lowStockThreshold,
       Reserved: i.reserved,
       Incoming: i.incoming,
-      'Cost Price': i.costPrice,
-      'Stock Value': i.stock * i.costPrice,
+      'Cost Price (before VAT)': i.costPrice,
+      'Stock Value (before VAT)': i.stock * i.costPrice,
       'Last Updated': i.lastUpdated,
     }))
     if (rows.length === 0) {
@@ -636,7 +636,7 @@ export default function InventoryPage() {
           loading={loading}
         />
         <StatCard
-          label='Inventory Value'
+          label='Inventory Value (cost, before VAT)'
           value={formatCurrency(totalValue)}
           icon={<ValueIcon />}
           iconBg='bg-[#2C6ECB]/8'
@@ -766,7 +766,7 @@ export default function InventoryPage() {
                   'Stock',
                   'Reserved',
                   'Incoming',
-                  'Value',
+                  'Value (before VAT)',
                   'Updated',
                   '',
                 ].map((h, i) => (

@@ -727,6 +727,8 @@ export interface POSIndexEntry {
   category: string
   /** Every size-like dimension this variant has — usually one, sometimes more. */
   sizes: POSSizeDimension[]
+  /** All option values joined (colour + size etc.) so variants can be told apart. */
+  variantLabel?: string
 }
 export interface POSDetailEntry {
   productId: string

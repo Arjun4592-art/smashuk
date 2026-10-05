@@ -44,6 +44,17 @@ export async function notifyAdmin(opts: {
   })
 }
 
+// Where "New POS order" alerts go. Walk-in POS sales are frequent, so they get
+// their own inbox (default info@smashuk.co) instead of flooding the main
+// sales@ one. Set POS_ORDER_NOTIFY_EMAIL to another address to redirect them,
+// or to "off" to stop POS order alert emails entirely (customer receipts are
+// unaffected).
+export function posOrderNotifyRecipient(): string | null {
+  const configured = (process.env.POS_ORDER_NOTIFY_EMAIL ?? '').trim()
+  if (/^(off|none|false|disabled)$/i.test(configured)) return null
+  return configured || 'info@smashuk.co'
+}
+
 // Like notifyAdmin, but for the store owner's inbox rather than the Medusa
 // admin inbox: prefers STORE_OWNER_EMAIL, falling back to MEDUSA_ADMIN_EMAIL
 // if the owner address isn't set. Used for order/shipping/refund/new-customer
@@ -54,11 +65,14 @@ export async function notifyOwner(opts: {
   text?: string
   customerEmail?: string
   resendTemplate?: { name: string; variables: Record<string, string> }
+  /** Send to this address instead of the default owner inbox. */
+  to?: string
 }): Promise<{
   sent: boolean
   error?: string
 }> {
-  const to = process.env.STORE_OWNER_EMAIL || process.env.MEDUSA_ADMIN_EMAIL
+  const to =
+    opts.to || process.env.STORE_OWNER_EMAIL || process.env.MEDUSA_ADMIN_EMAIL
   if (!to) {
     return {
       sent: false,

@@ -1,21 +1,3 @@
-/**
- * Single source of truth for stringing.
- *
- * Vocabulary
- *   - "service": a stringing job offered as an add-on on a racket's page
- *     (free or paid — the owner decides per racket in the dashboard).
- *   - "reel":    a spool of string sold on its own. Never shown as an add-on.
- *
- * WHERE A SERVICE SHOWS
- *   A service appears in the "String Selection" dropdown of rackets of the
- *   SAME SPORT as the service. The sport is detected from the product itself
- *   (see detectStringingSport), not from which category it happens to sit in,
- *   because three categories are all literally called "Stringing".
- *
- * This file is pure (no imports) so the storefront, the dashboard and the
- * API route can all use it.
- */
-
 export const STRINGING_SPORTS = ['badminton', 'tennis', 'squash'] as const
 export type StringingSport = (typeof STRINGING_SPORTS)[number]
 export type StringingKind = 'service' | 'reel'
@@ -249,4 +231,26 @@ export function stringTypeOrder(label: string): number {
   if (!label) return 1000
   const i = STRING_TYPES.findIndex((t) => t.label === label)
   return i >= 0 ? i : 500
+}
+
+/**
+ * True for ANY stringing product (service OR reel). The shop no longer sells
+ * strings online: stringing is an in-store service only, offered online just
+ * as the "String upgrade" option on a racket (that dropdown is fed by
+ * /api/store/stringing-options, which does not use this check). So every
+ * public listing, search, sitemap and feed must leave these products out.
+ * (Name kept for the existing call sites.)
+ *
+ * Works on raw Medusa products (categories + metadata). A product with
+ * neither a stringing category nor a stringing_type is NOT hidden, so
+ * incomplete data can never hide a normal product like a racket.
+ */
+export function isStringingServiceProduct(p: any): boolean {
+  if (!p) return false
+  const explicit = p.metadata?.stringing_type
+  if (explicit === 'service' || explicit === 'reel') return true
+  return (p.categories ?? []).some(
+    (c: any) =>
+      isStringingCategoryHandle(c?.handle) || /string/i.test(c?.name ?? ''),
+  )
 }

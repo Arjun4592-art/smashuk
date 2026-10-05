@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
 
     // 1. Orders (paid only) in range, with line items.
     const ordersRes = await fetch(
-      `${MEDUSA_URL}/admin/orders?limit=500&payment_status[]=captured&fields=id,display_id,total,created_at,+metadata,*items,items.variant_id,items.product_id,+items.variant_sku,+items.variant.metadata`,
+      `${MEDUSA_URL}/admin/orders?limit=500&payment_status[]=captured&fields=id,display_id,total,created_at,+metadata,*items,items.variant_id,items.product_id,+items.variant_sku,+items.variant.metadata,+items.subtotal,+items.discount_subtotal,+items.total,+items.tax_total`,
       { headers: { Authorization: authorization } },
     )
     const ordersData = await safeJson(ordersRes, 'reports/profit (orders)')
@@ -176,7 +176,15 @@ export async function GET(req: NextRequest) {
           0
 
         const qty = item.quantity ?? 0
-        const lineRevenue = (item.unit_price ?? 0) * qty
+        // Revenue must be EX-VAT because cost_price has no VAT. Our prices are
+        // VAT-inclusive, so unit_price * qty included VAT and overstated profit.
+        // subtotal = ex-VAT before discount, discount_subtotal = ex-VAT
+        // discount, so this is the ex-VAT amount actually charged.
+        const exVatSubtotal = Number(item.subtotal)
+        const exVatDiscount = Number(item.discount_subtotal ?? 0)
+        const lineRevenue = Number.isFinite(exVatSubtotal)
+          ? exVatSubtotal - (Number.isFinite(exVatDiscount) ? exVatDiscount : 0)
+          : (item.unit_price ?? 0) * qty // fallback if totals were not returned
         const lineCost = unitCost * qty
         const lineProfit = lineRevenue - lineCost
 

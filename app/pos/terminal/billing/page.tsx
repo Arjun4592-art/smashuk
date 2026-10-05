@@ -131,6 +131,7 @@ export default function BillingPage() {
     amountDue,
     paymentMethod,
     customer,
+    customerName,
     orderNote,
     fulfillmentType,
     shippingSpeed,
@@ -439,6 +440,7 @@ export default function BillingPage() {
       variantId: entry.variantId,
       size: displaySize.size,
       sizeOptionTitle: displaySize.sizeOptionTitle,
+      variantLabel: entry.variantLabel,
       pricePending: !detail,
     }
   }
@@ -446,13 +448,6 @@ export default function BillingPage() {
     () => visibleIndexEntries.map(toPOSProduct),
     [visibleIndexEntries, detailsByVariantId],
   )
-  // The size filter chips above already let staff narrow to one exact
-  // variant when they know it, but with no size picked `filtered` still
-  // has one row per variant — a shoe in 6 sizes showed as 6 identical
-  // tiles. Collapse that down to one tile per product id; the tile shows
-  // whichever variant is picked as "representative" (first in-stock one)
-  // and clicking it opens a size picker instead of adding directly,
-  // unless the product only has the one variant to begin with.
   const productGroups = useMemo(() => {
     const byId = new Map<string, POSProduct[]>()
     for (const p of filtered) {
@@ -469,6 +464,7 @@ export default function BillingPage() {
         ? {
             ...representative,
             size: undefined,
+            variantLabel: undefined,
             variantCountOverride: group.length,
           }
         : representative
@@ -481,13 +477,6 @@ export default function BillingPage() {
   const handleScanSubmit = async (raw: string) => {
     const q = raw.trim().toLowerCase()
     if (!q) return
-    // Matching runs over indexEntries (name/sku/category/size only) —
-    // identical logic to before, just against the small index instead of
-    // the full catalogue. This is also why scanning stays reliable: it
-    // never depends on Medusa's own admin search, which doesn't cover SKU
-    // (see app/api/pos/index/route.ts).
-    // A scanner types the EAN/barcode, so try an exact EAN/barcode hit first,
-    // then fall back to SKU exactly as before.
     const byEan = indexEntries.find(
       (p) =>
         (p.ean ?? '').toLowerCase() === q ||
@@ -608,7 +597,7 @@ export default function BillingPage() {
         1,
         {
           id: p.variantId,
-          title: p.size,
+          title: p.variantLabel ?? p.size,
         } as any,
       )
       if (soundOnScan) playScanBeep()
@@ -682,9 +671,13 @@ export default function BillingPage() {
       })
     }
   }
+  // Charge goes straight to "Take now / Ship to customer". Customer details
+  // are only asked for when "Ship to customer" is picked (the address step
+  // collects name/email/address). ~95% of POS sales are walk-ins who need
+  // neither, so they now go Charge -> Take now -> payment.
   const handleChargeClick = () => {
-    setPendingCharge(true)
-    setShowCustomer(true)
+    setPendingCharge(false)
+    setShowFulfillment(true)
   }
   const handleConfirmPayment = async (result: PaymentResult) => {
     if (fulfillmentType === 'ship' && !shippingAddress?.address_1) {
@@ -729,7 +722,7 @@ export default function BillingPage() {
               ? customer.id
               : undefined,
           customer_email: (customer as any)?.email || shippingAddress?.email,
-          customer_name: customer?.name,
+          customer_name: customer?.name || customerName || undefined,
           customer_phone: customer?.phone,
           payment_method: result.method,
           note: orderNote,

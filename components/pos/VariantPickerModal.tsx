@@ -24,7 +24,11 @@ export default function VariantPickerModal({
   onClose,
 }: Props) {
   const sorted = [...variants].sort((a, b) =>
-    (a.size ?? '').localeCompare(b.size ?? '', undefined, { numeric: true }),
+    (a.variantLabel ?? a.size ?? '').localeCompare(
+      b.variantLabel ?? b.size ?? '',
+      undefined,
+      { numeric: true },
+    ),
   )
   return (
     <div
@@ -56,7 +60,7 @@ export default function VariantPickerModal({
               {productName}
             </p>
             <p className='text-xs' style={{ color: '#8C9196' }}>
-              Choose a size / variant
+              Choose a colour / size / variant
             </p>
           </div>
           <button
@@ -73,7 +77,7 @@ export default function VariantPickerModal({
             const isOut = v.stock === 0
             return (
               <button
-                key={v.variantId ?? v.size}
+                key={v.variantId ?? v.variantLabel ?? v.size}
                 onClick={() => onSelect(v)}
                 className='w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-left transition-colors'
                 style={{ background: '#FFFFFF' }}
@@ -89,7 +93,7 @@ export default function VariantPickerModal({
                     className='text-sm font-semibold px-2 py-0.5 rounded'
                     style={{ background: '#F0F1F2', color: '#202223' }}
                   >
-                    {v.size ?? '—'}
+                    {v.variantLabel ?? v.size ?? '—'}
                   </span>
                   {isOut && (
                     <span className='text-[11px]' style={{ color: '#D82C0D' }}>

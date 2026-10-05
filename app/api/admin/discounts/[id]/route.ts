@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { safeJson } from '@/lib/api/safe-json'
+import {
+  getChannelIds,
+  channelRule,
+  appliesToFromRules,
+  SALES_CHANNEL_RULE_ATTRIBUTE,
+} from '@/lib/api/sales-channels'
 
 const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 
@@ -30,6 +36,15 @@ export async function GET(
         { error: data.message ?? 'Failed to fetch discount' },
         { status: res.status },
       )
+    }
+    const ids = await getChannelIds((path) =>
+      fetch(`${MEDUSA_URL}${path}`, {
+        headers: { Authorization: authorization },
+      }),
+    )
+    const promotion = data.promotion ?? data
+    if (promotion && typeof promotion === 'object') {
+      promotion.applies_to = appliesToFromRules(promotion.rules, ids)
     }
     return NextResponse.json(data)
   } catch (err: any) {
@@ -86,7 +101,16 @@ export async function PATCH(
               Authorization: authorization,
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify(campaignFields),
+            body: JSON.stringify({
+              ...campaignFields,
+              // Required by Medusa 2.x when creating a campaign
+              campaign_identifier:
+                campaignFields.campaign_identifier ??
+                `${String(campaignFields.name ?? 'campaign')
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, '-')
+                  .replace(/^-|-$/g, '')}-${Date.now()}`,
+            }),
           })
           const campaignData = await safeJson(
             campaignRes,
@@ -127,6 +151,66 @@ export async function PATCH(
         { error: data.message ?? 'Failed to update discount' },
         { status: res.status },
       )
+    }
+
+    // Sync the Online / In-store / Both choice. Medusa ignores `rules` on a
+    // plain update, so the channel rule is changed through the rules API.
+    if (
+      rest.applies_to === 'online' ||
+      rest.applies_to === 'store' ||
+      rest.applies_to === 'both'
+    ) {
+      try {
+        const ids = await getChannelIds((path) =>
+          fetch(`${MEDUSA_URL}${path}`, {
+            headers: { Authorization: authorization },
+          }),
+        )
+        const curRes = await fetch(
+          `${MEDUSA_URL}/admin/promotions/${id}?fields=id,*rules`,
+          { headers: { Authorization: authorization } },
+        )
+        const cur = await safeJson(curRes, 'discount PATCH rules lookup')
+        const existing = (cur?.promotion?.rules ?? []).filter(
+          (r: any) => r?.attribute === SALES_CHANNEL_RULE_ATTRIBUTE,
+        )
+        const wanted = channelRule(rest.applies_to, ids)
+        const currentChoice = appliesToFromRules(cur?.promotion?.rules, ids)
+        if (currentChoice !== rest.applies_to) {
+          const batch: any = {}
+          if (existing.length) batch.delete = existing.map((r: any) => r.id)
+          if (wanted) batch.create = [wanted]
+          if (batch.delete || batch.create) {
+            const batchRes = await fetch(
+              `${MEDUSA_URL}/admin/promotions/${id}/rules/batch`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: authorization,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(batch),
+              },
+            )
+            if (!batchRes.ok) {
+              const err = await safeJson(
+                batchRes,
+                'discount PATCH channel rule',
+              )
+              return NextResponse.json(
+                {
+                  error:
+                    err?.message ??
+                    'Saved, but could not update where the discount applies',
+                },
+                { status: batchRes.status },
+              )
+            }
+          }
+        }
+      } catch (channelErr: any) {
+        console.warn('[API] channel rule sync failed:', channelErr.message)
+      }
     }
 
     if (status !== undefined) {

@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { isStringingServiceProduct } from '@/lib/stringing'
+
 import { SITE_URL, SITE_NAME } from '@/lib/constants'
 import { getStoreChannelProductIds, googleOfferId } from '@/lib/google-merchant'
 
@@ -78,7 +80,8 @@ async function fetchAllProducts(): Promise<any[]> {
     if (batch.length < PAGE_SIZE) break
     offset += PAGE_SIZE
   }
-  return products
+  // In-store-only stringing services must never appear in a public feed.
+  return products.filter((p) => !isStringingServiceProduct(p))
 }
 
 // Products NOT sold in the physical store must opt out of the local marketing

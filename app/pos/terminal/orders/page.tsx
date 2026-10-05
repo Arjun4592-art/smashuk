@@ -8,6 +8,7 @@ import OrderDetailModal, {
   type OrderDetailData,
 } from '@/components/pos/OrderDetailModal'
 import { POSOrderRowSkeleton } from '@/components/ui/Skeleton'
+import DateRangeFilter, { toLocalYMD } from '@/components/ui/DateRangeFilter'
 import { fetchPOSOrderPage, type PosOrderRecord } from '@/lib/api/pos'
 const STATUS_STYLE: Record<
   string,
@@ -217,6 +218,9 @@ function FilterBar({
   payValue,
   payOptions,
   onPay,
+  dateFrom,
+  dateTo,
+  onDate,
   summary,
 }: {
   sourceValue: string
@@ -225,11 +229,30 @@ function FilterBar({
   payValue: string
   payOptions: FilterOption[]
   onPay: (v: string) => void
+  dateFrom: string
+  dateTo: string
+  onDate: (from: string, to: string) => void
   summary: React.ReactNode
 }) {
   const sourceActive = sourceOptions.find((o) => o.key === sourceValue)
   const payActive = payOptions.find((o) => o.key === payValue)
-  const hasActive = sourceValue !== 'all' || payValue !== 'all'
+  const hasDate = Boolean(dateFrom || dateTo)
+  const hasActive = sourceValue !== 'all' || payValue !== 'all' || hasDate
+  const shortDay = (ymd: string) =>
+    new Date(`${ymd}T00:00:00`).toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+    })
+  const dateChipLabel =
+    dateFrom && dateTo
+      ? dateFrom === dateTo
+        ? shortDay(dateFrom)
+        : `${shortDay(dateFrom)} – ${shortDay(dateTo)}`
+      : dateFrom
+        ? `From ${shortDay(dateFrom)}`
+        : dateTo
+          ? `Until ${shortDay(dateTo)}`
+          : ''
   return (
     <div
       className='rounded-xl mb-3 px-3.5 py-3'
@@ -300,6 +323,13 @@ function FilterBar({
             </span>
           </div>
         </div>
+
+        <div className='flex items-center gap-2'>
+          <span className={FILTER_LABEL_CLASS} style={{ color: '#8C9196' }}>
+            Date
+          </span>
+          <DateRangeFilter from={dateFrom} to={dateTo} onChange={onDate} />
+        </div>
       </div>
 
       {(hasActive || summary) && (
@@ -325,10 +355,17 @@ function FilterBar({
                     onRemove={() => onPay('all')}
                   />
                 )}
+                {hasDate && (
+                  <ActiveChip
+                    label={`Date: ${dateChipLabel}`}
+                    onRemove={() => onDate('', '')}
+                  />
+                )}
                 <button
                   onClick={() => {
                     onSource('all')
                     onPay('all')
+                    onDate('', '')
                   }}
                   className='ml-1 text-xs font-medium hover:underline'
                   style={{ color: '#008060' }}
@@ -359,6 +396,9 @@ export default function OrdersPage() {
   const [search, setSearch] = useState('')
   const [sourceFilter, setSourceFilter] = useState<SourceKey | 'all'>('all')
   const [payFilter, setPayFilter] = useState<PayKey | 'all'>('all')
+  // Date range (YYYY-MM-DD, local time). '' = no limit.
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [mounted, setMounted] = useState(false)
   const [completedOrders, setCompletedOrders] = useState<PosOrderRecord[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -456,10 +496,19 @@ export default function OrdersPage() {
       live: true,
       raw: o,
     }))
+  const matchesDate = (iso: string) => {
+    if (!dateFrom && !dateTo) return true
+    if (!iso) return false
+    const day = toLocalYMD(new Date(iso))
+    if (dateFrom && day < dateFrom) return false
+    if (dateTo && day > dateTo) return false
+    return true
+  }
   const filtered = allOrders.filter(
     (o) =>
       (sourceFilter === 'all' || o.source === sourceFilter) &&
       (payFilter === 'all' || o.payment.key === payFilter) &&
+      matchesDate(o.raw.completedAt) &&
       (!search ||
         o.id.toLowerCase().includes(search.toLowerCase()) ||
         o.customer.toLowerCase().includes(search.toLowerCase()) ||
@@ -613,6 +662,12 @@ export default function OrdersPage() {
           payValue={payFilter}
           payOptions={payOptions}
           onPay={(v) => setPayFilter(v as PayKey | 'all')}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDate={(f, t) => {
+            setDateFrom(f)
+            setDateTo(t)
+          }}
           summary={
             mounted && !loadError ? (
               <>

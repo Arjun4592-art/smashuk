@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        metadata: { ...currentMetadata, homeLayout: layout },
+        metadata: { homeLayout: layout },
       }),
     })
     const data = await safeJson(res)

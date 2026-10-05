@@ -1,4 +1,5 @@
 import 'server-only'
+import { isStringingServiceProduct } from '@/lib/stringing'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 
 // The "Store code" from Google Business Profile for the physical store. It
@@ -64,7 +65,8 @@ export async function listAdminProducts(
     products.push(...batch)
     if (batch.length < PAGE_SIZE) break
   }
-  return products
+  // In-store-only stringing services must never reach a public feed.
+  return products.filter((p) => !isStringingServiceProduct(p))
 }
 
 // IDs of every product that is sold in the physical store (the "Store" sales

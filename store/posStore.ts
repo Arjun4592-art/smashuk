@@ -140,6 +140,8 @@ export interface POSCatalogProduct {
   variantId?: string
   size?: string
   sizeOptionTitle?: string
+  /** All option values joined (colour + size etc.) so variants can be told apart. */
+  variantLabel?: string
 }
 interface POSState {
   session: POSSession | null

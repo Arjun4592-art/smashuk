@@ -16,6 +16,8 @@ export interface POSProduct {
   variantId?: string
   size?: string
   sizeOptionTitle?: string
+  /** Every option value (colour + size...) e.g. "White / S" — tells variants apart. */
+  variantLabel?: string
   // Set on the collapsed "one tile per product" grid entry when a
   // product has more than one variant, so the tile can say "5 sizes"
   // instead of showing one specific (and misleading) size.
@@ -204,7 +206,7 @@ export default function ProductGrid({
                   >
                     {p.brand}
                   </p>
-                  {p.size && (
+                  {(p.variantLabel ?? p.size) && (
                     <span
                       className='text-[10px] font-semibold px-1.5 py-[1px] rounded'
                       style={{
@@ -212,10 +214,11 @@ export default function ProductGrid({
                         color: '#008060',
                       }}
                     >
-                      {p.size}
+                      {p.variantLabel ?? p.size}
                     </span>
                   )}
                   {!p.size &&
+                    !p.variantLabel &&
                     p.variantCountOverride &&
                     p.variantCountOverride > 1 && (
                       <span

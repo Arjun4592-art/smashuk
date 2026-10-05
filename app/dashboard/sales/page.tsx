@@ -555,6 +555,10 @@ function SalesPageContent() {
   const [profitChannel, setProfitChannel] = useState<'all' | 'website' | 'pos'>(
     'all',
   )
+  // Everything in this report is BEFORE VAT (revenue is ex-VAT, cost price has
+  // no VAT). "Show VAT" adds the VAT-inclusive figures and the VAT due.
+  const [showVat, setShowVat] = useState(false)
+  const VAT_PCT = 0.2
   const [profitCategory, setProfitCategory] = useState('')
   const [profitProductId, setProfitProductId] = useState('')
   const [categoryOptions, setCategoryOptions] = useState<
@@ -564,7 +568,7 @@ function SalesPageContent() {
     }[]
   >([])
   useEffect(() => {
-    if (view !== 'reports') return
+    if (view !== 'profit') return
     let cancelled = false
     ;(async () => {
       setProfitLoading(true)
@@ -663,6 +667,35 @@ function SalesPageContent() {
       fetchHistory()
     } catch {}
   }
+  // --- Profit & Margin tab helpers ---
+  const money2 = (n: number) =>
+    `£${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const marginPillClass = (m: number) =>
+    m >= 40
+      ? 'bg-[#E3F1EB] text-[#006e52]'
+      : m >= 25
+        ? 'bg-[#FFF1D6] text-[#8A5A00]'
+        : 'bg-[#FBEAE5] text-[#D82C0D]'
+  const marginBarClass = (m: number) =>
+    m >= 40 ? 'bg-[#008060]' : m >= 25 ? 'bg-[#E0A100]' : 'bg-[#D82C0D]'
+  const profitRangeLabel =
+    (
+      {
+        today: 'Today',
+        last7: 'Last 7 days',
+        last30: 'Last 30 days',
+        last90: 'Last 90 days',
+        thisyear: 'This year',
+      } as Record<string, string>
+    )[dateRange] ?? dateRange
+  const profitFiltersActive = Boolean(
+    profitCategory || profitProductId || profitChannel !== 'all',
+  )
+  const clearProfitFilters = () => {
+    setProfitChannel('all')
+    setProfitCategory('')
+    setProfitProductId('')
+  }
   const TABS = [
     {
       id: 'overview',
@@ -671,6 +704,10 @@ function SalesPageContent() {
     {
       id: 'reports',
       label: 'Reports',
+    },
+    {
+      id: 'profit',
+      label: 'Profit & Margin',
     },
     {
       id: 'live',
@@ -1385,286 +1422,6 @@ function SalesPageContent() {
               </button>
             </div>
 
-            {}
-            <div className='border border-[#E1E3E5] rounded-xl overflow-hidden bg-white'>
-              <div className='flex items-center justify-between px-5 py-3 bg-[#F6F6F7] border-b border-[#E1E3E5] flex-wrap gap-2'>
-                <div>
-                  <p className='text-[12px] font-semibold text-[#6D7175] uppercase tracking-wide'>
-                    Profit & Gross Margin
-                  </p>
-                  <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
-                    Sales by channel, cost of inventory & gross profit — filter
-                    by category or product
-                  </p>
-                </div>
-                <button
-                  onClick={async () => {
-                    if (filteredProfitProducts.length === 0) {
-                      toast.error('Nothing to export yet')
-                      return
-                    }
-                    const rows = filteredProfitProducts.map((p) => ({
-                      Product: p.name,
-                      SKU: p.sku,
-                      Category: p.category,
-                      'Units Sold': p.unitsSold,
-                      Revenue: p.displayRevenue,
-                      'Cost of Inventory': p.displayCost,
-                      'Gross Profit': p.displayGrossProfit,
-                      'Margin %': p.displayMargin,
-                    }))
-                    rows.push({
-                      Product: 'TOTAL',
-                      SKU: '',
-                      Category: '',
-                      'Units Sold': profitTotals.unitsSold,
-                      Revenue: Math.round(profitTotals.revenue * 100) / 100,
-                      'Cost of Inventory':
-                        Math.round(profitTotals.cost * 100) / 100,
-                      'Gross Profit':
-                        Math.round(profitTotals.grossProfit * 100) / 100,
-                      'Margin %': profitTotalMargin,
-                    })
-                    const fileName = `gross-profit-report-${profitChannel}-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`
-                    const csv = Papa.unparse(rows)
-                    const blob = new Blob([csv], {
-                      type: 'text/csv;charset=utf-8;',
-                    })
-                    const url = URL.createObjectURL(blob)
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = fileName
-                    document.body.appendChild(a)
-                    a.click()
-                    document.body.removeChild(a)
-                    URL.revokeObjectURL(url)
-                    toast.success('Gross profit report exported')
-                    await recordDownload(
-                      'Gross Profit Report',
-                      'profit-report',
-                      rows.length,
-                      fileName,
-                    )
-                  }}
-                  className='flex items-center gap-1.5 px-3.5 py-1.5 bg-white hover:bg-[#F6F6F7] text-[#202223] text-[12.5px] font-medium rounded-lg border border-[#E1E3E5] cursor-pointer transition-colors'
-                >
-                  {Icons.download} Export CSV
-                </button>
-              </div>
-
-              {}
-              <div className='flex items-center gap-3 px-5 py-3 border-b border-[#E1E3E5] flex-wrap'>
-                <select
-                  value={profitChannel}
-                  onChange={(e) =>
-                    setProfitChannel(
-                      e.target.value as 'all' | 'website' | 'pos',
-                    )
-                  }
-                  className='px-3 py-1.5 text-[12.5px] border border-[#E1E3E5] rounded-lg bg-white text-[#202223] cursor-pointer'
-                >
-                  <option value='all'>All channels</option>
-                  <option value='website'>Website only</option>
-                  <option value='pos'>POS only</option>
-                </select>
-                <select
-                  value={profitCategory}
-                  onChange={(e) => setProfitCategory(e.target.value)}
-                  className='px-3 py-1.5 text-[12.5px] border border-[#E1E3E5] rounded-lg bg-white text-[#202223] cursor-pointer'
-                >
-                  <option value=''>All categories</option>
-                  {categoryOptions.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={profitProductId}
-                  onChange={(e) => setProfitProductId(e.target.value)}
-                  className='px-3 py-1.5 text-[12.5px] border border-[#E1E3E5] rounded-lg bg-white text-[#202223] cursor-pointer max-w-[220px]'
-                >
-                  <option value=''>All products</option>
-                  {profitProducts.map((p) => (
-                    <option key={p.productId} value={p.productId}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-                {(profitCategory ||
-                  profitProductId ||
-                  profitChannel !== 'all') && (
-                  <button
-                    onClick={() => {
-                      setProfitChannel('all')
-                      setProfitCategory('')
-                      setProfitProductId('')
-                    }}
-                    className='text-[12px] text-[#2C6ECB] hover:underline bg-transparent border-none cursor-pointer'
-                  >
-                    Clear filters
-                  </button>
-                )}
-              </div>
-
-              {profitLoading ? (
-                <div className='p-5 space-y-2'>
-                  {[...Array(4)].map((_, i) => (
-                    <div
-                      key={i}
-                      className='h-8 bg-[#F1F1F1] rounded-lg animate-pulse'
-                    />
-                  ))}
-                </div>
-              ) : profitError ? (
-                <p className='text-[13px] text-[#D82C0D] p-5'>{profitError}</p>
-              ) : (
-                <>
-                  {}
-                  <div className='grid grid-cols-2 lg:grid-cols-4 gap-px bg-[#E1E3E5]'>
-                    {[
-                      {
-                        label: 'Revenue',
-                        value: profitTotals.revenue,
-                      },
-                      {
-                        label: 'Cost of Inventory',
-                        value: profitTotals.cost,
-                      },
-                      {
-                        label: 'Gross Profit',
-                        value: profitTotals.grossProfit,
-                      },
-                      {
-                        label: 'Gross Margin',
-                        value: profitTotalMargin,
-                        isPct: true,
-                      },
-                    ].map((s) => (
-                      <div key={s.label} className='bg-white px-5 py-4'>
-                        <p className='text-[11.5px] text-[#6D7175] mb-1'>
-                          {s.label}
-                        </p>
-                        <p className='text-[18px] font-semibold text-[#202223] font-sora'>
-                          {s.isPct
-                            ? `${s.value}%`
-                            : `£${s.value.toLocaleString('en-GB', {
-                                maximumFractionDigits: 2,
-                              })}`}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-
-                  {}
-                  <div className='overflow-x-auto'>
-                    <table className='w-full text-[12.5px]'>
-                      <thead>
-                        <tr className='bg-[#FAFAFA] border-b border-[#E1E3E5]'>
-                          <th className='text-left font-medium text-[#6D7175] px-5 py-2.5'>
-                            Product
-                          </th>
-                          <th className='text-left font-medium text-[#6D7175] px-3 py-2.5'>
-                            SKU
-                          </th>
-                          <th className='text-left font-medium text-[#6D7175] px-3 py-2.5'>
-                            Category
-                          </th>
-                          <th className='text-right font-medium text-[#6D7175] px-3 py-2.5'>
-                            Units
-                          </th>
-                          <th className='text-right font-medium text-[#6D7175] px-3 py-2.5'>
-                            Revenue
-                          </th>
-                          <th className='text-right font-medium text-[#6D7175] px-3 py-2.5'>
-                            Cost
-                          </th>
-                          <th className='text-right font-medium text-[#6D7175] px-3 py-2.5'>
-                            Gross Profit
-                          </th>
-                          <th className='text-right font-medium text-[#6D7175] px-5 py-2.5'>
-                            Margin
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className='divide-y divide-[#F1F1F1]'>
-                        {filteredProfitProducts.length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={8}
-                              className='text-center text-[#8C9196] px-5 py-8'
-                            >
-                              No sales in this range for the selected filters
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredProfitProducts.map((p) => (
-                            <tr
-                              key={p.productId}
-                              className='hover:bg-[#FAFAFA]'
-                            >
-                              <td className='px-5 py-2.5 font-medium text-[#202223]'>
-                                {p.name}
-                              </td>
-                              <td className='px-3 py-2.5 text-[#6D7175] font-mono text-[11.5px]'>
-                                {p.sku || '—'}
-                              </td>
-                              <td className='px-3 py-2.5 text-[#6D7175]'>
-                                {p.category}
-                              </td>
-                              <td className='px-3 py-2.5 text-right text-[#202223]'>
-                                {p.unitsSold}
-                              </td>
-                              <td className='px-3 py-2.5 text-right text-[#202223]'>
-                                £{p.displayRevenue.toLocaleString('en-GB')}
-                              </td>
-                              <td className='px-3 py-2.5 text-right text-[#202223]'>
-                                £{p.displayCost.toLocaleString('en-GB')}
-                              </td>
-                              <td className='px-3 py-2.5 text-right font-medium text-[#008060]'>
-                                £{p.displayGrossProfit.toLocaleString('en-GB')}
-                              </td>
-                              <td className='px-5 py-2.5 text-right text-[#6D7175]'>
-                                {p.displayMargin}%
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                      {filteredProfitProducts.length > 0 && (
-                        <tfoot>
-                          <tr className='bg-[#FAFAFA] border-t-2 border-[#E1E3E5] font-semibold'>
-                            <td
-                              className='px-5 py-3 text-[#202223]'
-                              colSpan={3}
-                            >
-                              Total (collective)
-                            </td>
-                            <td className='px-3 py-3 text-right text-[#202223]'>
-                              {profitTotals.unitsSold}
-                            </td>
-                            <td className='px-3 py-3 text-right text-[#202223]'>
-                              £{profitTotals.revenue.toLocaleString('en-GB')}
-                            </td>
-                            <td className='px-3 py-3 text-right text-[#202223]'>
-                              £{profitTotals.cost.toLocaleString('en-GB')}
-                            </td>
-                            <td className='px-3 py-3 text-right text-[#008060]'>
-                              £
-                              {profitTotals.grossProfit.toLocaleString('en-GB')}
-                            </td>
-                            <td className='px-5 py-3 text-right text-[#6D7175]'>
-                              {profitTotalMargin}%
-                            </td>
-                          </tr>
-                        </tfoot>
-                      )}
-                    </table>
-                  </div>
-                </>
-              )}
-            </div>
-
             <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
               {[
                 {
@@ -1974,6 +1731,420 @@ function SalesPageContent() {
               )}
             </div>
             <ScheduledReports />
+          </div>
+        )}
+
+        {view === 'profit' && (
+          <div className='p-5 space-y-5'>
+            {/* Header */}
+            <div className='flex items-start justify-between gap-3 flex-wrap'>
+              <div>
+                <h2 className='font-sora text-[15px] font-semibold text-[#202223]'>
+                  Profit & Margin
+                </h2>
+                <p className='text-[12.5px] text-[#6D7175] mt-0.5'>
+                  Gross profit by channel, category and product for{' '}
+                  <span className='font-medium text-[#202223]'>
+                    {profitRangeLabel}
+                  </span>
+                  . Change the range with the date picker at the top of the
+                  page.
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  if (filteredProfitProducts.length === 0) {
+                    toast.error('Nothing to export yet')
+                    return
+                  }
+                  const rows = filteredProfitProducts.map((p) => ({
+                    Product: p.name,
+                    SKU: p.sku,
+                    Category: p.category,
+                    'Units Sold': p.unitsSold,
+                    Revenue: p.displayRevenue,
+                    'Cost of Inventory': p.displayCost,
+                    'Gross Profit': p.displayGrossProfit,
+                    'Margin %': p.displayMargin,
+                  }))
+                  rows.push({
+                    Product: 'TOTAL',
+                    SKU: '',
+                    Category: '',
+                    'Units Sold': profitTotals.unitsSold,
+                    Revenue: Math.round(profitTotals.revenue * 100) / 100,
+                    'Cost of Inventory':
+                      Math.round(profitTotals.cost * 100) / 100,
+                    'Gross Profit':
+                      Math.round(profitTotals.grossProfit * 100) / 100,
+                    'Margin %': profitTotalMargin,
+                  })
+                  const fileName = `gross-profit-report-${profitChannel}-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`
+                  const csv = Papa.unparse(rows)
+                  const blob = new Blob([csv], {
+                    type: 'text/csv;charset=utf-8;',
+                  })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = fileName
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  URL.revokeObjectURL(url)
+                  toast.success('Gross profit report exported')
+                  await recordDownload(
+                    'Gross Profit Report',
+                    'profit-report',
+                    rows.length,
+                    fileName,
+                  )
+                }}
+                className='flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-[#F6F6F7] text-[#202223] text-[12.5px] font-medium rounded-lg border border-[#E1E3E5] cursor-pointer transition-colors'
+              >
+                {Icons.download} Export CSV
+              </button>
+            </div>
+
+            {/* Filters */}
+            <div className='flex items-center justify-between gap-3 flex-wrap'>
+              <div className='flex items-center gap-2.5 flex-wrap'>
+                <div
+                  className='inline-flex p-0.5 rounded-lg bg-[#F1F2F3]'
+                  role='tablist'
+                  aria-label='Sales channel'
+                >
+                  {(
+                    [
+                      ['all', 'All channels'],
+                      ['website', 'Website'],
+                      ['pos', 'POS'],
+                    ] as const
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type='button'
+                      role='tab'
+                      aria-selected={profitChannel === k}
+                      onClick={() => setProfitChannel(k)}
+                      className={`px-3 py-1.5 rounded-md text-[12.5px] font-medium border-none cursor-pointer transition-colors whitespace-nowrap ${profitChannel === k ? 'bg-white text-[#008060] shadow-sm' : 'bg-transparent text-[#6D7175] hover:text-[#202223]'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <select
+                  value={profitCategory}
+                  onChange={(e) => setProfitCategory(e.target.value)}
+                  aria-label='Category'
+                  className='px-3 py-2 text-[12.5px] border border-[#E1E3E5] rounded-lg bg-white text-[#202223] cursor-pointer outline-none hover:border-[#8C9196] focus:border-[#008060]'
+                >
+                  <option value=''>All categories</option>
+                  {categoryOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={profitProductId}
+                  onChange={(e) => setProfitProductId(e.target.value)}
+                  aria-label='Product'
+                  className='px-3 py-2 text-[12.5px] border border-[#E1E3E5] rounded-lg bg-white text-[#202223] cursor-pointer outline-none hover:border-[#8C9196] focus:border-[#008060] max-w-[220px]'
+                >
+                  <option value=''>All products</option>
+                  {profitProducts.map((p) => (
+                    <option key={p.productId} value={p.productId}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                {profitFiltersActive && (
+                  <button
+                    onClick={clearProfitFilters}
+                    className='text-[12px] font-medium text-[#008060] hover:underline bg-transparent border-none cursor-pointer'
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+
+              <label className='flex items-center gap-2 text-[12.5px] text-[#202223] cursor-pointer select-none'>
+                <button
+                  type='button'
+                  role='switch'
+                  aria-checked={showVat}
+                  aria-label='Show VAT'
+                  onClick={() => setShowVat(!showVat)}
+                  className={`relative w-9 h-5 rounded-full border-none cursor-pointer transition-colors ${showVat ? 'bg-[#008060]' : 'bg-[#C9CCCF]'}`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${showVat ? 'translate-x-4' : ''}`}
+                  />
+                </button>
+                Show VAT (20%)
+              </label>
+            </div>
+
+            {profitLoading ? (
+              <div className='space-y-4'>
+                <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
+                  {[...Array(4)].map((_, i) => (
+                    <div
+                      key={i}
+                      className='h-[92px] bg-[#F1F1F1] rounded-xl animate-pulse'
+                    />
+                  ))}
+                </div>
+                <div className='h-48 bg-[#F1F1F1] rounded-xl animate-pulse' />
+              </div>
+            ) : profitError ? (
+              <div className='rounded-xl border border-[#FBD5CC] bg-[#FFF5F3] px-5 py-4 text-[13px] text-[#D82C0D]'>
+                {profitError}
+              </div>
+            ) : (
+              <>
+                {/* KPI cards */}
+                <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
+                  <div className='rounded-xl border border-[#E1E3E5] bg-white px-5 py-4'>
+                    <p className='text-[12px] text-[#6D7175]'>Revenue</p>
+                    <p className='font-sora text-[22px] font-semibold text-[#202223] mt-1 tabular-nums'>
+                      {money2(profitTotals.revenue)}
+                    </p>
+                    <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
+                      before VAT
+                    </p>
+                  </div>
+                  <div className='rounded-xl border border-[#E1E3E5] bg-white px-5 py-4'>
+                    <p className='text-[12px] text-[#6D7175]'>
+                      Cost of inventory
+                    </p>
+                    <p className='font-sora text-[22px] font-semibold text-[#202223] mt-1 tabular-nums'>
+                      {money2(profitTotals.cost)}
+                    </p>
+                    <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
+                      before VAT
+                    </p>
+                  </div>
+                  <div className='rounded-xl border border-[#B7DCCB] bg-[#F1F8F5] px-5 py-4'>
+                    <p className='text-[12px] text-[#4A6B5D]'>Gross profit</p>
+                    <p className='font-sora text-[22px] font-semibold text-[#006e52] mt-1 tabular-nums'>
+                      {money2(profitTotals.grossProfit)}
+                    </p>
+                    <p className='text-[11.5px] text-[#4A6B5D] mt-0.5'>
+                      before VAT
+                    </p>
+                  </div>
+                  <div className='rounded-xl border border-[#E1E3E5] bg-white px-5 py-4'>
+                    <p className='text-[12px] text-[#6D7175]'>Gross margin</p>
+                    <p className='font-sora text-[22px] font-semibold text-[#202223] mt-1 tabular-nums'>
+                      {profitTotalMargin}%
+                    </p>
+                    <div className='h-1.5 rounded-full bg-[#E1E3E5] mt-2.5 overflow-hidden'>
+                      <div
+                        className={`h-full rounded-full ${marginBarClass(profitTotalMargin)}`}
+                        style={{
+                          width: `${Math.min(100, Math.max(0, profitTotalMargin))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* VAT breakdown */}
+                {showVat && (
+                  <div className='rounded-xl border border-[#E1E3E5] bg-white px-5 py-4'>
+                    <p className='text-[12.5px] font-semibold text-[#202223] mb-3'>
+                      VAT breakdown{' '}
+                      <span className='font-normal text-[#8C9196]'>(20%)</span>
+                    </p>
+                    <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
+                      {[
+                        {
+                          label: 'Revenue incl. VAT',
+                          value: profitTotals.revenue * (1 + VAT_PCT),
+                        },
+                        {
+                          label: 'VAT due on sales',
+                          value: profitTotals.revenue * VAT_PCT,
+                        },
+                        {
+                          label: 'Cost incl. VAT',
+                          value: profitTotals.cost * (1 + VAT_PCT),
+                        },
+                        {
+                          label: 'VAT paid on cost',
+                          value: profitTotals.cost * VAT_PCT,
+                        },
+                      ].map((v) => (
+                        <div key={v.label}>
+                          <p className='text-[11.5px] text-[#6D7175]'>
+                            {v.label}
+                          </p>
+                          <p className='text-[16px] font-semibold text-[#202223] mt-0.5 tabular-nums'>
+                            {money2(v.value)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Product table */}
+                <div className='rounded-xl border border-[#E1E3E5] bg-white overflow-hidden'>
+                  <div className='flex items-center justify-between px-5 py-3 border-b border-[#E1E3E5]'>
+                    <p className='text-[13px] font-semibold text-[#202223]'>
+                      Products
+                    </p>
+                    <p className='text-[12px] text-[#8C9196]'>
+                      {filteredProfitProducts.length} product
+                      {filteredProfitProducts.length === 1 ? '' : 's'} · sorted
+                      by gross profit
+                    </p>
+                  </div>
+                  <div className='overflow-auto max-h-[560px]'>
+                    <table className='w-full text-[12.5px] tabular-nums'>
+                      <thead className='sticky top-0 z-10'>
+                        <tr className='bg-[#FAFAFA] border-b border-[#E1E3E5] text-[11.5px] font-medium text-[#6D7175]'>
+                          <th className='text-left font-medium px-5 py-2.5 min-w-[240px]'>
+                            Product
+                          </th>
+                          <th className='text-right font-medium px-3 py-2.5'>
+                            Units
+                          </th>
+                          <th className='text-right font-medium px-3 py-2.5'>
+                            Revenue
+                          </th>
+                          {showVat && (
+                            <>
+                              <th className='text-right font-medium px-3 py-2.5'>
+                                Revenue incl. VAT
+                              </th>
+                              <th className='text-right font-medium px-3 py-2.5'>
+                                VAT due
+                              </th>
+                            </>
+                          )}
+                          <th className='text-right font-medium px-3 py-2.5'>
+                            Cost
+                          </th>
+                          <th className='text-right font-medium px-3 py-2.5'>
+                            Gross profit
+                          </th>
+                          <th className='text-right font-medium px-5 py-2.5'>
+                            Margin
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className='divide-y divide-[#F1F1F1]'>
+                        {filteredProfitProducts.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={showVat ? 8 : 6}
+                              className='text-center text-[#8C9196] px-5 py-10'
+                            >
+                              <p>
+                                No sales in this range for the selected filters
+                              </p>
+                              {profitFiltersActive && (
+                                <button
+                                  onClick={clearProfitFilters}
+                                  className='mt-2 text-[12px] font-medium text-[#008060] hover:underline bg-transparent border-none cursor-pointer'
+                                >
+                                  Clear filters
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredProfitProducts.map((p) => (
+                            <tr
+                              key={p.productId}
+                              className='hover:bg-[#FAFAFA]'
+                            >
+                              <td className='px-5 py-3'>
+                                <p className='font-medium text-[#202223] leading-snug'>
+                                  {p.name}
+                                </p>
+                                <p className='text-[11.5px] text-[#8C9196] mt-0.5'>
+                                  {p.category || 'Uncategorised'}
+                                  {p.sku ? ` · ${p.sku}` : ''}
+                                </p>
+                              </td>
+                              <td className='px-3 py-3 text-right text-[#202223]'>
+                                {p.unitsSold}
+                              </td>
+                              <td className='px-3 py-3 text-right text-[#202223]'>
+                                {money2(p.displayRevenue)}
+                              </td>
+                              {showVat && (
+                                <>
+                                  <td className='px-3 py-3 text-right text-[#202223]'>
+                                    {money2(p.displayRevenue * (1 + VAT_PCT))}
+                                  </td>
+                                  <td className='px-3 py-3 text-right text-[#6D7175]'>
+                                    {money2(p.displayRevenue * VAT_PCT)}
+                                  </td>
+                                </>
+                              )}
+                              <td className='px-3 py-3 text-right text-[#202223]'>
+                                {money2(p.displayCost)}
+                              </td>
+                              <td className='px-3 py-3 text-right font-semibold text-[#006e52]'>
+                                {money2(p.displayGrossProfit)}
+                              </td>
+                              <td className='px-5 py-3 text-right'>
+                                <span
+                                  className={`inline-block min-w-[52px] text-center px-2 py-0.5 rounded-full text-[11.5px] font-medium ${marginPillClass(p.displayMargin)}`}
+                                >
+                                  {p.displayMargin}%
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                      {filteredProfitProducts.length > 0 && (
+                        <tfoot>
+                          <tr className='bg-[#FAFAFA] border-t border-[#E1E3E5] font-semibold text-[#202223]'>
+                            <td className='px-5 py-3'>Total</td>
+                            <td className='px-3 py-3 text-right'>
+                              {profitTotals.unitsSold}
+                            </td>
+                            <td className='px-3 py-3 text-right'>
+                              {money2(profitTotals.revenue)}
+                            </td>
+                            {showVat && (
+                              <>
+                                <td className='px-3 py-3 text-right'>
+                                  {money2(profitTotals.revenue * (1 + VAT_PCT))}
+                                </td>
+                                <td className='px-3 py-3 text-right'>
+                                  {money2(profitTotals.revenue * VAT_PCT)}
+                                </td>
+                              </>
+                            )}
+                            <td className='px-3 py-3 text-right'>
+                              {money2(profitTotals.cost)}
+                            </td>
+                            <td className='px-3 py-3 text-right text-[#006e52]'>
+                              {money2(profitTotals.grossProfit)}
+                            </td>
+                            <td className='px-5 py-3 text-right'>
+                              <span
+                                className={`inline-block min-w-[52px] text-center px-2 py-0.5 rounded-full text-[11.5px] font-medium ${marginPillClass(profitTotalMargin)}`}
+                              >
+                                {profitTotalMargin}%
+                              </span>
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 
