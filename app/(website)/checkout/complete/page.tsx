@@ -30,17 +30,67 @@ function CompleteInner() {
       setErrorMessage('Missing cart reference. Please try checking out again.')
       return
     }
-    if (redirectStatus !== 'succeeded') {
-      setStatus('error')
-      setErrorMessage(
-        redirectStatus === 'failed' || redirectStatus === 'canceled'
-          ? 'Payment was not completed. No charge was made — please try again.'
-          : 'Could not confirm payment status. Please try again.',
-      )
-      return
-    }
+    const paymentIntentIdParam = searchParams.get('payment_intent')
     let cancelled = false
     ;(async () => {
+      // Decide success from the real PaymentIntent status (server-side),
+      // not the redirect_status URL param. With manual capture the PI is
+      // `requires_capture` after authorisation — that is a success; the
+      // `complete` action captures it right after creating the order.
+      let paymentOk = redirectStatus === 'succeeded'
+      let failMessage: string | null = null
+      if (paymentIntentIdParam) {
+        let piStatus: string | undefined
+        for (let attempt = 0; attempt < 6; attempt++) {
+          try {
+            const r = await fetch('/api/store/payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                action: 'get-status',
+                paymentIntentId: paymentIntentIdParam,
+              }),
+            })
+            const d = await r.json()
+            piStatus = d?.status
+          } catch {
+            piStatus = undefined
+          }
+          // Only keep polling while the bank/wallet is still processing.
+          if (piStatus !== 'processing' && piStatus !== 'requires_action') break
+          await new Promise((res) => setTimeout(res, 2000))
+        }
+        if (piStatus === 'succeeded' || piStatus === 'requires_capture') {
+          paymentOk = true
+        } else if (
+          piStatus === 'canceled' ||
+          piStatus === 'requires_payment_method'
+        ) {
+          paymentOk = false
+          failMessage =
+            'Payment was not completed. No charge was made — please try again.'
+        } else if (
+          piStatus === 'processing' ||
+          piStatus === 'requires_action'
+        ) {
+          paymentOk = false
+          failMessage =
+            'Your payment is still being processed. Please do not pay again — check My Orders in a few minutes or contact support.'
+        }
+        // piStatus undefined (lookup failed) -> fall back to redirect_status
+      }
+      if (cancelled) return
+      if (!paymentOk) {
+        setStatus('error')
+        setErrorMessage(
+          failMessage ??
+            (redirectStatus === 'failed' || redirectStatus === 'canceled'
+              ? 'Payment was not completed. No charge was made — please try again.'
+              : 'Could not confirm payment status. If you were charged, please do not pay again — contact support.'),
+        )
+        return
+      }
       setStatus('completing')
       try {
         const cart = await getCart(cartId)

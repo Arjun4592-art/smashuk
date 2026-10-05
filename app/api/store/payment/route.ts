@@ -70,6 +70,39 @@ export async function POST(req: NextRequest) {
         })
       }
     }
+    // Server-side source of truth for the PaymentIntent state. The
+    // `redirect_status` URL param is NOT reliable for redirect-based methods
+    // (e.g. Revolut Pay) and with manual capture the PI sits in
+    // `requires_capture` (authorised, not yet captured) which is a SUCCESS
+    // for our flow — the `complete` action below captures it afterwards.
+    if (action === 'get-status') {
+      const { paymentIntentId } = body
+      if (!paymentIntentId) {
+        return NextResponse.json(
+          { error: 'paymentIntentId required' },
+          { status: 400 },
+        )
+      }
+      try {
+        const { requireStripe } = await import('@/lib/stripe-server')
+        const pi = await requireStripe().paymentIntents.retrieve(
+          paymentIntentId,
+          { expand: ['payment_method'] },
+        )
+        const pm = pi.payment_method
+        const type = typeof pm === 'object' && pm ? pm.type : undefined
+        return NextResponse.json({
+          status: pi.status,
+          payment_method: type ?? 'card',
+        })
+      } catch (err: any) {
+        console.error('[/api/store/payment] get-status failed:', err)
+        return NextResponse.json(
+          { error: err?.message ?? 'get-status failed' },
+          { status: 500 },
+        )
+      }
+    }
     if (action === 'create-collection' || action === 'complete') {
       const ukErr = await getNonUkDeliveryError(cartId, MEDUSA_URL, h)
       if (ukErr) {
