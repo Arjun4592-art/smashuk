@@ -448,6 +448,23 @@ function SalesPageContent() {
   const view = searchParams.get('view') ?? 'overview'
   const { user } = useAuthStore()
   const [dateRange, setDateRange] = useState('last30')
+  const toISODate = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const todayISO = toISODate(new Date())
+  const [customFrom, setCustomFrom] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 30)
+    return toISODate(d)
+  })
+  const [customTo, setCustomTo] = useState(() => toISODate(new Date()))
+  const customValid =
+    dateRange !== 'custom' ||
+    (Boolean(customFrom) && Boolean(customTo) && customFrom <= customTo)
+  const rangeFrom = dateRange === 'custom' ? customFrom : undefined
+  const rangeTo = dateRange === 'custom' ? customTo : undefined
+  // Used in export file names / report history
+  const rangeKey =
+    dateRange === 'custom' ? `${customFrom}_to_${customTo}` : dateRange
   const [chartType, setChartType] = useState<ChartType>('area')
   const [chartMetric, setChartMetric] = useState<ChartMetric>('revenue')
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
@@ -489,17 +506,18 @@ function SalesPageContent() {
     error?: string
   } | null>(null)
   const fetchAnalytics = useCallback(async () => {
+    if (!customValid) return
     setLoading(true)
     setError(null)
     try {
-      const data = await getAnalytics(dateRange)
+      const data = await getAnalytics(dateRange, rangeFrom, rangeTo)
       setAnalytics(data)
     } catch (err: any) {
       setError(err.message)
     } finally {
       setLoading(false)
     }
-  }, [dateRange])
+  }, [dateRange, rangeFrom, rangeTo, customValid])
   useEffect(() => {
     fetchAnalytics()
   }, [fetchAnalytics])
@@ -568,14 +586,14 @@ function SalesPageContent() {
     }[]
   >([])
   useEffect(() => {
-    if (view !== 'profit') return
+    if (view !== 'profit' || !customValid) return
     let cancelled = false
     ;(async () => {
       setProfitLoading(true)
       setProfitError(null)
       try {
         const [report, cats] = await Promise.all([
-          getProfitReport({ range: dateRange }),
+          getProfitReport({ range: dateRange, from: rangeFrom, to: rangeTo }),
           categoryOptions.length ? Promise.resolve(null) : getCategories(),
         ])
         if (cancelled) return
@@ -595,7 +613,7 @@ function SalesPageContent() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, dateRange])
+  }, [view, dateRange, rangeFrom, rangeTo, customValid])
   const profitProducts = profitReport?.products ?? []
   // Category filter matches by category id -> name (products carry the name only).
   const profitCategoryName = profitCategory
@@ -657,7 +675,7 @@ function SalesPageContent() {
         body: JSON.stringify({
           name,
           type,
-          dateRange,
+          dateRange: rangeKey,
           downloadedBy: user?.name ?? 'Admin',
           downloadedByEmail: user?.email ?? '',
           rowCount,
@@ -686,6 +704,7 @@ function SalesPageContent() {
         last30: 'Last 30 days',
         last90: 'Last 90 days',
         thisyear: 'This year',
+        custom: `${customFrom} to ${customTo}`,
       } as Record<string, string>
     )[dateRange] ?? dateRange
   const profitFiltersActive = Boolean(
@@ -751,7 +770,30 @@ function SalesPageContent() {
             <option value='last30'>Last 30 days</option>
             <option value='last90'>Last 90 days</option>
             <option value='thisyear'>This year</option>
+            <option value='custom'>Custom range</option>
           </select>
+          {dateRange === 'custom' && (
+            <div className='flex items-center gap-1.5'>
+              <input
+                type='date'
+                value={customFrom}
+                max={customTo || todayISO}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                aria-label='From date'
+                className='px-3 py-2 border border-[#E1E3E5] bg-white rounded-lg text-[13px] text-[#202223] outline-none hover:border-[#8C9196] transition-colors'
+              />
+              <span className='text-[12px] text-[#6D7175]'>to</span>
+              <input
+                type='date'
+                value={customTo}
+                min={customFrom || undefined}
+                max={todayISO}
+                onChange={(e) => setCustomTo(e.target.value)}
+                aria-label='To date'
+                className='px-3 py-2 border border-[#E1E3E5] bg-white rounded-lg text-[13px] text-[#202223] outline-none hover:border-[#8C9196] transition-colors'
+              />
+            </div>
+          )}
           <button
             onClick={async () => {
               if (!analytics) {
@@ -771,13 +813,13 @@ function SalesPageContent() {
               const url = URL.createObjectURL(blob)
               const a = document.createElement('a')
               a.href = url
-              a.download = `sales-export-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`
+              a.download = `sales-export-${rangeKey}-${new Date().toISOString().slice(0, 10)}.csv`
               document.body.appendChild(a)
               a.click()
               document.body.removeChild(a)
               URL.revokeObjectURL(url)
               toast.success('Exported sales data')
-              const fileName2 = `sales-export-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`
+              const fileName2 = `sales-export-${rangeKey}-${new Date().toISOString().slice(0, 10)}.csv`
               await recordDownload(
                 'Sales Export',
                 'sales-export',
@@ -1401,7 +1443,7 @@ function SalesPageContent() {
                   const url = URL.createObjectURL(blob)
                   const a = document.createElement('a')
                   a.href = url
-                  a.download = `full-report-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`
+                  a.download = `full-report-${rangeKey}-${new Date().toISOString().slice(0, 10)}.csv`
                   document.body.appendChild(a)
                   a.click()
                   document.body.removeChild(a)
@@ -1413,7 +1455,7 @@ function SalesPageContent() {
                     analytics.chartData.length +
                       analytics.topProducts.length +
                       analytics.citiesData.length,
-                    `full-report-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`,
+                    `full-report-${rangeKey}-${new Date().toISOString().slice(0, 10)}.csv`,
                   )
                 }}
                 className='flex items-center gap-1.5 px-4 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-medium rounded-lg border-none cursor-pointer transition-colors'
@@ -1779,7 +1821,7 @@ function SalesPageContent() {
                       Math.round(profitTotals.grossProfit * 100) / 100,
                     'Margin %': profitTotalMargin,
                   })
-                  const fileName = `gross-profit-report-${profitChannel}-${dateRange}-${new Date().toISOString().slice(0, 10)}.csv`
+                  const fileName = `gross-profit-report-${profitChannel}-${rangeKey}-${new Date().toISOString().slice(0, 10)}.csv`
                   const csv = Papa.unparse(rows)
                   const blob = new Blob([csv], {
                     type: 'text/csv;charset=utf-8;',

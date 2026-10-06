@@ -6,11 +6,38 @@ const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 
 type Channel = 'website' | 'pos'
 
+/** Resolve start/end of the selected range. Supports presets and custom from/to (YYYY-MM-DD). */
+function resolveRange(range: string, from: string | null, to: string | null) {
+  const now = new Date()
+  const startDate = new Date()
+  let endDate = now
+  if (range === 'custom') {
+    const re = /^\d{4}-\d{2}-\d{2}$/
+    if (from && to && re.test(from) && re.test(to)) {
+      const s = new Date(`${from}T00:00:00`)
+      const e = new Date(`${to}T23:59:59.999`)
+      if (!isNaN(s.getTime()) && !isNaN(e.getTime()) && s <= e) {
+        return { startDate: s, endDate: e, isCustom: true }
+      }
+    }
+    // invalid / missing custom dates -> fall back to last 30 days
+    startDate.setDate(now.getDate() - 30)
+    return { startDate, endDate, isCustom: false }
+  }
+  if (range === 'today') startDate.setHours(0, 0, 0, 0)
+  else if (range === 'last7') startDate.setDate(now.getDate() - 7)
+  else if (range === 'last30') startDate.setDate(now.getDate() - 30)
+  else if (range === 'last90') startDate.setDate(now.getDate() - 90)
+  else if (range === 'thisyear') startDate.setMonth(0, 1)
+  return { startDate, endDate, isCustom: false }
+}
+
 /**
  * GET /api/admin/reports/profit
  *
  * Query params:
- *  - range: today | last7 | last30 | last90 | thisyear (default last30)
+ *  - range: today | last7 | last30 | last90 | thisyear | custom (default last30)
+ *  - from / to: YYYY-MM-DD, used when range=custom (inclusive)
  *  - channel: all | website | pos (default all)
  *  - category: product_category id (optional)
  *  - productId: medusa product id (optional)
@@ -24,6 +51,8 @@ type Channel = 'website' | 'pos'
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const range = searchParams.get('range') ?? 'last30'
+  const fromParam = searchParams.get('from')
+  const toParam = searchParams.get('to')
   const channelFilter = (searchParams.get('channel') ?? 'all') as
     'all' | Channel
   const categoryFilter = searchParams.get('category') ?? ''
@@ -38,13 +67,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const now = new Date()
-    const startDate = new Date()
-    if (range === 'today') startDate.setHours(0, 0, 0, 0)
-    else if (range === 'last7') startDate.setDate(now.getDate() - 7)
-    else if (range === 'last30') startDate.setDate(now.getDate() - 30)
-    else if (range === 'last90') startDate.setDate(now.getDate() - 90)
-    else if (range === 'thisyear') startDate.setMonth(0, 1)
+    const { startDate, endDate } = resolveRange(range, fromParam, toParam)
 
     // 1. Orders (paid only) in range, with line items.
     const ordersRes = await fetch(
@@ -60,7 +83,7 @@ export async function GET(req: NextRequest) {
     }
     const orders = (ordersData.orders ?? []).filter((o: any) => {
       const d = new Date(o.created_at)
-      return d >= startDate && d <= now
+      return d >= startDate && d <= endDate
     })
 
     // 2. Products (all) with cost_price + category, paginated.
@@ -279,6 +302,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       range,
+      from: range === 'custom' ? fromParam : undefined,
+      to: range === 'custom' ? toParam : undefined,
       summary: {
         revenue: round(totals.revenue),
         cost: round(totals.cost),

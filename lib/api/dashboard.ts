@@ -944,9 +944,15 @@ export async function getCategories(params?: {
     count: data.count ?? 0,
   }
 }
-export async function getAnalytics(range: string = 'last30') {
+export async function getAnalytics(
+  range: string = 'last30',
+  from?: string,
+  to?: string,
+) {
   const data = await api<any>('/api/admin/analytics', {
     range,
+    from,
+    to,
   })
   return data
 }
@@ -990,12 +996,16 @@ export interface ProfitReport {
 }
 export async function getProfitReport(params?: {
   range?: string
+  from?: string
+  to?: string
   channel?: 'all' | 'website' | 'pos'
   category?: string
   productId?: string
 }): Promise<ProfitReport> {
   return api<ProfitReport>('/api/admin/reports/profit', {
     range: params?.range ?? 'last30',
+    from: params?.from,
+    to: params?.to,
     channel: params?.channel ?? 'all',
     category: params?.category,
     productId: params?.productId,
