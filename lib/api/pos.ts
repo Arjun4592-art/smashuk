@@ -49,7 +49,16 @@ export interface POSCustomer {
 }
 export interface CreatePOSOrderPayload {
   items: {
-    variant_id: string
+    /** Required for catalogue items; omitted for custom sales. */
+    variant_id?: string
+    /** Set for a custom sale (an item not registered in the catalogue). */
+    custom?: {
+      title: string
+      /** VAT-inclusive unit price in pounds. */
+      unit_price: number
+      /** Unique per custom line so identical lines are never merged. */
+      ref: string
+    }
     quantity: number
     product_id?: string
     /** Manual discount on this line, in pounds off the whole line (all units).

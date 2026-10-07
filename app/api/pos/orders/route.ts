@@ -28,7 +28,7 @@ function toPosOrderRecord(o: any) {
     product: {
       id: i.variant_id ?? i.id,
       lineItemId: i.id as string,
-      name: i.product_title ?? i.title ?? 'Item',
+      name: i.metadata?.custom_title ?? i.product_title ?? i.title ?? 'Item',
       brand: i.metadata?.brand ?? '',
       price: i.unit_price ?? 0,
       variantTitle:
@@ -443,6 +443,41 @@ export async function POST(request: NextRequest) {
     }
     const cartId = cartData.cart.id
     for (const item of items) {
+      // Custom sale (item not in the catalogue): the store cart can't take a
+      // custom title/price, so it goes through the backend route instead.
+      if (item.custom) {
+        const customRes = await medusaServiceFetch('/admin/pos/custom-items', {
+          method: 'POST',
+          body: JSON.stringify({
+            cart_id: cartId,
+            title: item.custom.title,
+            unit_price: item.custom.unit_price,
+            quantity: item.quantity,
+            ref: item.custom.ref,
+          }),
+        })
+        const customData = await safeJson(customRes, 'add custom item')
+        if (!customRes.ok) {
+          console.error(
+            '[POS orders] add custom item failed:',
+            customRes.status,
+            customData,
+          )
+          return NextResponse.json(
+            {
+              error: stepError(
+                `add custom item "${item.custom.title}"`,
+                customRes.status,
+                customData,
+              ),
+            },
+            {
+              status: customRes.status,
+            },
+          )
+        }
+        continue
+      }
       let lineRes = await storeFetch(`/store/carts/${cartId}/line-items`, {
         method: 'POST',
         body: JSON.stringify({
@@ -553,8 +588,6 @@ export async function POST(request: NextRequest) {
             allocation: 'across',
             value: amount,
             currency_code: 'gbp',
-            // Store prices are VAT-inclusive, so the discount amount is too.
-            is_tax_inclusive: true,
             target_rules: [
               {
                 attribute: 'items.product.id',
@@ -607,7 +640,6 @@ export async function POST(request: NextRequest) {
             allocation: 'across',
             value: Number(manual_discount_amount),
             currency_code: 'gbp',
-            is_tax_inclusive: true,
           },
           campaign: {
             name: tempCode,
