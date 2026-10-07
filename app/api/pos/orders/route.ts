@@ -11,10 +11,7 @@ import { notifyOwner, posOrderNotifyRecipient } from '@/lib/email'
 import { adminNewOrderEmail } from '@/lib/email-templates'
 import { sendOrderConfirmationEmail } from '@/lib/api/order-notifications'
 import { signOrderTrackToken } from '@/lib/api/order-track-token'
-// Synthetic emails we generate ourselves for walk-in / no-email customers —
-// never send a "confirmation" to these, they're not real inboxes.
-const isSyntheticEmail = (email?: string) =>
-  !email || /^(walkin@|pos-)/i.test(email)
+import { WALKIN_EMAIL, isSyntheticEmail } from '@/lib/pos/walkin'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL || 'http://localhost:9000'
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
@@ -409,7 +406,7 @@ export async function POST(request: NextRequest) {
       }
     }
     if (!cartEmail) {
-      cartEmail = (customer_email || 'walkin@smashuk.co.uk').toLowerCase()
+      cartEmail = (customer_email || WALKIN_EMAIL).toLowerCase()
     }
     // Tag the cart with the Store sales channel so "In-store only" / "Online
     // only" discounts apply correctly. Falls back to an untagged cart if the
@@ -702,7 +699,7 @@ export async function POST(request: NextRequest) {
       // address itself (separate from the cart/order email). The POS UI
       // never collects one, so fall back to the cart email we already
       // resolved above (real customer email, or the synthetic
-      // walkin@/pos- address) rather than leaving it blank and failing
+      // WALKIN_EMAIL / pos- address) rather than leaving it blank and failing
       // fulfillment creation later with "Please enter the email address".
       const addrRes = await storeFetch(`/store/carts/${cartId}`, {
         method: 'POST',

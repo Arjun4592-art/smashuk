@@ -17,8 +17,7 @@ import {
   adminShippingEmail,
 } from '@/lib/email-templates'
 import { signOrderTrackToken } from '@/lib/api/order-track-token'
-const isSyntheticEmail = (email?: string) =>
-  !email || /^(walkin@|pos-)/i.test(email)
+import { isSyntheticEmail } from '@/lib/pos/walkin'
 async function requirePosSession(): Promise<boolean> {
   const cookieStore = await cookies()
   const posToken = cookieStore.get(SURFACE_COOKIES.pos.tokenCookie)?.value
