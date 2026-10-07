@@ -37,6 +37,7 @@ import GiftCardModal from '@/components/pos/GiftCardModal'
 import CameraBarcodeScanner from '@/components/pos/CameraBarcodeScanner'
 import NoteModal from '@/components/pos/NoteModal'
 import FulfillmentModal from '@/components/pos/FulfillmentModal'
+import CustomItemModal from '@/components/pos/CustomItemModal'
 import VoidModal from '@/components/pos/VoidModal'
 import SavedCarts from '@/components/pos/SavedCarts'
 import ReturnModal from '@/components/pos/ReturnModal'
@@ -108,6 +109,7 @@ export default function BillingPage() {
   const [showGiftCard, setShowGiftCard] = useState(false)
   const [showCameraScan, setShowCameraScan] = useState(false)
   const [showNote, setShowNote] = useState(false)
+  const [showCustomItem, setShowCustomItem] = useState(false)
   const [showFulfillment, setShowFulfillment] = useState(false)
   const [showVoid, setShowVoid] = useState(false)
   const [showSavedCarts, setShowSavedCarts] = useState(false)
@@ -679,6 +681,39 @@ export default function BillingPage() {
     setPendingCharge(false)
     setShowFulfillment(true)
   }
+  // Custom sale: an item that isn't registered in the catalogue. It lives in
+  // the cart as a normal line with a one-off id (so two custom lines never
+  // merge) and no Medusa variant; the order route creates it server-side.
+  const handleAddCustomItem = (c: {
+    name: string
+    price: number
+    quantity: number
+  }) => {
+    const ref = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const product = {
+      id: ref,
+      name: c.name,
+      slug: 'custom-item',
+      description: '',
+      brand: 'Custom',
+      sport: '',
+      category: 'Custom',
+      categoryId: '',
+      price: c.price,
+      images: [],
+      stock: 9999,
+      sku: 'CUSTOM',
+      rating: 0,
+      reviewCount: 0,
+      inStock: true,
+      tags: [],
+      specs: [],
+      isCustom: true,
+      customRef: ref,
+    } as unknown as Parameters<typeof addItem>[0]
+    addItem(product, c.quantity)
+    toast.success(`Added "${c.name}"`)
+  }
   const handleConfirmPayment = async (result: PaymentResult) => {
     if (fulfillmentType === 'ship' && !shippingAddress?.address_1) {
       toast.error('Add the shipping address before charging this sale', {
@@ -701,6 +736,26 @@ export default function BillingPage() {
           throw new Error('No default region configured in Medusa')
         }
         const orderItems = items.map((i) => {
+          if ((i.product as any).isCustom) {
+            // The line discount is for the whole line; fold it into the unit
+            // price because custom items have no product to attach a
+            // promotion to.
+            const lineDiscount =
+              i.discount && i.discount > 0 ? i.discount : 0
+            const unitPrice = Math.max(
+              0,
+              Math.round((i.product.price - lineDiscount / i.quantity) * 100) /
+                100,
+            )
+            return {
+              custom: {
+                title: i.product.name,
+                unit_price: unitPrice,
+                ref: (i.product as any).customRef ?? i.product.id,
+              },
+              quantity: i.quantity,
+            }
+          }
           const variantId = (i.product as any).variantId ?? i.variant?.id
           if (!variantId) {
             throw new Error(
@@ -1084,6 +1139,7 @@ export default function BillingPage() {
           onChange={setSearch}
           onSubmit={handleScanSubmit}
           onOpenCamera={() => setShowCameraScan(true)}
+          onCustomItem={() => setShowCustomItem(true)}
         />
         <CategoryFilter
           categories={CATEGORIES}
@@ -1297,7 +1353,7 @@ export default function BillingPage() {
         }}
       >
         <div
-          className='flex items-center gap-1.5 px-3 py-2 shrink-0 overflow-x-auto'
+          className='flex flex-wrap items-center gap-1.5 px-3 py-2 shrink-0'
           style={{
             background: '#FFFFFF',
             borderBottom: '1px solid #E1E3E5',
@@ -1391,6 +1447,31 @@ export default function BillingPage() {
               <path d='M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7' />
               <path d='M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z' />
             </svg>
+          </button>
+
+          <button
+            onClick={() => setShowCustomItem(true)}
+            className='flex items-center gap-1 px-2 py-1.5 rounded text-xs border transition-all shrink-0'
+            title='Sell an item that is not registered'
+            style={{
+              borderColor: '#E1E3E5',
+              color: '#6D7175',
+              background: '#FFFFFF',
+            }}
+          >
+            <svg
+              width='13'
+              height='13'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1.5'
+              strokeLinecap='round'
+            >
+              <line x1='12' y1='5' x2='12' y2='19' />
+              <line x1='5' y1='12' x2='19' y2='12' />
+            </svg>
+            <span className='whitespace-nowrap'>Custom</span>
           </button>
 
           <button
@@ -1612,6 +1693,12 @@ export default function BillingPage() {
         />
       )}
       {showNote && <NoteModal onClose={() => setShowNote(false)} />}
+      {showCustomItem && (
+        <CustomItemModal
+          onClose={() => setShowCustomItem(false)}
+          onAdd={handleAddCustomItem}
+        />
+      )}
       {showFulfillment && (
         <FulfillmentModal
           onClose={() => setShowFulfillment(false)}

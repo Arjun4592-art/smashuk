@@ -44,16 +44,18 @@ export default function CustomItemModal({ onClose, onAdd }: Props) {
 
   return (
     <div
-      className='fixed inset-0 flex items-center justify-center z-50 p-4'
+      className='fixed inset-0 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4'
       style={{ background: 'rgba(0,0,0,0.4)' }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
-        className='w-full max-w-sm rounded-xl overflow-hidden'
+        className='w-full sm:max-w-sm rounded-t-2xl sm:rounded-xl overflow-y-auto'
         style={{
           background: '#FFFFFF',
           border: '1px solid #E1E3E5',
           boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+          maxHeight: '92dvh',
+          paddingBottom: 'env(safe-area-inset-bottom)',
         }}
       >
         <div
@@ -75,8 +77,8 @@ export default function CustomItemModal({ onClose, onAdd }: Props) {
 
         <div className='px-5 py-4 flex flex-col gap-3'>
           <p className='text-xs' style={{ color: '#6D7175' }}>
-            For items that are not registered in the system. Enter the price
-            the customer pays (VAT included).
+            For items that are not registered in the system. Enter the price the
+            customer pays (VAT included).
           </p>
 
           <label className='flex flex-col gap-1 text-xs font-medium'>
@@ -87,7 +89,7 @@ export default function CustomItemModal({ onClose, onAdd }: Props) {
               onChange={(e) => setName(e.target.value)}
               maxLength={120}
               placeholder='e.g. Racket repair'
-              className='rounded-lg px-3 py-2 text-sm outline-none'
+              className='rounded-lg px-3 py-2.5 text-base sm:text-sm outline-none'
               style={inputStyle}
             />
           </label>
@@ -100,17 +102,17 @@ export default function CustomItemModal({ onClose, onAdd }: Props) {
                 onChange={(e) => setPrice(e.target.value)}
                 inputMode='decimal'
                 placeholder='0.00'
-                className='rounded-lg px-3 py-2 text-sm outline-none'
+                className='rounded-lg px-3 py-2.5 text-base sm:text-sm outline-none'
                 style={inputStyle}
               />
             </label>
-            <label className='flex w-24 flex-col gap-1 text-xs font-medium'>
+            <label className='flex w-20 sm:w-24 flex-col gap-1 text-xs font-medium'>
               <span style={{ color: '#202223' }}>Qty</span>
               <input
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 inputMode='numeric'
-                className='rounded-lg px-3 py-2 text-sm outline-none'
+                className='rounded-lg px-3 py-2.5 text-base sm:text-sm outline-none'
                 style={inputStyle}
                 onKeyDown={(e) => e.key === 'Enter' && submit()}
               />
@@ -124,7 +126,7 @@ export default function CustomItemModal({ onClose, onAdd }: Props) {
         >
           <button
             onClick={onClose}
-            className='flex-1 rounded-lg py-2 text-sm font-medium'
+            className='flex-1 rounded-lg py-2.5 text-sm font-medium'
             style={{ border: '1px solid #E1E3E5', color: '#6D7175' }}
           >
             Cancel
@@ -132,7 +134,7 @@ export default function CustomItemModal({ onClose, onAdd }: Props) {
           <button
             onClick={submit}
             disabled={!valid}
-            className='flex-1 rounded-lg py-2 text-sm font-semibold text-white disabled:opacity-40'
+            className='flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-40'
             style={{ background: '#008060' }}
           >
             Add to sale
