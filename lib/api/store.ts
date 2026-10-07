@@ -242,7 +242,19 @@ function buildProductUrl(
     : '/api/store/products'
   const sp = new URLSearchParams()
   Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== '') sp.set(k, v)
+    if (v === undefined || v === '') return
+    // Medusa's /store/products expects repeated `id[]` params. A comma-joined
+    // `id=a,b` is treated as ONE id and matches nothing, which silently broke
+    // server-side lookups (e.g. the cross-sell panel). The /api/store/products
+    // proxy already splits on commas, so only the direct-to-Medusa (server)
+    // path needs this.
+    if (k === 'id' && isServer) {
+      v.split(',')
+        .filter(Boolean)
+        .forEach((id) => sp.append('id[]', id))
+      return
+    }
+    sp.set(k, v)
   })
   if (isServer) {
     sp.set(
