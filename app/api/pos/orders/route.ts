@@ -553,6 +553,8 @@ export async function POST(request: NextRequest) {
             allocation: 'across',
             value: amount,
             currency_code: 'gbp',
+            // Store prices are VAT-inclusive, so the discount amount is too.
+            is_tax_inclusive: true,
             target_rules: [
               {
                 attribute: 'items.product.id',
@@ -605,6 +607,7 @@ export async function POST(request: NextRequest) {
             allocation: 'across',
             value: Number(manual_discount_amount),
             currency_code: 'gbp',
+            is_tax_inclusive: true,
           },
           campaign: {
             name: tempCode,

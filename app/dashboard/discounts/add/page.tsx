@@ -414,6 +414,9 @@ function buildPromotionPayload(
           : Number(form.value || 0),
     currency_code: 'gbp',
   }
+  // Store prices are VAT-inclusive; a fixed £ discount must be too, otherwise
+  // Medusa adds VAT on top (e.g. £27 -> £32.40).
+  if (form.type === 'fixed') applicationMethod.is_tax_inclusive = true
   const rules: any[] = []
   if (form.minOrderAmount)
     rules.push({
