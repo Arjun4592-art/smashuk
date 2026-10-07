@@ -289,7 +289,7 @@ export default function OrderDetailPage({
   const handleProcessReturn = async (
     items: { item_id: string; quantity: number }[],
     reason: string,
-    shippingOption: 'label' | 'no_shipping',
+    shippingOption: 'label' | 'email_label' | 'no_shipping',
     trackingNumber?: string,
     shippingCarrier?: string,
     refundAmount?: number,
@@ -301,8 +301,24 @@ export default function OrderDetailPage({
     ]
       .filter(Boolean)
       .join(' · ')
-    await processOrderReturn(id, items, reason, note || undefined, refundAmount)
+    const result = await processOrderReturn(
+      id,
+      items,
+      reason,
+      note || undefined,
+      refundAmount,
+      shippingOption === 'email_label',
+    )
     toast.success('Return processed and refund issued')
+    if (shippingOption === 'email_label') {
+      if (result?.return_label?.emailed) {
+        toast.success('Return label emailed to the customer')
+      } else {
+        toast.warning(
+          `Return processed, but the label email did not go out: ${result?.return_label?.error ?? 'unknown error'}`,
+        )
+      }
+    }
     setShowReturnModal(false)
     await fetchOrder(true)
   }

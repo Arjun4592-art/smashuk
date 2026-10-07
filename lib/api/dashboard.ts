@@ -265,6 +265,7 @@ export async function processOrderReturn(
   reason: string,
   note?: string,
   refundAmount?: number,
+  emailLabel?: boolean,
 ) {
   return mutate(`/api/admin/orders/${id}`, 'PATCH', {
     action: 'return',
@@ -272,6 +273,7 @@ export async function processOrderReturn(
     reason,
     note,
     refund_amount: refundAmount,
+    email_label: emailLabel || undefined,
   })
 }
 export async function approveOrderReturn(id: string, returnId: string) {

@@ -15,6 +15,7 @@ import {
   updateReturnRecord,
 } from '@/lib/api/medusa-returns'
 import { randomUUID } from 'crypto'
+import { isSyntheticEmail } from '@/lib/pos/walkin'
 import { sendMail, notifyOwner } from '@/lib/email'
 import {
   shippingConfirmationEmail,
@@ -29,6 +30,7 @@ import {
   adminRefundEmail,
   readyForPickupEmail,
   returnDeclinedEmail,
+  returnLabelEmail,
 } from '@/lib/email-templates'
 import { signOrderTrackToken } from '@/lib/api/order-track-token'
 export async function GET(
@@ -637,6 +639,7 @@ export async function PATCH(
           reason,
           note,
           refund_amount: refundAmountOverride,
+          email_label: emailLabel,
         } = body as {
           items?: {
             item_id: string
@@ -645,6 +648,7 @@ export async function PATCH(
           reason?: string
           note?: string
           refund_amount?: number
+          email_label?: boolean
         }
         try {
           const order = await getOrderForReturn(id, fetcher)
@@ -671,6 +675,53 @@ export async function PATCH(
             }
             refund_amount = refundAmountOverride
           }
+          // "Email return label to customer": book the Parcel2Go label FIRST
+          // so a booking problem (no address, low Prepay balance...) stops
+          // the return before anything is refunded.
+          let returnLabel: {
+            trackingNumber?: string
+            carrierName?: string
+            parcel2goOrderId?: string
+            base64?: string
+          } | null = null
+          if (emailLabel) {
+            if (!order.email || isSyntheticEmail(order.email)) {
+              return NextResponse.json(
+                {
+                  error:
+                    "This order has no customer email, so the return label can't be emailed.",
+                },
+                { status: 400 },
+              )
+            }
+            const labelRes = await fetcher(`/admin/orders/${id}/return-label`, {
+              method: 'POST',
+              body: JSON.stringify({
+                items: builtItems.map((i) => ({
+                  item_id: i.item_id,
+                  quantity: i.quantity,
+                })),
+              }),
+            })
+            const labelData = await labelRes.json().catch(() => ({}))
+            if (!labelRes.ok) {
+              return NextResponse.json(
+                {
+                  error:
+                    labelData?.error ??
+                    labelData?.message ??
+                    'Could not book the return label.',
+                },
+                { status: 400 },
+              )
+            }
+            returnLabel = {
+              trackingNumber: labelData.tracking_number ?? undefined,
+              carrierName: labelData.carrier_name ?? labelData.service_name,
+              parcel2goOrderId: labelData.parcel2go_order_id,
+              base64: labelData.label_base64 ?? undefined,
+            }
+          }
           await refundOrderAmount(order, refund_amount, fetcher)
           data = await appendReturnRecord(
             id,
@@ -679,7 +730,24 @@ export async function PATCH(
               id: randomUUID(),
               items: builtItems,
               reason: reason || 'Other',
-              note,
+              note:
+                [
+                  note,
+                  returnLabel
+                    ? `Return label emailed to customer${returnLabel.trackingNumber ? ` · Tracking: ${returnLabel.trackingNumber}` : ''}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ') || undefined,
+              ...(returnLabel
+                ? {
+                    label: {
+                      tracking_number: returnLabel.trackingNumber,
+                      carrier: returnLabel.carrierName,
+                      parcel2go_order_id: returnLabel.parcel2goOrderId,
+                    },
+                  }
+                : {}),
               refund_amount,
               status: 'refunded',
               source: 'dashboard',
@@ -690,6 +758,45 @@ export async function PATCH(
             {},
             actor,
           )
+          if (returnLabel) {
+            let emailed = false
+            let labelError: string | undefined
+            if (returnLabel.base64) {
+              const mail = returnLabelEmail(order, {
+                carrierName: returnLabel.carrierName,
+                trackingNumber: returnLabel.trackingNumber,
+              })
+              const sent = await sendMail({
+                to: order.email,
+                subject: mail.subject,
+                html: mail.html,
+                text: mail.text,
+                attachments: [
+                  {
+                    filename: `return-label-${order.display_id ?? id}.pdf`,
+                    content: returnLabel.base64,
+                    contentType: 'application/pdf',
+                  },
+                ],
+              })
+              emailed = sent.sent
+              if (!sent.sent) {
+                labelError = sent.error ?? 'The email could not be sent'
+              }
+            } else {
+              labelError =
+                'The label PDF was not ready yet — download it from Parcel2Go'
+            }
+            data = {
+              ...data,
+              return_label: {
+                emailed,
+                tracking_number: returnLabel.trackingNumber,
+                parcel2go_order_id: returnLabel.parcel2goOrderId,
+                error: labelError,
+              },
+            }
+          }
           if (order.email) {
             try {
               const { subject, html, text, resendTemplate } =

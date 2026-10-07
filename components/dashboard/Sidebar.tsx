@@ -796,7 +796,10 @@ function UserSection({ collapsed }: { collapsed: boolean }) {
               </span>
             </div>
             <button
-              onClick={() => logout('dashboard')}
+              onClick={async () => {
+                await logout('dashboard')
+                window.location.assign('/dashboard/login')
+              }}
               className='text-[10.5px] text-[#6D7175] hover:text-[#D82C0D] bg-transparent border-none cursor-pointer transition-colors'
               title='Sign out'
             >

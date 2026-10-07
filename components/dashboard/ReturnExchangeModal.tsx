@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { isSyntheticEmail } from '@/lib/pos/walkin'
 import {
   Btn,
   IconBack,
@@ -47,7 +48,7 @@ interface Props {
   onSubmit: (
     items: { item_id: string; quantity: number }[],
     reason: string,
-    shippingOption: 'label' | 'no_shipping',
+    shippingOption: 'label' | 'email_label' | 'no_shipping',
     trackingNumber?: string,
     shippingCarrier?: string,
     refundAmount?: number,
@@ -80,9 +81,16 @@ export default function ReturnExchangeModal({
 }: Props) {
   const [qtys, setQtys] = useState<Record<string, number>>({})
   const [reason, setReason] = useState('')
-  const [shippingOption, setShippingOption] = useState<'label' | 'no_shipping'>(
-    'label',
-  )
+  const [shippingOption, setShippingOption] = useState<
+    'label' | 'email_label' | 'no_shipping'
+  >('label')
+  // Emailing a prepaid label needs a real customer email and a delivery
+  // address to collect from (i.e. a shipped order, not an in-store sale).
+  const customerEmail: string | undefined = order?.email
+  const canEmailLabel =
+    Boolean(customerEmail) &&
+    !isSyntheticEmail(customerEmail) &&
+    Boolean(order?.shipping_address?.postal_code)
   const [trackingNumber, setTrackingNumber] = useState('')
   const [shippingCarrier, setShippingCarrier] = useState('')
   const [useCustomAmount, setUseCustomAmount] = useState(false)
@@ -363,6 +371,23 @@ export default function ReturnExchangeModal({
                     </div>
                   )}
                 </div>
+
+                {canEmailLabel && (
+                  <button
+                    type='button'
+                    onClick={() => setShippingOption('email_label')}
+                    className='flex items-start gap-3 text-left text-[16px] text-[#202223] cursor-pointer'
+                  >
+                    <Radio on={shippingOption === 'email_label'} />
+                    <span>
+                      Email prepaid return label to customer
+                      <span className='block text-[13px] text-[#6D7175] mt-0.5'>
+                        Books a Parcel2Go label (charged to your Prepay balance)
+                        and emails the PDF to {customerEmail}.
+                      </span>
+                    </span>
+                  </button>
+                )}
 
                 <button
                   type='button'

@@ -82,6 +82,43 @@ export async function PATCH(
       // Medusa merges metadata; an empty string removes the key.
       updatePayload.metadata.role = dashboardAccess ? 'admin' : ''
     }
+    // Optional: set / reset the dashboard password for this existing user.
+    const newPassword: string =
+      typeof body.password === 'string' ? body.password : ''
+    if (newPassword) {
+      if (dashboardAccess !== true) {
+        return NextResponse.json(
+          { error: 'Turn on Dashboard access to set a password.' },
+          { status: 400 },
+        )
+      }
+      if (newPassword.length < 8) {
+        return NextResponse.json(
+          { error: 'Dashboard password must be at least 8 characters.' },
+          { status: 400 },
+        )
+      }
+      const pwRes = await fetch(`${MEDUSA_URL}/admin/staff/${id}/password`, {
+        method: 'POST',
+        headers: {
+          Authorization: authorization,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password: newPassword }),
+      })
+      if (!pwRes.ok) {
+        const pwData = await pwRes.json().catch(() => ({}))
+        return NextResponse.json(
+          {
+            error:
+              pwData.error ??
+              pwData.message ??
+              'Could not set the dashboard password.',
+          },
+          { status: pwRes.status === 404 ? 404 : 400 },
+        )
+      }
+    }
     if (typeof pin === 'string' && pin.length > 0) {
       updatePayload.metadata.pin = await hashPin(pin)
     }

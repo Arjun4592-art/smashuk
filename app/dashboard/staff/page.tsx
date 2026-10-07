@@ -344,11 +344,24 @@ export default function StaffPage() {
     setShowPinValue(false)
     setShowModal(true)
   }
+  const editingStaff = editingId
+    ? staffList.find((s) => s.id === editingId)
+    : undefined
+  // A password is mandatory for a new dashboard user, or when turning
+  // dashboard access ON for someone who didn't have it (their current
+  // password is a random one nobody knows). Optional when they already
+  // have access - leave blank to keep the current password.
+  const passwordRequired =
+    form.dashboardAccess && (!editingId || !editingStaff?.dashboardAccess)
+  const passwordInvalid =
+    form.dashboardAccess &&
+    (passwordRequired || form.password.length > 0) &&
+    form.password.length < 8
   const handleSave = async () => {
     if (!form.name) return
     if (!editingId && form.pin.length !== 6) return
     if (form.pin && form.pin.length !== 6) return
-    if (!editingId && form.dashboardAccess && form.password.length < 8) {
+    if (passwordInvalid) {
       setSaveError('Dashboard password must be at least 8 characters')
       return
     }
@@ -364,7 +377,8 @@ export default function StaffPage() {
           headers: authHeaders(),
           body: JSON.stringify({
             ...form,
-            password: undefined,
+            password:
+              form.dashboardAccess && form.password ? form.password : undefined,
           }),
         })
         if (!res.ok)
@@ -1057,13 +1071,13 @@ export default function StaffPage() {
 
       {}
       {showModal && (
-        <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
+        <div className='fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4'>
           <div
             className='absolute inset-0 bg-black/40 backdrop-blur-sm'
             onClick={() => setShowModal(false)}
           />
-          <div className='relative bg-white rounded-2xl shadow-2xl w-full max-w-125 overflow-hidden'>
-            <div className='flex items-center justify-between px-6 py-4 border-b border-[#E1E3E5]'>
+          <div className='relative bg-white rounded-2xl shadow-2xl w-full max-w-125 max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden'>
+            <div className='flex items-center justify-between px-6 py-4 border-b border-[#E1E3E5] shrink-0'>
               <h2 className='font-sora text-[16px] font-semibold text-[#202223]'>
                 {editingId ? 'Edit Staff Member' : 'Add Staff Member'}
               </h2>
@@ -1074,7 +1088,7 @@ export default function StaffPage() {
                 ✕
               </button>
             </div>
-            <div className='px-6 py-5 space-y-4'>
+            <div className='px-6 py-5 space-y-4 flex-1 min-h-0 overflow-y-auto overscroll-contain'>
               {saveError && (
                 <div className='px-3 py-2.5 bg-[#FFF4F4] border border-[#D82C0D]/20 rounded-lg text-[12.5px] text-[#D82C0D]'>
                   {saveError}
@@ -1289,11 +1303,15 @@ export default function StaffPage() {
                     />
                   </button>
                 </div>
-                {form.dashboardAccess && !editingId && (
+                {form.dashboardAccess && (
                   <div>
                     <label className='block text-[12.5px] font-medium text-[#202223] mb-1.5'>
-                      Dashboard password{' '}
-                      <span className='text-[#D82C0D]'>*</span>
+                      {editingId && !passwordRequired
+                        ? 'New dashboard password'
+                        : 'Dashboard password'}{' '}
+                      {passwordRequired && (
+                        <span className='text-[#D82C0D]'>*</span>
+                      )}
                     </label>
                     <div className='relative'>
                       <input
@@ -1308,7 +1326,11 @@ export default function StaffPage() {
                             password: e.target.value,
                           }))
                         }
-                        placeholder='At least 8 characters'
+                        placeholder={
+                          editingId && !passwordRequired
+                            ? 'Leave blank to keep current password'
+                            : 'At least 8 characters'
+                        }
                         className='w-full px-3.5 py-2.5 pr-16 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] placeholder-[#8C9196] outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15 transition-all'
                       />
                       <button
@@ -1325,12 +1347,6 @@ export default function StaffPage() {
                       /dashboard/login with their email.
                     </p>
                   </div>
-                )}
-                {form.dashboardAccess && editingId && (
-                  <p className='text-[11.5px] text-[#6D7175]'>
-                    This changes access only. Their dashboard password is not
-                    changed here.
-                  </p>
                 )}
               </div>
               <div className='flex items-center justify-between p-3 border border-[#E1E3E5] rounded-lg'>
@@ -1357,7 +1373,7 @@ export default function StaffPage() {
                 </button>
               </div>
             </div>
-            <div className='flex items-center justify-end gap-2 px-6 py-4 border-t border-[#E1E3E5] bg-[#F6F6F7]/50'>
+            <div className='flex items-center justify-end gap-2 px-6 py-4 border-t border-[#E1E3E5] bg-[#F6F6F7] shrink-0'>
               <button
                 onClick={() => setShowModal(false)}
                 className='px-4 py-2 border border-[#E1E3E5] bg-white hover:bg-[#F6F6F7] text-[13px] font-medium text-[#202223] rounded-lg cursor-pointer'
@@ -1371,9 +1387,7 @@ export default function StaffPage() {
                   !form.name ||
                   (!editingId && form.pin.length !== 6) ||
                   (form.pin.length > 0 && form.pin.length !== 6) ||
-                  (!editingId &&
-                    form.dashboardAccess &&
-                    form.password.length < 8)
+                  passwordInvalid
                 }
                 className='px-4 py-2 bg-[#008060] hover:bg-[#006e52] text-white text-[13px] font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer border-none flex items-center gap-2'
               >

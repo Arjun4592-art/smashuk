@@ -36,7 +36,8 @@ function statusBadge(
     | 'dispute'
     | 'ready_for_pickup'
     | 'return_requested'
-    | 'return_declined',
+    | 'return_declined'
+    | 'return_label',
 ) {
   const map = {
     confirmed: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'ORDER CONFIRMED' },
@@ -67,6 +68,7 @@ function statusBadge(
       label: 'RETURN REQUESTED',
     },
     return_declined: { bg: '#FDF0ED', fg: CORAL, label: 'RETURN DECLINED' },
+    return_label: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'RETURN LABEL' },
   }[kind]
   return pillBadge(map.label, map.bg, map.fg)
 }
@@ -481,7 +483,10 @@ export function welcomeEmail(customer: {
   const text = `Welcome to ${SITE_NAME}, ${firstName}. Your account (${customer.email}) has been created. Visit ${SITE_URL}/shop to start shopping.`
   const resendTemplate = {
     name: 'welcome',
-    variables: { CUSTOMER_FIRST_NAME: firstName, CUSTOMER_EMAIL: customer.email },
+    variables: {
+      CUSTOMER_FIRST_NAME: firstName,
+      CUSTOMER_EMAIL: customer.email,
+    },
   }
   return { subject, html, text, resendTemplate }
 }
@@ -567,7 +572,8 @@ function infoRow(label: string, value: string) {
 // split into the two separate name fields the Resend templates use.
 function adminCustomerVars(order: any) {
   return {
-    CUSTOMER_FIRST_NAME: order.customer?.first_name || (order.customer ? '' : 'Guest'),
+    CUSTOMER_FIRST_NAME:
+      order.customer?.first_name || (order.customer ? '' : 'Guest'),
     CUSTOMER_LAST_NAME: order.customer?.last_name || '',
     CUSTOMER_EMAIL: order.email ?? 'no email',
   }
@@ -1068,7 +1074,9 @@ export function readyForPickupEmail(order: any) {
 
 // ─── Returns ─────────────────────────────────────────────────────────────
 
-export function returnItemsTable(items: { title?: string; quantity: number }[]) {
+export function returnItemsTable(
+  items: { title?: string; quantity: number }[],
+) {
   const rows = (items ?? [])
     .map(
       (i) => `
@@ -1089,7 +1097,10 @@ export function returnItemsTable(items: { title?: string; quantity: number }[]) 
 // order-tracking page — confirms it was received, before staff act on it.
 export function returnRequestedEmail(
   order: any,
-  returnRecord: { items?: { title?: string; quantity: number }[]; reason?: string },
+  returnRecord: {
+    items?: { title?: string; quantity: number }[]
+    reason?: string
+  },
 ) {
   const orderNumber = orderNumberOf(order)
   const subject = `We've received your return request for ${orderNumber} — ${SITE_NAME}`
@@ -1119,7 +1130,11 @@ export function returnRequestedEmail(
 // request, so it doesn't sit unnoticed in the dashboard.
 export function adminReturnRequestEmail(
   order: any,
-  returnRecord: { items?: { title?: string; quantity: number }[]; reason?: string; note?: string },
+  returnRecord: {
+    items?: { title?: string; quantity: number }[]
+    reason?: string
+    note?: string
+  },
 ) {
   const orderNumber = orderNumberOf(order)
   const customerName =
@@ -1183,4 +1198,36 @@ export function returnDeclinedEmail(
     },
   }
   return { subject, html, text, resendTemplate }
+}
+
+// Sent when staff process a return with "Email return label to customer".
+// The label itself travels as a PDF attachment. (No Resend template is wired
+// to this one on purpose: the dashboard template expects a hosted download
+// link, which Parcel2Go doesn't provide — the PDF is attached instead.)
+export function returnLabelEmail(
+  order: any,
+  opts: { carrierName?: string; trackingNumber?: string },
+) {
+  const orderNumber = orderNumberOf(order)
+  const carrier = opts.carrierName || 'the courier'
+  const subject = `Your return label for order ${orderNumber} — ${SITE_NAME}`
+  const html = renderShell(
+    statusBadge('return_label'),
+    'Your prepaid return label is attached',
+    `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Your prepaid return label for order <strong style="color:${TEXT};">${orderNumber}</strong> is attached to this email as a PDF.
+      </p>
+      <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
+        <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">How to use it</p>
+        <p style="margin:0;font-size:14px;line-height:1.6;color:${TEXT};">Print the label, attach it securely to your parcel, and drop it off at a ${carrier} drop-off point.</p>
+        ${opts.trackingNumber ? `<p style="margin:10px 0 0;font-size:13px;color:${MUTED};">Tracking number: <strong style="color:${TEXT};">${opts.trackingNumber}</strong></p>` : ''}
+      </div>
+      <p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:${MUTED};">
+        Please keep your proof of postage until the return reaches us. If you have any trouble printing the label, just reply to this email.
+      </p>
+    `,
+  )
+  const text = `Your prepaid return label for order ${orderNumber} is attached as a PDF. Print it, attach it to your parcel and drop it off at a ${carrier} drop-off point.${opts.trackingNumber ? ` Tracking number: ${opts.trackingNumber}.` : ''} Reply to this email if you need help.`
+  return { subject, html, text }
 }

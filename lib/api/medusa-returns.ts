@@ -25,6 +25,12 @@ export interface ReturnRecord {
   source: 'customer' | 'dashboard' | 'pos'
   requested_at: string
   processed_at?: string
+  /** Set when a prepaid return label was booked and emailed to the customer */
+  label?: {
+    tracking_number?: string
+    carrier?: string
+    parcel2go_order_id?: string
+  }
 }
 async function readJson(res: Response) {
   return res.json().catch(() => ({}))
