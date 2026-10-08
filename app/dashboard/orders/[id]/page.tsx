@@ -48,7 +48,6 @@ function courierDate(iso?: string | null) {
   return isNaN(d.getTime())
     ? ''
     : d.toLocaleDateString('en-GB', {
-        timeZone: 'Europe/London',
         weekday: 'short',
         day: 'numeric',
         month: 'short',
@@ -61,12 +60,11 @@ function courierDateTime(iso?: string | null) {
   return isNaN(d.getTime())
     ? ''
     : d.toLocaleString('en-GB', {
-        timeZone: 'Europe/London',
         day: 'numeric',
         month: 'short',
         hour: '2-digit',
         minute: '2-digit',
-      }) + ' UK'
+      })
 }
 
 const ITEM_METADATA_SKIP = new Set(['source', 'isGift'])

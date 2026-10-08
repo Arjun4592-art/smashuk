@@ -191,13 +191,10 @@ function buildTimeline(order: any): TimelineEvent[] {
   )
 }
 
-const UK_TZ = 'Europe/London'
-
-const ukDayKey = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: UK_TZ })
+const ukDayKey = (d: Date) => d.toLocaleDateString('en-CA')
 
 const timeOf = (ts: string) =>
   new Date(ts).toLocaleTimeString('en-GB', {
-    timeZone: UK_TZ,
     hour: '2-digit',
     minute: '2-digit',
   })
@@ -210,7 +207,6 @@ function dayLabel(ts: string) {
     return 'Yesterday'
   }
   return d.toLocaleDateString('en-GB', {
-    timeZone: UK_TZ,
     day: 'numeric',
     month: 'long',
     year: 'numeric',

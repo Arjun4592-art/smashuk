@@ -881,14 +881,11 @@ export async function getInventoryPage(params?: {
 export async function getDashboardStats(
   range?: string,
 ): Promise<DashboardStats> {
-  const data = await api<DashboardStats>(
-    '/api/admin/stats',
-    range
-      ? {
-          range,
-        }
-      : undefined,
-  )
+  const data = await api<DashboardStats>('/api/admin/stats', {
+    range,
+    // Day boundaries ("Today", charts) follow the viewer's browser timezone.
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  })
   return {
     totalRevenue: data.totalRevenue,
     totalOrders: data.totalOrders,

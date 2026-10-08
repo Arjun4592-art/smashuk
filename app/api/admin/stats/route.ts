@@ -4,9 +4,18 @@ import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 
-// The shop's own timezone. "Today" and every chart bucket are computed in
-// this zone, NOT the server's (Vercel runs in UTC) and NOT the viewer's.
-const SHOP_TZ = process.env.SHOP_TIMEZONE ?? 'Europe/London'
+// "Today" and every chart bucket are computed in the VIEWER'S browser
+// timezone (sent by the dashboard as ?tz=). The server's own timezone
+// (Vercel runs in UTC) is never used. Falls back to UTC if none is sent.
+function resolveTz(raw: string | null): string {
+  if (!raw) return 'UTC'
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone: raw })
+    return raw
+  } catch {
+    return 'UTC'
+  }
+}
 
 const DAY_MS = 86_400_000
 const PAGE = 200
@@ -17,54 +26,57 @@ const RANGES: Range[] = ['today', 'last7', 'last30', 'last90', 'thisyear']
 
 /* ───────────────────────── timezone helpers ───────────────────────── */
 
-const dtf = new Intl.DateTimeFormat('en-GB', {
-  timeZone: SHOP_TZ,
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hourCycle: 'h23',
-})
+function makeTz(tz: string) {
+  const dtf = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  })
 
-function parts(d: Date) {
-  const p: Record<string, number> = {}
-  for (const x of dtf.formatToParts(d)) {
-    if (x.type !== 'literal') p[x.type] = Number(x.value)
+  function parts(d: Date) {
+    const p: Record<string, number> = {}
+    for (const x of dtf.formatToParts(d)) {
+      if (x.type !== 'literal') p[x.type] = Number(x.value)
+    }
+    return {
+      y: p.year,
+      m: p.month,
+      d: p.day,
+      h: p.hour,
+      mi: p.minute,
+      s: p.second,
+    }
   }
-  return {
-    y: p.year,
-    m: p.month,
-    d: p.day,
-    h: p.hour,
-    mi: p.minute,
-    s: p.second,
+
+  /** Offset (ms) of the timezone from UTC at the given instant. */
+  function tzOffset(d: Date) {
+    const p = parts(d)
+    const asUtc = Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi, p.s)
+    return asUtc - Math.floor(d.getTime() / 1000) * 1000
   }
-}
 
-/** Offset (ms) of SHOP_TZ from UTC at the given instant. */
-function tzOffset(d: Date) {
-  const p = parts(d)
-  const asUtc = Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi, p.s)
-  return asUtc - Math.floor(d.getTime() / 1000) * 1000
-}
+  /** The instant at which the shop's calendar day y-m-d starts (00:00 local).
+   *  Day/month overflow is fine (d = 0 → last day of previous month). */
+  function zonedMidnight(y: number, m: number, d: number): Date {
+    const guess = Date.UTC(y, m - 1, d)
+    const off1 = tzOffset(new Date(guess))
+    let t = guess - off1
+    const off2 = tzOffset(new Date(t))
+    if (off2 !== off1) t = guess - off2
+    return new Date(t)
+  }
 
-/** The instant at which the shop's calendar day y-m-d starts (00:00 local).
- *  Day/month overflow is fine (d = 0 → last day of previous month). */
-function zonedMidnight(y: number, m: number, d: number): Date {
-  const guess = Date.UTC(y, m - 1, d)
-  const off1 = tzOffset(new Date(guess))
-  let t = guess - off1
-  const off2 = tzOffset(new Date(t))
-  if (off2 !== off1) t = guess - off2
-  return new Date(t)
-}
-
-/** Whole-day number of the shop-local calendar date of `d` (UTC-midnight based). */
-function dayNumber(d: Date) {
-  const p = parts(d)
-  return Date.UTC(p.y, p.m - 1, p.d) / DAY_MS
+  /** Whole-day number of the shop-local calendar date of `d` (UTC-midnight based). */
+  function dayNumber(d: Date) {
+    const p = parts(d)
+    return Date.UTC(p.y, p.m - 1, p.d) / DAY_MS
+  }
+  return { parts, tzOffset, zonedMidnight, dayNumber }
 }
 
 const MONTHS = [
@@ -170,7 +182,12 @@ interface Period {
   granularity: 'hourly' | 'daily' | 'weekly' | 'monthly'
 }
 
-function buildPeriod(range: Range, now: Date): Period {
+function buildPeriod(
+  range: Range,
+  now: Date,
+  T: ReturnType<typeof makeTz>,
+): Period {
+  const { parts, zonedMidnight } = T
   const t = parts(now)
   const todayStart = zonedMidnight(t.y, t.m, t.d)
   const mk = (n: number, label: string): Period => {
@@ -256,7 +273,9 @@ export async function GET(req: NextRequest) {
 
   try {
     const now = new Date()
-    const period = buildPeriod(range, now)
+    const T = makeTz(resolveTz(searchParams.get('tz')))
+    const { parts, dayNumber } = T
+    const period = buildPeriod(range, now, T)
 
     const [allInPeriods, productsRes, categoryMap] = await Promise.all([
       fetchOrdersSince(authHeader, period.prevStart),
