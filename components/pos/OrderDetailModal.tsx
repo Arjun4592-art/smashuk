@@ -66,6 +66,7 @@ export interface OrderDetailData {
     price: number
     quantity: number
     variantTitle?: string | null
+    thumbnail?: string | null
   }[]
   customer: {
     name: string
@@ -512,15 +513,22 @@ export default function OrderDetailModal({
                   </p>
 
                   <div className='mt-2 divide-y divide-[#F6F6F7]'>
-                    {order.items.map((item, i) => (
-                      <ItemRow
-                        key={`${item.id}-${i}`}
-                        title={item.name}
-                        chips={item.brand ? [item.brand] : undefined}
-                        meta={`${fmt(item.price)} × ${item.quantity}`}
-                        total={fmt(item.price * item.quantity)}
-                      />
-                    ))}
+                    {order.items.map((item, i) => {
+                      // Size / colour first, like the dashboard order page.
+                      const chips = [item.variantTitle, item.brand].filter(
+                        (c): c is string => !!c,
+                      )
+                      return (
+                        <ItemRow
+                          key={`${item.id}-${i}`}
+                          thumb={item.thumbnail}
+                          title={item.name}
+                          chips={chips.length > 0 ? chips : undefined}
+                          meta={`${fmt(item.price)} × ${item.quantity}`}
+                          total={fmt(item.price * item.quantity)}
+                        />
+                      )
+                    })}
                   </div>
 
                   {canFulfill && (

@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import RichTextEditor from '@/components/dashboard/Richtexteditor'
 import { compressImageForUpload } from '@/lib/image-compress'
 import ImageCropModal from '@/components/dashboard/ImageCropModal'
+import ExtraCategoriesPicker from '@/components/dashboard/ExtraCategoriesPicker'
 function buildAutoMetaTitle(name: string, brand: string): string {
   const withBrand =
     brand && !name.toLowerCase().includes(brand.toLowerCase())
@@ -104,6 +105,7 @@ export default function AddProductPage() {
   const [activeTab, setActiveTab] = useState('general')
   const [categories, setCategories] = useState<MedusaCategory[]>([])
   const [categoriesLoading, setCategoriesLoading] = useState(true)
+  const [extraCategoryIds, setExtraCategoryIds] = useState<string[]>([])
   const [sellingChannel, setSellingChannel] = useState<
     'both' | 'website' | 'store'
   >('both')
@@ -657,13 +659,12 @@ export default function AddProductPage() {
       selling_channel: sellingChannel,
       thumbnail: uploadedImages[0]?.url ?? undefined,
       images: uploadedImages.length > 0 ? uploadedImages : undefined,
-      categories: form.category
-        ? [
-            {
-              id: form.category,
-            },
-          ]
-        : [],
+      categories: [
+        ...(form.category ? [{ id: form.category }] : []),
+        ...extraCategoryIds
+          .filter((cid) => cid !== form.category)
+          .map((cid) => ({ id: cid })),
+      ],
       tags: undefined as
         | {
             id: string
@@ -1230,6 +1231,17 @@ export default function AddProductPage() {
                       ))}
                     </select>
                   </div>
+
+                  <ExtraCategoriesPicker
+                    categories={categories.map((c) => ({
+                      id: c.id,
+                      label: c.name,
+                    }))}
+                    primaryId={form.category}
+                    selectedIds={extraCategoryIds}
+                    onChange={setExtraCategoryIds}
+                    disabled={categoriesLoading}
+                  />
 
                   <div className='grid grid-cols-1 sm:grid-cols-3 gap-4'>
                     <div>

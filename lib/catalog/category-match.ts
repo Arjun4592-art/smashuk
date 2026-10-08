@@ -132,6 +132,13 @@ export function isClothing(p: Product): boolean {
 
 export function matchesSport(p: Product, wanted: string): boolean {
   if (p.sport === wanted) return true
+  // A product filed under extra categories ("tennis-bags" AND "badminton-bags")
+  // also belongs to each of those sports, not just the one in its metadata.
+  if (wanted) {
+    for (const h of p.categoryHandles ?? []) {
+      if (h === wanted || h.startsWith(`${wanted}-`)) return true
+    }
+  }
   return wanted === 'clothing' && isClothing(p)
 }
 
@@ -143,10 +150,12 @@ export function matchesCategory(p: Product, wanted: string): boolean {
   const w = slug(wanted)
   if (!w) return false
 
-  // 1. Category handle (original behaviour, unchanged)
-  const handle = p.category
-  if (handle && (handle.includes(wanted) || wanted.includes(handle)))
-    return true
+  // 1. Category handle (original behaviour) — checked for the main category
+  //    and for every extra category the product is also filed under.
+  for (const handle of [p.category, ...(p.categoryHandles ?? [])]) {
+    if (handle && (handle.includes(wanted) || wanted.includes(handle)))
+      return true
+  }
 
   // 2. Tags, 3. category-like specs
   const names = [

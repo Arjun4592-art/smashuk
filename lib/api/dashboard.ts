@@ -732,6 +732,12 @@ export async function deleteProduct(id: string) {
 export interface BulkProductChanges {
   status?: 'published' | 'draft' | 'rejected'
   categoryId?: string
+  /** What to do with categoryId. Default (when omitted): 'replace'. */
+  categoryMode?: 'replace' | 'add' | 'remove'
+  crossSells?: {
+    mode: 'add' | 'replace' | 'clear'
+    items: { productId: string; productTitle: string; discountPct: number }[]
+  }
   brand?: string
   sport?: string
   /** '' removes the badge */

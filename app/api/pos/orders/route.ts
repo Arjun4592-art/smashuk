@@ -35,6 +35,7 @@ function toPosOrderRecord(o: any) {
         i.variant_title && i.variant_title !== 'Default'
           ? i.variant_title
           : null,
+      thumbnail: (i.thumbnail as string | null | undefined) ?? null,
     },
     quantity: i.quantity ?? 1,
   }))

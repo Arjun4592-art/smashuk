@@ -49,6 +49,7 @@ function toOrderDetail(o: PosOrderRecord): OrderDetailData {
       price: i.product.price,
       quantity: i.quantity,
       variantTitle: i.product.variantTitle,
+      thumbnail: i.product.thumbnail ?? null,
     })),
     customer: o.customer
       ? {

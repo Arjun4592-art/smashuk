@@ -109,6 +109,8 @@ export interface Product {
   sport: string
   category: string
   categoryId: string
+  /** Handles of EVERY category the product is filed under (main + extras). */
+  categoryHandles?: string[]
   price: number
   originalPrice?: number
   images: string[]

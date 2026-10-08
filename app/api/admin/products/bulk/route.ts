@@ -33,10 +33,37 @@ const UPSERT_LIMIT = 15
 const STATUSES = ['published', 'draft', 'rejected'] as const
 const CHANNELS = ['both', 'website', 'store'] as const
 
+const CATEGORY_MODES = ['replace', 'add', 'remove'] as const
+const CROSS_SELL_MODES = ['add', 'replace', 'clear'] as const
+// Same sane limits the product page uses (discount 1–99 %).
+const MAX_CROSS_SELLS = 20
+
+interface BulkCrossSellItem {
+  productId: string
+  productTitle: string
+  discountPct: number
+}
+
 interface BulkChanges {
   status?: (typeof STATUSES)[number]
-  /** Replaces ALL categories of each product with this single one. */
+  /**
+   * The category to apply. What happens to it depends on `categoryMode`:
+   * 'replace' (default) -> ALL categories of each product become just this one,
+   * 'add'               -> it is added next to the categories the product has,
+   * 'remove'            -> it is taken off the product (others are kept).
+   */
   categoryId?: string
+  categoryMode?: (typeof CATEGORY_MODES)[number]
+  /**
+   * 'add'     -> items are added to each product's existing cross-sells
+   *              (same product again just updates its discount),
+   * 'replace' -> each product's cross-sells become exactly these items,
+   * 'clear'   -> every cross-sell is removed (items ignored).
+   */
+  crossSells?: {
+    mode: (typeof CROSS_SELL_MODES)[number]
+    items: BulkCrossSellItem[]
+  }
   brand?: string
   sport?: string
   /** '' removes the badge. undefined = leave as is. */
@@ -206,6 +233,60 @@ export async function POST(req: NextRequest) {
     }
     if (typeof raw.categoryId === 'string' && raw.categoryId) {
       changes.categoryId = raw.categoryId
+      if (raw.categoryMode !== undefined) {
+        if (!CATEGORY_MODES.includes(raw.categoryMode as any)) {
+          return NextResponse.json(
+            { error: 'Invalid category mode' },
+            { status: 400 },
+          )
+        }
+        changes.categoryMode = raw.categoryMode as BulkChanges['categoryMode']
+      }
+    }
+    if (raw.crossSells !== undefined) {
+      const cs = raw.crossSells as any
+      const mode = cs?.mode
+      if (!CROSS_SELL_MODES.includes(mode)) {
+        return NextResponse.json(
+          { error: 'Invalid cross-sell mode' },
+          { status: 400 },
+        )
+      }
+      const items: BulkCrossSellItem[] = []
+      if (mode !== 'clear') {
+        const seen = new Set<string>()
+        for (const it of Array.isArray(cs?.items) ? cs.items : []) {
+          const productId =
+            typeof it?.productId === 'string' ? it.productId : ''
+          const pct = Number(it?.discountPct)
+          if (!productId.startsWith('prod_') || seen.has(productId)) continue
+          if (!Number.isFinite(pct) || pct < 1 || pct > 99) {
+            return NextResponse.json(
+              { error: 'Cross-sell discount must be between 1 and 99 %' },
+              { status: 400 },
+            )
+          }
+          seen.add(productId)
+          items.push({
+            productId,
+            productTitle: String(it?.productTitle ?? '').slice(0, 300),
+            discountPct: pct,
+          })
+        }
+        if (items.length === 0) {
+          return NextResponse.json(
+            { error: 'Add at least one cross-sell product' },
+            { status: 400 },
+          )
+        }
+        if (items.length > MAX_CROSS_SELLS) {
+          return NextResponse.json(
+            { error: `At most ${MAX_CROSS_SELLS} cross-sell products` },
+            { status: 400 },
+          )
+        }
+      }
+      changes.crossSells = { mode, items }
     }
     if (typeof raw.brand === 'string') changes.brand = raw.brand.trim()
     if (typeof raw.sport === 'string') changes.sport = raw.sport.trim()
@@ -226,7 +307,13 @@ export async function POST(req: NextRequest) {
     const touchesMetadata =
       changes.brand !== undefined ||
       changes.sport !== undefined ||
-      changes.badge !== undefined
+      changes.badge !== undefined ||
+      changes.crossSells !== undefined
+    const categoryMode = changes.categoryMode ?? 'replace'
+    // Adding / removing a category needs the product's current categories;
+    // replacing it does not.
+    const needsCurrentCategories =
+      !!changes.categoryId && categoryMode !== 'replace'
 
     const channels = changes.sellingChannel
       ? await resolveSalesChannels(
@@ -246,15 +333,16 @@ export async function POST(req: NextRequest) {
       try {
         const payload: Record<string, unknown> = {}
         if (changes.status) payload.status = changes.status
-        if (changes.categoryId)
+        if (changes.categoryId && categoryMode === 'replace')
           payload.categories = [{ id: changes.categoryId }]
         if (channels) payload.sales_channels = channels
 
-        if (touchesMetadata) {
+        if (touchesMetadata || needsCurrentCategories) {
           // Metadata is sent back whole (like the edit form does), so read the
           // current one first and only change the keys that were asked for.
+          // The current categories come with the same call (add / remove).
           const curRes = await fetch(
-            `${MEDUSA_URL}/admin/products/${id}?fields=${encodeURIComponent('id,metadata')}`,
+            `${MEDUSA_URL}/admin/products/${id}?fields=${encodeURIComponent('id,metadata,*categories')}`,
             { headers: { Authorization: authorization } },
           )
           const cur = await safeJson(curRes)
@@ -262,18 +350,53 @@ export async function POST(req: NextRequest) {
             failed.push({ id, error: errorText(cur, curRes.status) })
             return
           }
-          const metadata: Record<string, unknown> = {
-            ...(cur.product.metadata ?? {}),
+
+          if (needsCurrentCategories && changes.categoryId) {
+            const currentIds: string[] = (cur.product.categories ?? [])
+              .map((c: any) => c?.id)
+              .filter((cid: unknown): cid is string => typeof cid === 'string')
+            const nextIds =
+              categoryMode === 'add'
+                ? Array.from(new Set([...currentIds, changes.categoryId]))
+                : currentIds.filter((cid) => cid !== changes.categoryId)
+            payload.categories = nextIds.map((cid) => ({ id: cid }))
           }
-          const apply = (key: string, value: string | undefined) => {
-            if (value === undefined) return
-            if (value === '') delete metadata[key]
-            else metadata[key] = value
+
+          if (touchesMetadata) {
+            const metadata: Record<string, unknown> = {
+              ...(cur.product.metadata ?? {}),
+            }
+            const apply = (key: string, value: string | undefined) => {
+              if (value === undefined) return
+              if (value === '') delete metadata[key]
+              else metadata[key] = value
+            }
+            apply('brand', changes.brand)
+            apply('sport', changes.sport)
+            apply('badge', changes.badge)
+
+            if (changes.crossSells) {
+              const { mode, items } = changes.crossSells
+              // A product is never offered as a cross-sell of itself.
+              const incoming = items.filter((it) => it.productId !== id)
+              if (mode === 'clear') {
+                // An empty list (not a deleted key) so it also clears
+                // cross-sells if Medusa merges metadata instead of replacing.
+                metadata.cross_sells = []
+              } else if (mode === 'replace') {
+                metadata.cross_sells = incoming
+              } else {
+                const existing: any[] = Array.isArray(metadata.cross_sells)
+                  ? (metadata.cross_sells as any[])
+                  : []
+                const merged = existing.filter(
+                  (e) => !incoming.some((it) => it.productId === e?.productId),
+                )
+                metadata.cross_sells = [...merged, ...incoming]
+              }
+            }
+            payload.metadata = metadata
           }
-          apply('brand', changes.brand)
-          apply('sport', changes.sport)
-          apply('badge', changes.badge)
-          payload.metadata = metadata
         }
 
         const res = await fetch(`${MEDUSA_URL}/admin/products/${id}`, {

@@ -30,6 +30,8 @@ export interface POSProduct {
    */
   stockPending?: boolean
   category: string
+  /** Every category the product is filed under (includes `category`). */
+  categories?: string[]
   image?: string
   description?: string
   channel: 'both' | 'online_only' | 'pos_only'
@@ -222,6 +224,20 @@ function pickCategoryName(categories: any[] | undefined): string {
   const chosen = preferred ?? categories[0]
   return chosen?.name ?? 'Uncategorized'
 }
+/**
+ * Names of EVERY specific category a product is filed under (bare sport
+ * categories like "Tennis" are left out, same as pickCategoryName).
+ */
+function allCategoryNames(categories: any[] | undefined): string[] {
+  const names = (categories ?? [])
+    .filter(
+      (c: any) => c?.handle && !SPORT_CATEGORY_SLUGS.has(c.handle) && c?.name,
+    )
+    .map((c: any) => String(c.name))
+  return names.length > 0
+    ? Array.from(new Set(names))
+    : [pickCategoryName(categories)]
+}
 function mapProductToPOSVariants(
   p: any,
   stockPlaceholder?: number,
@@ -240,6 +256,12 @@ function mapProductToPOSVariants(
       stock,
       stockPending: stockPlaceholder !== undefined,
       category: pickCategoryName(p.categories),
+      categories: Array.from(
+        new Set([
+          pickCategoryName(p.categories),
+          ...allCategoryNames(p.categories),
+        ]),
+      ),
       image: p.thumbnail ?? p.images?.[0]?.url ?? undefined,
       description: p.description ?? undefined,
       channel: (p.metadata?.channel as any) ?? 'both',
@@ -448,6 +470,7 @@ export interface PosOrderLineItem {
     brand: string
     price: number
     variantTitle?: string | null
+    thumbnail?: string | null
   }
   quantity: number
 }
@@ -734,6 +757,8 @@ export interface POSIndexEntry {
   name: string
   brand: string
   category: string
+  /** Every category the product is filed under (includes `category`). */
+  categories?: string[]
   /** Every size-like dimension this variant has — usually one, sometimes more. */
   sizes: POSSizeDimension[]
   /** All option values joined (colour + size etc.) so variants can be told apart. */

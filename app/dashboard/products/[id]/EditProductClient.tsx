@@ -18,6 +18,7 @@ import RichTextEditor from '@/components/dashboard/Richtexteditor'
 import ImageCropModal from '@/components/dashboard/ImageCropModal'
 import { compressImageForUpload } from '@/lib/image-compress'
 import StringingCategoryHint from '@/components/dashboard/StringingCategoryHint'
+import ExtraCategoriesPicker from '@/components/dashboard/ExtraCategoriesPicker'
 import { isStringingCategoryHandle } from '@/lib/stringing'
 import type { EditorData } from '@/lib/api/admin-products-server'
 interface VariantOptionEntry {
@@ -2179,6 +2180,14 @@ export default function EditProductClient({
                       ))}
                     </select>
                   </div>
+
+                  <ExtraCategoriesPicker
+                    categories={categories}
+                    primaryId={form.category}
+                    selectedIds={extraCategoryIds}
+                    onChange={setExtraCategoryIds}
+                    disabled={categoriesLoading}
+                  />
 
                   <StringingCategoryHint
                     title={form.name}

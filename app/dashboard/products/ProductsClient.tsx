@@ -357,6 +357,11 @@ function BulkEditModal({
   // '' means "don't change" for every field (badge uses NONE to clear it).
   const [status, setStatus] = useState('')
   const [categoryId, setCategoryId] = useState('')
+  // 'add' keeps what the products already have (a product can sit in several
+  // categories); 'replace' makes the chosen one their only category.
+  const [categoryMode, setCategoryMode] = useState<
+    'add' | 'replace' | 'remove'
+  >('add')
   const [brand, setBrand] = useState('')
   const [sport, setSport] = useState('')
   const [badge, setBadge] = useState('')
@@ -367,6 +372,73 @@ function BulkEditModal({
   const [brands, setBrands] = useState<string[]>([])
   const [sports, setSports] = useState<string[]>([])
   const [optionsLoading, setOptionsLoading] = useState(true)
+  // Cross-sell: '' = don't change.
+  const [csMode, setCsMode] = useState<'' | 'add' | 'replace' | 'clear'>('')
+  const [csItems, setCsItems] = useState<
+    { productId: string; productTitle: string; discountPct: number }[]
+  >([])
+  const [csSearch, setCsSearch] = useState('')
+  const [csResults, setCsResults] = useState<{ id: string; title: string }[]>(
+    [],
+  )
+  const [csLoading, setCsLoading] = useState(false)
+  const csTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const csSeq = useRef(0)
+
+  useEffect(
+    () => () => {
+      if (csTimer.current) clearTimeout(csTimer.current)
+    },
+    [],
+  )
+
+  const searchCsProducts = (q: string) => {
+    setCsSearch(q)
+    if (csTimer.current) clearTimeout(csTimer.current)
+    const seq = ++csSeq.current
+    if (!q.trim()) {
+      setCsResults([])
+      setCsLoading(false)
+      return
+    }
+    setCsLoading(true)
+    csTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/products?q=${encodeURIComponent(q.trim())}&limit=8`,
+          { credentials: 'include' },
+        )
+        const data = await res.json()
+        // Ignore answers to an older keystroke.
+        if (seq !== csSeq.current) return
+        setCsResults(
+          (data.products ?? []).map((p: any) => ({
+            id: String(p.id),
+            title: String(p.title ?? ''),
+          })),
+        )
+      } catch {
+        if (seq === csSeq.current) setCsResults([])
+      } finally {
+        if (seq === csSeq.current) setCsLoading(false)
+      }
+    }, 250)
+  }
+  const addCsItem = (p: { id: string; title: string }) => {
+    if (csItems.some((c) => c.productId === p.id)) return
+    setCsItems((prev) => [
+      ...prev,
+      { productId: p.id, productTitle: p.title, discountPct: 10 },
+    ])
+    setCsSearch('')
+    setCsResults([])
+  }
+  const csDiscountsValid = csItems.every(
+    (c) =>
+      Number.isFinite(c.discountPct) &&
+      c.discountPct >= 1 &&
+      c.discountPct <= 99,
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -380,9 +452,22 @@ function BulkEditModal({
     ]).then(([cats, fields]) => {
       if (cancelled) return
       const list = cats?.categories ?? cats?.product_categories ?? []
+      // "Badminton › Stringing": several sports have a category with the same
+      // bare name, so show the parent in front of it.
+      const nameById = new Map<string, string>(
+        list.map((c: any) => [String(c.id), String(c.name)]),
+      )
       setCategories(
         list
-          .map((c: any) => ({ id: String(c.id), name: String(c.name) }))
+          .map((c: any) => {
+            const parent = c.parent_category_id
+              ? nameById.get(String(c.parent_category_id))
+              : undefined
+            return {
+              id: String(c.id),
+              name: parent ? `${parent} › ${c.name}` : String(c.name),
+            }
+          })
           .sort((a: any, b: any) => a.name.localeCompare(b.name)),
       )
       setBrands(fields?.brands ?? [])
@@ -396,14 +481,27 @@ function BulkEditModal({
 
   const changes: BulkProductChanges = {}
   if (status) changes.status = status as BulkProductChanges['status']
-  if (categoryId) changes.categoryId = categoryId
+  if (categoryId) {
+    changes.categoryId = categoryId
+    changes.categoryMode = categoryMode
+  }
+  if (csMode === 'clear') {
+    changes.crossSells = { mode: 'clear', items: [] }
+  } else if (csMode && csItems.length > 0) {
+    changes.crossSells = { mode: csMode, items: csItems }
+  }
   if (brand.trim()) changes.brand = brand.trim()
   if (sport.trim()) changes.sport = sport.trim()
   if (badge) changes.badge = badge === 'NONE' ? '' : badge
   if (channel) {
     changes.sellingChannel = channel as BulkProductChanges['sellingChannel']
   }
-  const hasChanges = Object.keys(changes).length > 0
+  // A cross-sell mode that needs products but has none (or a bad discount)
+  // is not ready to apply.
+  const csIncomplete =
+    (csMode === 'add' || csMode === 'replace') &&
+    (csItems.length === 0 || !csDiscountsValid)
+  const hasChanges = Object.keys(changes).length > 0 && !csIncomplete
 
   const fieldCls =
     'w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] text-[#202223] bg-white outline-none focus:border-[#008060] focus:ring-2 focus:ring-[#008060]/15'
@@ -452,12 +550,7 @@ function BulkEditModal({
             </select>
           </div>
           <div className='sm:col-span-2'>
-            <label className={labelCls}>
-              Category{' '}
-              <span className='text-[11px] text-[#8C9196] font-normal'>
-                (replaces the current categories)
-              </span>
-            </label>
+            <label className={labelCls}>Category</label>
             <select
               value={categoryId}
               onChange={(e) => setCategoryId(e.target.value)}
@@ -473,6 +566,39 @@ function BulkEditModal({
                 </option>
               ))}
             </select>
+            {categoryId && (
+              <div className='mt-2'>
+                <div className='inline-flex rounded-lg border border-[#E1E3E5] overflow-hidden'>
+                  {(
+                    [
+                      ['add', 'Add to current'],
+                      ['replace', 'Replace all'],
+                      ['remove', 'Remove'],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type='button'
+                      onClick={() => setCategoryMode(value)}
+                      className={`px-3 py-1.5 text-[12px] font-medium border-none cursor-pointer transition-colors ${
+                        categoryMode === value
+                          ? 'bg-[#008060] text-white'
+                          : 'bg-white text-[#202223] hover:bg-[#F6F6F7]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className='text-[11.5px] text-[#8C9196] mt-1.5'>
+                  {categoryMode === 'add'
+                    ? 'The products keep their current categories and also appear in this one.'
+                    : categoryMode === 'replace'
+                      ? 'This becomes the only category of every selected product.'
+                      : 'This category is taken off the selected products; their other categories stay.'}
+                </p>
+              </div>
+            )}
           </div>
           <div>
             <label className={labelCls}>Brand</label>
@@ -518,6 +644,152 @@ function BulkEditModal({
               <option value='BESTSELLER'>Bestseller</option>
               <option value='LIMITED'>Limited</option>
             </select>
+          </div>
+
+          <div className='sm:col-span-2 border-t border-[#E1E3E5] pt-4'>
+            <label className={labelCls}>Cross-sell</label>
+            <select
+              value={csMode}
+              onChange={(e) => setCsMode(e.target.value as typeof csMode)}
+              className={fieldCls}
+            >
+              <option value=''>Don’t change</option>
+              <option value='add'>Add to current cross-sells</option>
+              <option value='replace'>Replace current cross-sells</option>
+              <option value='clear'>Remove all cross-sells</option>
+            </select>
+
+            {csMode === 'clear' && (
+              <p className='text-[11.5px] text-[#B98900] mt-1.5'>
+                Every cross-sell product will be removed from the selected
+                products.
+              </p>
+            )}
+
+            {(csMode === 'add' || csMode === 'replace') && (
+              <div className='mt-3 space-y-3'>
+                <p className='text-[11.5px] text-[#8C9196]'>
+                  {csMode === 'add'
+                    ? 'These are offered with each selected product, next to any cross-sells it already has (a product already listed just gets the new discount).'
+                    : 'Each selected product will offer exactly these, instead of its current cross-sells.'}
+                </p>
+                <div className='relative'>
+                  <input
+                    type='text'
+                    value={csSearch}
+                    onChange={(e) => searchCsProducts(e.target.value)}
+                    placeholder='Search a product (e.g. Grip, Shuttle, Socks)…'
+                    className={fieldCls}
+                  />
+                  {csLoading && (
+                    <span className='absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-[#8C9196]'>
+                      Searching…
+                    </span>
+                  )}
+                  {csResults.length > 0 && (
+                    <div className='absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#E1E3E5] rounded-lg shadow-lg overflow-hidden'>
+                      {csResults.map((p) => {
+                        const added = csItems.some((c) => c.productId === p.id)
+                        return (
+                          <button
+                            key={p.id}
+                            type='button'
+                            disabled={added}
+                            onClick={() => addCsItem(p)}
+                            className='w-full text-left px-3.5 py-2 text-[13px] text-[#202223] hover:bg-[#F6F6F7] border-none bg-transparent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                          >
+                            {p.title}
+                            {added && (
+                              <span className='ml-2 text-[11px] text-[#8C9196]'>
+                                (already added)
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {csItems.length === 0 ? (
+                  <div className='py-4 text-center border border-dashed border-[#E1E3E5] rounded-lg'>
+                    <p className='text-[12px] text-[#8C9196]'>
+                      No cross-sell products added yet.
+                    </p>
+                  </div>
+                ) : (
+                  <div className='border border-[#E1E3E5] rounded-lg divide-y divide-[#F1F1F1]'>
+                    {csItems.map((cs) => {
+                      const bad =
+                        !Number.isFinite(cs.discountPct) ||
+                        cs.discountPct < 1 ||
+                        cs.discountPct > 99
+                      return (
+                        <div
+                          key={cs.productId}
+                          className='grid grid-cols-[1fr_auto_auto] gap-3 items-center px-3 py-2.5'
+                        >
+                          <p className='text-[13px] font-medium text-[#202223] truncate'>
+                            {cs.productTitle}
+                          </p>
+                          <div className='relative w-24'>
+                            <input
+                              type='number'
+                              min={1}
+                              max={99}
+                              value={
+                                Number.isFinite(cs.discountPct)
+                                  ? cs.discountPct
+                                  : ''
+                              }
+                              onChange={(e) =>
+                                setCsItems((prev) =>
+                                  prev.map((c) =>
+                                    c.productId === cs.productId
+                                      ? {
+                                          ...c,
+                                          discountPct: Number(e.target.value),
+                                        }
+                                      : c,
+                                  ),
+                                )
+                              }
+                              className={`w-full pl-2.5 pr-6 py-1.5 border rounded-lg text-[13px] text-[#202223] outline-none focus:ring-2 ${
+                                bad
+                                  ? 'border-[#D82C0D] focus:ring-[#D82C0D]/15'
+                                  : 'border-[#E1E3E5] focus:border-[#008060] focus:ring-[#008060]/15'
+                              }`}
+                            />
+                            <span className='absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-[#8C9196]'>
+                              %
+                            </span>
+                          </div>
+                          <button
+                            type='button'
+                            aria-label='Remove'
+                            onClick={() =>
+                              setCsItems((prev) =>
+                                prev.filter(
+                                  (c) => c.productId !== cs.productId,
+                                ),
+                              )
+                            }
+                            className='w-8 h-8 flex items-center justify-center text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg bg-transparent border-none cursor-pointer text-base'
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                {!csDiscountsValid && (
+                  <p className='text-[11.5px] text-[#D82C0D]'>
+                    Discount must be between 1 and 99 %.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

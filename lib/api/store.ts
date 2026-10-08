@@ -59,6 +59,13 @@ export function normalizeProduct(p: any): Product {
     sport: p.metadata?.sport ?? category.handle ?? '',
     category: category.handle,
     categoryId: category.id,
+    categoryHandles: Array.from(
+      new Set(
+        (p.categories ?? [])
+          .map((c: any) => c?.handle)
+          .filter((h: unknown): h is string => typeof h === 'string' && !!h),
+      ),
+    ),
     price: rawPrice,
     originalPrice,
     images:
