@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useInventory } from '@/hooks/useDashboard'
+import { useAllInventory } from '@/hooks/useDashboard'
 import { useDebouncedValue } from '@/hooks/useDebounce'
 import { toast } from 'sonner'
 type InventoryItem = {
@@ -363,8 +363,7 @@ export default function InventoryPage() {
     data: inventory,
     loading,
     error,
-  } = useInventory({
-    limit: 100,
+  } = useAllInventory({
     q: debouncedSearch || undefined,
   })
   const [items, setItems] = useState<InventoryItem[]>([])

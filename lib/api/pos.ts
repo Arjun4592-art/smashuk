@@ -566,6 +566,29 @@ export async function fetchPOSOrderPage(
   const orders: PosOrderRecord[] = data.orders ?? []
   return { orders, count: data.count ?? orders.length }
 }
+/**
+ * Every order newer than `since` (or up to `cap` orders when `since` is
+ * null). Orders come back newest-first, so paging stops as soon as a page
+ * reaches past `since` — a short range stays fast even with a big history.
+ */
+export async function fetchPOSOrdersSince(
+  since: Date | null,
+  cap = 3000,
+): Promise<PosOrderRecord[]> {
+  const byId = new Map<string, PosOrderRecord>()
+  let total = Infinity
+  let offset = 0
+  while (offset < total && byId.size < cap) {
+    const { orders, count } = await fetchPOSOrderPage(offset, 300)
+    total = count
+    if (orders.length === 0) break
+    offset += orders.length
+    for (const o of orders) byId.set(o.medusaOrderId, o)
+    if (since && new Date(orders[orders.length - 1].completedAt) < since) break
+  }
+  const all = Array.from(byId.values())
+  return since ? all.filter((o) => new Date(o.completedAt) >= since) : all
+}
 export async function markPOSOrderReturned(
   medusaOrderId: string,
   reason: string,

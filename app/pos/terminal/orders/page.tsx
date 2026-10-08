@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import ReturnModal from '@/components/pos/ReturnModal'
 import OrderLookupModal from '@/components/pos/OrderLookupModal'
@@ -440,6 +440,53 @@ export default function OrdersPage() {
     }
   }
   const hasMore = completedOrders.length < totalCount
+  // ── Filters must see ALL matching orders, not just the first page ──────
+  // Orders arrive newest-first in pages. Without this, a date / source /
+  // payment filter or a search only looked at the 150 orders already loaded
+  // and silently hid everything older. While any filter is active we keep
+  // pulling pages in the background — and for a date filter we stop as soon
+  // as the oldest loaded order is older than the "from" date.
+  const AUTOLOAD_CAP = 3000
+  const filtersActive =
+    Boolean(search.trim()) ||
+    sourceFilter !== 'all' ||
+    payFilter !== 'all' ||
+    Boolean(dateFrom || dateTo)
+  const [autoLoading, setAutoLoading] = useState(false)
+  const autoLoadRef = useRef(false)
+  const reachedDateStart = (() => {
+    if (!dateFrom || search.trim()) return false
+    const oldest = completedOrders[completedOrders.length - 1]
+    return Boolean(
+      oldest && toLocalYMD(new Date(oldest.completedAt)) < dateFrom,
+    )
+  })()
+  const autoLoadDone =
+    !hasMore || completedOrders.length >= AUTOLOAD_CAP || reachedDateStart
+  useEffect(() => {
+    if (!mounted || !filtersActive || loadError) return
+    if (autoLoadDone || autoLoadRef.current) return
+    autoLoadRef.current = true
+    setAutoLoading(true)
+    fetchPOSOrderPage(completedOrders.length, 300)
+      .then(({ orders, count }) => {
+        setCompletedOrders((prev) => {
+          const seen = new Set(prev.map((p) => p.medusaOrderId))
+          return [...prev, ...orders.filter((o) => !seen.has(o.medusaOrderId))]
+        })
+        setTotalCount(count)
+      })
+      .catch((err: unknown) => {
+        setLoadError(
+          err instanceof Error ? err.message : 'Failed to load more orders',
+        )
+      })
+      .finally(() => {
+        autoLoadRef.current = false
+        setAutoLoading(false)
+      })
+  }, [mounted, filtersActive, loadError, autoLoadDone, completedOrders.length])
+  const filtersStillLoading = filtersActive && !autoLoadDone
   const isAdmin = authUser?.role === 'admin'
   // Order ID ("SR-35") barely needs any room, but Customer often holds a
   // full email address — give Order ID a small fixed share and Customer
@@ -505,26 +552,42 @@ export default function OrdersPage() {
     if (dateTo && day > dateTo) return false
     return true
   }
+  const matchesSearch = (o: (typeof allOrders)[number]) =>
+    !search ||
+    o.id.toLowerCase().includes(search.toLowerCase()) ||
+    o.customer.toLowerCase().includes(search.toLowerCase()) ||
+    o.cashier.toLowerCase().includes(search.toLowerCase()) ||
+    o.payment.label.toLowerCase().includes(search.toLowerCase()) ||
+    SOURCE_LABEL[o.source].toLowerCase().includes(search.toLowerCase())
+  const matchesSource = (o: (typeof allOrders)[number]) =>
+    sourceFilter === 'all' || o.source === sourceFilter
+  const matchesPay = (o: (typeof allOrders)[number]) =>
+    payFilter === 'all' || o.payment.key === payFilter
   const filtered = allOrders.filter(
     (o) =>
-      (sourceFilter === 'all' || o.source === sourceFilter) &&
-      (payFilter === 'all' || o.payment.key === payFilter) &&
+      matchesSource(o) &&
+      matchesPay(o) &&
       matchesDate(o.raw.completedAt) &&
-      (!search ||
-        o.id.toLowerCase().includes(search.toLowerCase()) ||
-        o.customer.toLowerCase().includes(search.toLowerCase()) ||
-        o.cashier.toLowerCase().includes(search.toLowerCase()) ||
-        o.payment.label.toLowerCase().includes(search.toLowerCase()) ||
-        SOURCE_LABEL[o.source].toLowerCase().includes(search.toLowerCase())),
+      matchesSearch(o),
+  )
+  // Chip counts follow the OTHER active filters (date, search, and the
+  // other chip group), so every number matches what the list will show
+  // when that chip is picked.
+  const forSourceCounts = allOrders.filter(
+    (o) => matchesPay(o) && matchesDate(o.raw.completedAt) && matchesSearch(o),
+  )
+  const forPayCounts = allOrders.filter(
+    (o) =>
+      matchesSource(o) && matchesDate(o.raw.completedAt) && matchesSearch(o),
   )
   // Only offer "Dashboard" as a source filter when such orders exist.
   const countSource = (k: SourceKey) =>
-    allOrders.filter((o) => o.source === k).length
+    forSourceCounts.filter((o) => o.source === k).length
   const sourceOptions: FilterOption[] = [
-    { key: 'all', label: 'All', count: allOrders.length },
+    { key: 'all', label: 'All', count: forSourceCounts.length },
     { key: 'website', label: 'Website', count: countSource('website') },
     { key: 'pos', label: 'POS', count: countSource('pos') },
-    ...(countSource('dashboard') > 0
+    ...(countSource('dashboard') > 0 || sourceFilter === 'dashboard'
       ? [
           {
             key: 'dashboard',
@@ -536,10 +599,10 @@ export default function OrdersPage() {
   ]
   // Only list payment methods that actually appear in the loaded orders.
   const payOptions: FilterOption[] = [
-    { key: 'all', label: 'All methods', count: allOrders.length },
+    { key: 'all', label: 'All methods', count: forPayCounts.length },
     ...PAY_FILTERS.map((f) => ({
       ...f,
-      count: allOrders.filter((o) => o.payment.key === f.key).length,
+      count: forPayCounts.filter((o) => o.payment.key === f.key).length,
     })).filter((f) => f.count > 0 || f.key === payFilter),
   ]
   // Sum of what's currently shown (returned orders left out) — handy for
@@ -678,6 +741,9 @@ export default function OrdersPage() {
                   {money(shownTotal)}
                 </strong>{' '}
                 · loaded {completedOrders.length} of {totalCount}
+                {autoLoading || filtersStillLoading
+                  ? ' · applying filters…'
+                  : ''}
               </>
             ) : null
           }
@@ -738,6 +804,12 @@ export default function OrdersPage() {
               >
                 Retry
               </button>
+            </div>
+          ) : filtered.length === 0 && filtersStillLoading ? (
+            <div className='flex flex-col items-center py-12 gap-2'>
+              <p className='text-sm' style={{ color: '#8C9196' }}>
+                Searching all orders…
+              </p>
             </div>
           ) : filtered.length === 0 ? (
             <div className='flex flex-col items-center py-12 gap-2'>
@@ -935,7 +1007,7 @@ export default function OrdersPage() {
           )}
         </div>
 
-        {mounted && !loadError && hasMore && (
+        {mounted && !loadError && hasMore && !filtersActive && (
           <div className='flex flex-col items-center gap-1.5 py-4'>
             <button
               onClick={loadMore}
@@ -956,6 +1028,21 @@ export default function OrdersPage() {
           </div>
         )}
       </div>
+
+      {mounted &&
+        !loadError &&
+        filtersActive &&
+        hasMore &&
+        autoLoadDone &&
+        !reachedDateStart && (
+          <p
+            className='text-center text-[11px] py-3'
+            style={{ color: '#8C9196' }}
+          >
+            Showing results from the newest {completedOrders.length} orders.
+            Narrow the date range to see older ones.
+          </p>
+        )}
 
       {}
       {selectedOrder && (

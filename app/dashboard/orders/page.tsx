@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Papa from 'papaparse'
 import { toast } from 'sonner'
 import DateRangeFilter from '@/components/ui/DateRangeFilter'
-import { useOrders, useAbandonedCheckouts } from '@/hooks/useDashboard'
+import { useAllOrders, useAbandonedCheckouts } from '@/hooks/useDashboard'
 import { updateOrderStatus, getOrder } from '@/lib/api/dashboard'
 import { printReceiptOnLabel } from '@/lib/printer/label-print'
 import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
@@ -244,9 +244,10 @@ function OrdersPageContent() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [page, setPage] = useState(1)
   const pageSize = 10
-  const { data, loading, error, refetch } = useOrders({
-    limit: 500,
-  })
+  // Loads every order page by page (the first page shows immediately), so
+  // date / source / payment filters cover the whole history, not just the
+  // newest 500.
+  const { data, loading, loadingMore, error, refetch } = useAllOrders()
   const orders = data?.orders ?? []
   const totalOrderCount = data?.count ?? orders.length
   const [bulkActionLoading, setBulkActionLoading] = useState(false)
@@ -326,16 +327,44 @@ function OrdersPageContent() {
       matchSearch && matchStatus && matchSource && matchPay && matchesDate(o)
     )
   })
+  // Chip / tab counts follow the OTHER active filters (date, search, status
+  // tab and the other chip group) so each number matches what the list shows.
+  const matchSearchStr = (o: any) =>
+    o.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
+    o.customer.toLowerCase().includes(search.toLowerCase())
+  const matchStatusTab = (o: any) =>
+    statusFilter === 'All' || o.status === statusFilter.toLowerCase()
+  const forSourceCounts = orders.filter(
+    (o: any) =>
+      matchesDate(o) &&
+      matchSearchStr(o) &&
+      matchStatusTab(o) &&
+      (!payFilter || o.paymentMethod === payFilter),
+  )
+  const forPayCounts = orders.filter(
+    (o: any) =>
+      matchesDate(o) &&
+      matchSearchStr(o) &&
+      matchStatusTab(o) &&
+      (!sourceFilter || o.source === sourceFilter),
+  )
+  const forStatusCounts = orders.filter(
+    (o: any) =>
+      matchesDate(o) &&
+      matchSearchStr(o) &&
+      (!sourceFilter || o.source === sourceFilter) &&
+      (!payFilter || o.paymentMethod === payFilter),
+  )
   const sourceCount = (k: string) => {
     let n = 0
-    for (const o of orders) if (o.source === k) n++
+    for (const o of forSourceCounts) if (o.source === k) n++
     return n
   }
   const sourceOptions = [
-    { value: '', label: 'All', count: orders.length },
+    { value: '', label: 'All', count: forSourceCounts.length },
     { value: 'website', label: 'Website', count: sourceCount('website') },
     { value: 'pos', label: 'POS', count: sourceCount('pos') },
-    ...(sourceCount('dashboard') > 0
+    ...(sourceCount('dashboard') > 0 || sourceFilter === 'dashboard'
       ? [
           {
             value: 'dashboard',
@@ -347,10 +376,11 @@ function OrdersPageContent() {
   ]
   // Payment methods that actually occur in the loaded orders, with counts.
   const payCounts = new Map<string, number>()
-  for (const o of orders) {
+  for (const o of forPayCounts) {
     const k: string = o.paymentMethod || ''
     if (k) payCounts.set(k, (payCounts.get(k) ?? 0) + 1)
   }
+  if (payFilter && !payCounts.has(payFilter)) payCounts.set(payFilter, 0)
   const payOptions: [string, number][] = Array.from(payCounts).sort(
     (a, b) => b[1] - a[1],
   )
@@ -509,9 +539,11 @@ function OrdersPageContent() {
           </h1>
           <p className='text-[13px] text-[#6D7175] mt-0.5'>
             {totalOrderCount} orders total
-            {orders.length < totalOrderCount
-              ? ` (showing latest ${orders.length})`
-              : ''}
+            {loadingMore
+              ? ` (loading all… ${orders.length} so far)`
+              : orders.length < totalOrderCount
+                ? ` (showing latest ${orders.length})`
+                : ''}
           </p>
         </div>
         <div className='flex items-center gap-2'>
@@ -658,9 +690,10 @@ function OrdersPageContent() {
                   {s}{' '}
                   <span className='ml-1 text-[10.5px] text-[#8C9196]'>
                     {s === 'All'
-                      ? orders.length
-                      : orders.filter((o: any) => o.status === s.toLowerCase())
-                          .length}
+                      ? forStatusCounts.length
+                      : forStatusCounts.filter(
+                          (o: any) => o.status === s.toLowerCase(),
+                        ).length}
                   </span>
                 </button>
               ))}

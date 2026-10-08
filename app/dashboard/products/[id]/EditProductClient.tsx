@@ -1141,6 +1141,55 @@ export default function EditProductClient({
       })
     })
     if (neededByTitle.size === 0) return
+    // Fresh, authoritative view of what Medusa has linked to this product and
+    // which options its variants really hold a value for. `existingOptions`
+    // can be stale and, for imported (Shopify CSV) products, can contain TWO
+    // options with the same title (or a leftover "Default"/"Title" option).
+    // Medusa counts EVERY linked option, but a variant's `options` payload is
+    // a title->value map and can never fill two options that share a title —
+    // that is the "Product has 2 option values but there were 1 provided"
+    // error. So exactly one option per needed title is kept (preferring the
+    // one existing variants already use) and every other one is unlinked.
+    let liveOptions: { id: string; title: string }[] = existingOptions.map(
+      (o) => ({ id: o.id, title: o.title }),
+    )
+    let liveUsage: Set<string> | null = null
+    try {
+      const liveRes = await fetch(`/api/admin/products/${id}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      })
+      if (liveRes.ok) {
+        const liveData = await liveRes.json()
+        const fetched = (liveData?.product?.options ?? []).map((o: any) => ({
+          id: String(o.id),
+          title: String(o.title ?? ''),
+        }))
+        if (fetched.length > 0) liveOptions = fetched
+        const queuedDelete = new Set(variantsToDeleteRef.current)
+        const used = new Set<string>()
+        ;(liveData?.product?.variants ?? []).forEach((pv: any) => {
+          if (queuedDelete.has(pv?.id)) return
+          ;(pv.options ?? []).forEach((o: any) => {
+            const oid = o?.option_id ?? o?.option?.id
+            if (oid) used.add(String(oid))
+          })
+        })
+        liveUsage = used
+      }
+    } catch (liveErr) {
+      console.error('[live option check]', liveErr)
+    }
+    const keepIdByTitle = new Map<string, string>()
+    for (const title of neededByTitle.keys()) {
+      const sameTitle = liveOptions.filter(
+        (o) => o.title.trim().toLowerCase() === title.toLowerCase(),
+      )
+      const pick =
+        sameTitle.find((o) => !!liveUsage && liveUsage.has(o.id)) ??
+        sameTitle[0]
+      if (pick) keepIdByTitle.set(title.toLowerCase(), pick.id)
+    }
     const linkTargets: {
       id: string
       title: string
@@ -1149,9 +1198,12 @@ export default function EditProductClient({
     const linkedAfterSave = new Map<string, Set<string>>()
     for (const [title, valueSet] of neededByTitle) {
       const requested = Array.from(valueSet)
-      const existingOption = existingOptions.find(
-        (o) => o.title.toLowerCase() === title.toLowerCase(),
-      )
+      const keepId = keepIdByTitle.get(title.toLowerCase())
+      const existingOption =
+        existingOptions.find((o) => !!keepId && o.id === keepId) ??
+        existingOptions.find(
+          (o) => o.title.toLowerCase() === title.toLowerCase(),
+        )
       // Fast path: the option is already on this product and already has every
       // value the variants use — nothing to create or link, so skip the 3-4
       // round trips (list options, load option, update option, link) per
@@ -1186,7 +1238,7 @@ export default function EditProductClient({
       const { optionId, valueIds, canonicalValues } = await upsertOptionValues(
         title,
         union,
-        existingOption?.id,
+        existingOption?.id ?? keepId,
       )
       linkTargets.push({
         id: optionId,
@@ -1224,11 +1276,14 @@ export default function EditProductClient({
         ]
       })
     }
-    const alreadyLinked = new Set(existingOptions.map((o) => o.id))
-    const neededTitles = new Set(neededByTitle.keys())
-    const removeOptionIds = existingOptions
-      .filter((o) => !neededTitles.has(o.title))
-      .map((o) => o.id)
+    const alreadyLinked = new Set<string>([
+      ...existingOptions.map((o) => o.id),
+      ...liveOptions.map((o) => o.id),
+    ])
+    const keepIds = new Set(keepIdByTitle.values())
+    const removeOptionIds = Array.from(alreadyLinked).filter(
+      (oid) => !keepIds.has(oid),
+    )
     let removeNowIds: string[] | null = null
     const defaultVariantSurvives = variants.some(
       (v) => v.medusaId === defaultVariantId && filledOptions(v).length > 0,
@@ -1284,6 +1339,28 @@ export default function EditProductClient({
         removeNowIds = removeOptionIds.filter(
           (oid) => !!usedIds && !usedIds.has(oid),
         )
+      }
+    }
+    if (removeNowIds === null && removeOptionIds.length > 0 && !defaultVariantId) {
+      // No single default variant: remove the variants the user deleted first
+      // (they may be what holds a stale/duplicate option), then unlink every
+      // option no surviving variant uses right now, before the product update.
+      const queuedFailed: string[] = []
+      for (const variantId of variantsToDeleteRef.current) {
+        try {
+          await deleteProductVariant(id, variantId)
+        } catch (deleteErr) {
+          console.error('[delete removed variant]', deleteErr)
+          queuedFailed.push(variantId)
+        }
+      }
+      variantsToDeleteRef.current = queuedFailed
+      if (liveUsage) {
+        const usedNow = liveUsage
+        staleOptionIdsRef.current = removeOptionIds.filter((oid) =>
+          usedNow.has(oid),
+        )
+        removeNowIds = removeOptionIds.filter((oid) => !usedNow.has(oid))
       }
     }
     const removeNow =

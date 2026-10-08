@@ -379,10 +379,14 @@ export default function BillingPage() {
   // shown, and only after typing settles for a moment, so scanning through
   // a search string doesn't fire a request per keystroke.
   useEffect(() => {
-    const productIds = Array.from(
-      new Set(visibleIndexEntries.map((e) => e.productId)),
+    // Keyed on VARIANT ids (not just product ids): picking / clearing a size
+    // chip keeps the same products but changes which variants are shown, and
+    // the newly shown variants still need their live price + stock.
+    const missing = visibleIndexEntries.filter(
+      (e) => !detailsByVariantId.has(e.variantId),
     )
-    const variantIds = visibleIndexEntries.map((e) => e.variantId)
+    const productIds = Array.from(new Set(missing.map((e) => e.productId)))
+    const variantIds = missing.map((e) => e.variantId)
     if (productIds.length === 0) return
     const timer = setTimeout(() => {
       fetchPOSDetailsForVariants(productIds, variantIds)
@@ -400,7 +404,7 @@ export default function BillingPage() {
         })
     }, 250)
     return () => clearTimeout(timer)
-  }, [visibleIndexEntries.map((e) => e.productId).join(',')])
+  }, [visibleIndexEntries.map((e) => e.variantId).join(',')])
   const detailsLoading =
     visibleIndexEntries.length > 0 &&
     visibleIndexEntries.some((e) => !detailsByVariantId.has(e.variantId))
@@ -740,8 +744,7 @@ export default function BillingPage() {
             // The line discount is for the whole line; fold it into the unit
             // price because custom items have no product to attach a
             // promotion to.
-            const lineDiscount =
-              i.discount && i.discount > 0 ? i.discount : 0
+            const lineDiscount = i.discount && i.discount > 0 ? i.discount : 0
             const unitPrice = Math.max(
               0,
               Math.round((i.product.price - lineDiscount / i.quantity) * 100) /

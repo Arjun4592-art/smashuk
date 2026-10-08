@@ -10,7 +10,8 @@ export interface DashboardStats {
   productsChange: number
   salesData: {
     date: string
-    revenue: number
+    /** null = this bucket is still in the future (e.g. later hours today) */
+    revenue: number | null
     orders: number
   }[]
   sportBreakdown: {
@@ -18,6 +19,14 @@ export interface DashboardStats {
     orders: number
     color: string
   }[]
+  topProducts: {
+    id: string
+    name: string
+    sold: number
+    revenue: number
+  }[]
+  comparisonLabel: string
+  granularity: 'hourly' | 'daily' | 'weekly' | 'monthly'
 }
 function jsonHeaders(): Record<string, string> {
   return {
@@ -806,12 +815,22 @@ export async function getInventory(params?: {
   offset?: number
   q?: string
 }) {
+  return (await getInventoryPage(params)).items
+}
+/** One page of inventory. `count` = total PRODUCTS on the server and
+ *  `fetched` = products in this page (items are flattened to variants, so
+ *  items.length is not the paging unit). */
+export async function getInventoryPage(params?: {
+  limit?: number
+  offset?: number
+  q?: string
+}) {
   const data = await api<any>('/api/admin/inventory', {
     limit: params?.limit,
     offset: params?.offset,
     q: params?.q,
   })
-  return data.products.flatMap((p: any) =>
+  const items = data.products.flatMap((p: any) =>
     (p.variants ?? []).map((v: any) => {
       const levels =
         v.inventory_items?.flatMap(
@@ -853,6 +872,11 @@ export async function getInventory(params?: {
       }
     }),
   )
+  return {
+    items,
+    count: (data.count ?? data.products.length) as number,
+    fetched: data.products.length as number,
+  }
 }
 export async function getDashboardStats(
   range?: string,
@@ -876,6 +900,9 @@ export async function getDashboardStats(
     productsChange: data.productsChange ?? 0,
     salesData: data.salesData ?? [],
     sportBreakdown: data.sportBreakdown ?? [],
+    topProducts: data.topProducts ?? [],
+    comparisonLabel: data.comparisonLabel ?? 'vs previous period',
+    granularity: data.granularity ?? 'daily',
   }
 }
 export async function getDiscounts(params?: {
