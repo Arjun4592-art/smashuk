@@ -549,6 +549,30 @@ export async function POST(request: NextRequest) {
     // single-use, unconditional promotion is created on the fly to carry the
     // discount into the cart, then cleaned up in `finally` if the sale never
     // completes (see `tempPromotionIds` above).
+    // The temp promotions below carry a fixed amount typed in the POS. Medusa
+    // treats a promotion's amount as EX-VAT unless promotion.is_tax_inclusive
+    // is true, and then adds VAT on top: a typed £10 off a VAT-inclusive cart
+    // became £12 off (10 x 1.2) and the customer was charged £2 too little.
+    // The POS cart (computePOSTotals) subtracts the typed amount as-is when
+    // prices include VAT, so mirror the cart's actual tax mode here.
+    let promoTaxInclusive = true
+    try {
+      const modeRes = await storeFetch(
+        `/store/carts/${cartId}?fields=items.is_tax_inclusive`,
+      )
+      if (modeRes.ok) {
+        const modeData = await safeJson(modeRes, 'cart tax mode fetch')
+        const flags = (modeData?.cart?.items ?? [])
+          .map((i: any) => i?.is_tax_inclusive)
+          .filter((v: unknown) => typeof v === 'boolean')
+        if (flags.length > 0) promoTaxInclusive = flags.every(Boolean)
+      }
+    } catch (err) {
+      console.warn(
+        '[POS orders] could not read cart tax mode, assuming VAT-inclusive:',
+        err,
+      )
+    }
     const promoCodesToApply: string[] = []
     if (coupon_code) {
       promoCodesToApply.push(String(coupon_code).trim().toUpperCase())
@@ -583,6 +607,7 @@ export async function POST(request: NextRequest) {
           type: 'standard',
           is_automatic: false,
           status: 'active',
+          is_tax_inclusive: promoTaxInclusive,
           application_method: {
             type: 'fixed',
             target_type: 'items',
@@ -635,6 +660,7 @@ export async function POST(request: NextRequest) {
           type: 'standard',
           is_automatic: false,
           status: 'active',
+          is_tax_inclusive: promoTaxInclusive,
           application_method: {
             type: 'fixed',
             target_type: 'order',

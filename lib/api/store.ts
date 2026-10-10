@@ -833,18 +833,23 @@ export async function getWishlist(): Promise<string[]> {
   const data = await res.json()
   return Array.isArray(data?.productIds) ? data.productIds : []
 }
-export async function saveWishlist(productIds: string[]) {
+export interface WishlistChange {
+  add?: string[]
+  remove?: string[]
+  clear?: boolean
+}
+export async function updateWishlist(
+  change: WishlistChange,
+): Promise<string[]> {
   const res = await fetch('/api/auth/customer-wishlist', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     credentials: 'include',
-    body: JSON.stringify({
-      productIds,
-    }),
+    body: JSON.stringify(change),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data?.error ?? 'Failed to save wishlist')
-  return data
+  return Array.isArray(data?.productIds) ? data.productIds : []
 }

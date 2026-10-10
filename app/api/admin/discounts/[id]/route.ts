@@ -10,6 +10,16 @@ import {
 
 const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 
+// Store prices are VAT-inclusive, so a fixed £ discount must be too, otherwise
+// Medusa adds VAT on top of it (e.g. £14 -> £16.80). Enforced server-side so
+// no client can create a fixed promotion that over-discounts.
+function withTaxInclusiveFixed(method: any) {
+  if (method && method.type === 'fixed' && method.is_tax_inclusive == null) {
+    return { ...method, is_tax_inclusive: true }
+  }
+  return method
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -129,7 +139,7 @@ export async function PATCH(
       code: rest.code,
       type: rest.type ?? 'standard',
       is_automatic: rest.is_automatic ?? false,
-      application_method: rest.application_method,
+      application_method: withTaxInclusiveFixed(rest.application_method),
     }
     if (rest.rules?.length > 0) promotionPayload.rules = rest.rules
     if (campaignId) promotionPayload.campaign_id = campaignId

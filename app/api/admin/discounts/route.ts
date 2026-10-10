@@ -3,6 +3,16 @@ import { getChannelIds, channelRule } from '@/lib/api/sales-channels'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { safeJson } from '@/lib/api/safe-json'
 const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
+// Store prices are VAT-inclusive, so a fixed £ discount must be too, otherwise
+// Medusa adds VAT on top of it (e.g. £14 -> £16.80). Enforced server-side so
+// no client can create a fixed promotion that over-discounts.
+function withTaxInclusiveFixed(method: any) {
+  if (method && method.type === 'fixed' && method.is_tax_inclusive == null) {
+    return { ...method, is_tax_inclusive: true }
+  }
+  return method
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const limit = searchParams.get('limit') ?? '20'
@@ -84,7 +94,7 @@ export async function POST(req: NextRequest) {
       code: body.code,
       type: body.type ?? 'standard',
       is_automatic: body.is_automatic ?? false,
-      application_method: body.application_method,
+      application_method: withTaxInclusiveFixed(body.application_method),
     }
     const createRules: any[] = [...(body.rules ?? [])]
     if (body.applies_to === 'online' || body.applies_to === 'store') {
