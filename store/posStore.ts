@@ -97,7 +97,12 @@ export interface POSStaffMember {
   totalOrders: number
 }
 export type AuditAction =
-  'login' | 'logout' | 'pin_change' | 'sale' | 'void' | 'return'
+  | 'login'
+  | 'logout'
+  | 'pin_change'
+  | 'sale'
+  | 'void'
+  | 'return'
 export interface AuditLogEntry {
   id: string
   staffId: string
@@ -334,16 +339,28 @@ function computePOSTotals(
       ? STANDARD_SHIPPING_COST
       : 0
   const chargeableBase = taxable + shippingCost
+  // Selling a gift card is not subject to VAT — VAT is charged when the card
+  // is spent on items. Gift card lines count toward the total but not the
+  // VAT base (the backend exempts them the same way). Discounts are blocked on
+  // sales containing a gift card, so no discount needs apportioning here.
+  const giftCardSaleTotal = items.reduce(
+    (sum, item) =>
+      (item.product as unknown as { giftCardCode?: string }).giftCardCode
+        ? sum + item.product.price * item.quantity
+        : sum,
+    0,
+  )
+  const vatBase = Math.max(0, chargeableBase - giftCardSaleTotal)
   const rate = liveTaxRate ?? VAT_RATE
   let tax: number
   let total: number
   if (liveTaxInclusive) {
     // Prices already include VAT — extract it for the receipt/display only, never add it on top
-    tax = Math.round((chargeableBase - chargeableBase / (1 + rate)) * 100) / 100
+    tax = Math.round((vatBase - vatBase / (1 + rate)) * 100) / 100
     total = chargeableBase
   } else {
     // Ex-VAT (trade/wholesale) pricing — VAT is added on top
-    tax = Math.round(chargeableBase * rate * 100) / 100
+    tax = Math.round(vatBase * rate * 100) / 100
     total = chargeableBase + tax
   }
   const cappedGiftCard = Math.max(0, Math.min(giftCardAmount, total))

@@ -6,6 +6,7 @@ import {
   STORE_DISPLAY_NAME,
   STORE_ADDRESS_LINE1,
   STORE_ADDRESS_LINE2,
+  GIFT_CARD_PRODUCT_HANDLE,
 } from './constants'
 import { qrInlineAttachment } from './qr'
 import { signOrderTrackToken } from './api/order-track-token'
@@ -196,7 +197,21 @@ export function orderNumberOf(order: any) {
   return order.display_id ? `#${order.display_id}` : order.id
 }
 
+// True when every line on the order is a gift card (emailed, never shipped).
+export function isGiftCardOnlyOrder(order: any) {
+  const items: any[] = order?.items ?? []
+  return (
+    items.length > 0 &&
+    items.every(
+      (i) =>
+        (i?.product_handle ?? i?.variant?.product?.handle) ===
+        GIFT_CARD_PRODUCT_HANDLE,
+    )
+  )
+}
+
 export function orderConfirmationEmail(order: any) {
+  if (isGiftCardOnlyOrder(order)) return giftCardOrderReceiptEmail(order)
   const orderNumber = orderNumberOf(order)
   const isPickup = order.metadata?.fulfillment_type === 'pickup'
   const greetingName = (order.customer?.first_name || '').trim() || 'there'
@@ -1230,4 +1245,139 @@ export function returnLabelEmail(
   )
   const text = `Your prepaid return label for order ${orderNumber} is attached as a PDF. Print it, attach it to your parcel and drop it off at a ${carrier} drop-off point.${opts.trackingNumber ? ` Tracking number: ${opts.trackingNumber}.` : ''} Reply to this email if you need help.`
   return { subject, html, text }
+}
+
+
+// ---------------------------------------------------------------------------
+// Gift cards (sold on the website - emailed, never shipped)
+// ---------------------------------------------------------------------------
+
+function giftCodeBlock(code: string) {
+  return `
+    <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
+      <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Gift card code</p>
+      <p style="margin:0;font-size:20px;font-weight:800;letter-spacing:1px;color:${TEXT};">${code}</p>
+    </div>
+  `
+}
+
+const escapeHtml = (s: string) =>
+  s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+
+// Sent to the BUYER right after payment: card number + value + how to use it.
+export function giftCardPurchaseEmail(opts: {
+  code: string
+  amount: number
+  orderNumber: string
+  recipientEmail?: string
+  sendDate?: string
+}) {
+  const { code, amount, orderNumber, recipientEmail, sendDate } = opts
+  const subject = `Your gift card is ready — ${code}`
+  const forwardNote = recipientEmail
+    ? `<p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">We are also emailing this card to <strong style="color:${TEXT};">${escapeHtml(recipientEmail)}</strong>${sendDate ? ` on ${escapeHtml(sendDate)}` : ' now'}.</p>`
+    : ''
+  const html = renderShell(
+    pillBadge('GIFT CARD PURCHASED', '#ECFDF5', GREEN),
+    'Thank you for your gift card purchase',
+    `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">Your ${SITE_NAME} gift card for <strong style="color:${TEXT};">${fmt(amount)}</strong> is ready to use (order <strong style="color:${TEXT};">${orderNumber}</strong>).</p>
+      ${giftCodeBlock(code)}
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">Enter this code at checkout online, or show it in store, to redeem it. It does not expire.</p>
+      ${forwardNote}
+      ${ctaButton('Start shopping', SITE_URL)}
+    `,
+  )
+  const text = `Your ${SITE_NAME} gift card (${fmt(amount)}) is ready. Gift card code: ${code}. Enter it at checkout or show it in store to redeem. It does not expire. Order ${orderNumber}.`
+  return {
+    subject,
+    html,
+    text,
+    resendTemplate: {
+      name: 'gift-card-confirmation',
+      variables: {
+        GIFT_CARD_CODE: code,
+        GIFT_CARD_AMOUNT: fmt(amount),
+        GIFT_CARD_EXPIRY_NOTE: '',
+        SHOP_URL: SITE_URL,
+      },
+    },
+  }
+}
+
+// Sent to the RECIPIENT when the buyer chose "send as a gift".
+export function giftCardRecipientEmail(opts: {
+  code: string
+  amount: number
+  senderName: string
+  message?: string
+}) {
+  const { code, amount, senderName, message } = opts
+  const note = (message ?? '').trim() || 'Enjoy your gift!'
+  const subject = `${senderName} sent you a ${SITE_NAME} gift card`
+  const html = renderShell(
+    pillBadge("YOU'VE BEEN SENT A GIFT", '#ECFDF5', GREEN),
+    "You've received a gift card",
+    `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};"><strong style="color:${TEXT};">${escapeHtml(senderName)}</strong> has sent you a ${SITE_NAME} gift card worth <strong style="color:${TEXT};">${fmt(amount)}</strong>.</p>
+      <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;"><p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Message from ${escapeHtml(senderName)}</p><p style="margin:0;font-size:14px;color:${TEXT};font-style:italic;">"${escapeHtml(note)}"</p></div>
+      ${giftCodeBlock(code)}
+      ${ctaButton('Redeem now', SITE_URL)}
+    `,
+  )
+  const text = `${senderName} sent you a ${SITE_NAME} gift card worth ${fmt(amount)}. "${note}" Gift card code: ${code}. Redeem it at ${SITE_URL}.`
+  return {
+    subject,
+    html,
+    text,
+    resendTemplate: {
+      name: 'gift-card-notification',
+      variables: {
+        SENDER_NAME: senderName,
+        GIFT_CARD_AMOUNT: fmt(amount),
+        GIFT_MESSAGE: note,
+        GIFT_CARD_CODE: code,
+        SHOP_URL: SITE_URL,
+      },
+    },
+  }
+}
+
+// Order receipt for an order that contains ONLY gift cards - same as the
+// normal confirmation but without the "being prepared for dispatch /
+// tracking" wording, since nothing is shipped.
+export function giftCardOrderReceiptEmail(order: any) {
+  const orderNumber = orderNumberOf(order)
+  const greetingName = (order.customer?.first_name || '').trim() || 'there'
+  const subject = `Order confirmed ${orderNumber} — ${SITE_NAME}`
+  const html = renderShell(
+    statusBadge('confirmed'),
+    `Thank you for your order, ${greetingName}`,
+    `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
+        Thank you for your order. We have received order <strong style="color:${TEXT};">${orderNumber}</strong>. Nothing is shipped for a gift card — your gift card number and details are in a separate email, sent to you right after payment.
+      </p>
+      ${itemsTable(order.items ?? [])}
+      <div style="margin-top:8px;padding-top:8px;border-top:2px solid ${BORDER};">
+        ${totalRow('Order total', order.total, true)}
+      </div>
+    `,
+  )
+  const text = `Order confirmed ${orderNumber} — Total ${fmt(order.total)}. Your gift card number and details are in a separate email.`
+  return {
+    subject,
+    html,
+    text,
+    // No dedicated Resend template for this variant yet -> raw html is used.
+    resendTemplate: undefined as
+      | { name: string; variables: Record<string, string> }
+      | undefined,
+    attachments: undefined as
+      | ReturnType<typeof qrInlineAttachment>[]
+      | undefined,
+  }
 }

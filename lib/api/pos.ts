@@ -60,6 +60,9 @@ export interface CreatePOSOrderPayload {
       unit_price: number
       /** Unique per custom line so identical lines are never merged. */
       ref: string
+      /** Set when this line is the sale of a physical gift card. The order
+       * route activates the card in Medusa after the sale is paid. */
+      gift_card_code?: string
     }
     quantity: number
     product_id?: string
@@ -438,9 +441,18 @@ export async function createPOSCustomer(customerData: {
     )
   }
 }
-export async function createPOSOrder(
-  payload: CreatePOSOrderPayload,
-): Promise<{ order: any; trackingToken?: string }> {
+/** Result of activating a sold physical gift card (see /api/pos/orders). */
+export interface GiftCardIssueOutcome {
+  code: string
+  value: number
+  ok: boolean
+  error?: string
+}
+export async function createPOSOrder(payload: CreatePOSOrderPayload): Promise<{
+  order: any
+  trackingToken?: string
+  giftCardsIssued?: GiftCardIssueOutcome[]
+}> {
   try {
     const res = await fetch('/api/pos/orders', {
       method: 'POST',
@@ -454,7 +466,11 @@ export async function createPOSOrder(
       throw new Error(err.error ?? err.message ?? 'Order create failed')
     }
     const data = await res.json()
-    return { order: data.order, trackingToken: data.trackingToken }
+    return {
+      order: data.order,
+      trackingToken: data.trackingToken,
+      giftCardsIssued: data.giftCardsIssued,
+    }
   } catch (err: unknown) {
     console.error('[POS] createPOSOrder Error:', err)
     throw new Error(
@@ -649,7 +665,11 @@ export interface CouponValidationResult {
   type?: 'percentage' | 'fixed'
   value?: number
   reason?:
-    'not_started' | 'expired' | 'min_amount' | 'min_quantity' | 'customer_group'
+    | 'not_started'
+    | 'expired'
+    | 'min_amount'
+    | 'min_quantity'
+    | 'customer_group'
 }
 export interface CouponValidationContext {
   /** Cart subtotal in pounds (not pence) — matches how POS stores prices. */
@@ -709,6 +729,32 @@ export async function validateGiftCard(
     throw new Error(
       err instanceof Error ? err.message : 'Failed to validate gift card',
     )
+  }
+}
+/**
+ * Is this card number free to sell? The validate endpoint answers
+ * `valid:false` with no `reason` only when no card has that code; every other
+ * answer (valid, expired, already redeemed) means the number is taken.
+ */
+export async function isGiftCardCodeAvailable(code: string): Promise<boolean> {
+  const r = await validateGiftCard(code)
+  return !r.valid && !r.reason
+}
+/** Recovery: activate a paid-for card that the order route couldn't. */
+export async function reissueGiftCard(payload: {
+  code: string
+  value: number
+  order_id: string
+  cashier?: string
+}): Promise<void> {
+  const res = await fetch('/api/pos/gift-cards/issue', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? 'Could not activate gift card')
   }
 }
 export interface EmailReceiptPayload {

@@ -6,11 +6,21 @@ const MEDUSA_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 // Store prices are VAT-inclusive, so a fixed £ discount must be too, otherwise
 // Medusa adds VAT on top of it (e.g. £14 -> £16.80). Enforced server-side so
 // no client can create a fixed promotion that over-discounts.
-function withTaxInclusiveFixed(method: any) {
-  if (method && method.type === 'fixed' && method.is_tax_inclusive == null) {
-    return { ...method, is_tax_inclusive: true }
+// In Medusa 2.17 `is_tax_inclusive` is a PROMOTION-level field; putting it
+// inside application_method is rejected ("Unrecognized fields"). So strip it
+// from the method and return it separately.
+function splitTaxInclusiveFixed(method: any): {
+  application_method: any
+  is_tax_inclusive?: boolean
+} {
+  if (!method) return { application_method: method }
+  const { is_tax_inclusive, ...rest } = method
+  if (is_tax_inclusive != null) {
+    return { application_method: rest, is_tax_inclusive: !!is_tax_inclusive }
   }
-  return method
+  return method.type === 'fixed'
+    ? { application_method: rest, is_tax_inclusive: true }
+    : { application_method: rest }
 }
 
 export async function GET(req: NextRequest) {
@@ -94,7 +104,7 @@ export async function POST(req: NextRequest) {
       code: body.code,
       type: body.type ?? 'standard',
       is_automatic: body.is_automatic ?? false,
-      application_method: withTaxInclusiveFixed(body.application_method),
+      ...splitTaxInclusiveFixed(body.application_method),
     }
     const createRules: any[] = [...(body.rules ?? [])]
     if (body.applies_to === 'online' || body.applies_to === 'store') {

@@ -525,7 +525,33 @@ export default function OrderDetailPage({
     }
   }
 
-  const subtotal = order.subtotal ?? 0
+  // ── Sale breakdown (VAT-inclusive, same as the POS order screen) ───────
+  // Medusa's order.subtotal is ex-VAT and order.total is net of any gift
+  // card, so rebuild: what was sold, how much a gift card covered, what was
+  // actually paid.
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  const discountAmt = order.discount_total ?? 0
+  const shippingAmt = order.shipping_total ?? 0
+  const itemsGross = r2(
+    items.reduce((sum, i) => sum + (i.unit_price ?? 0) * (i.quantity ?? 0), 0),
+  )
+  const saleTotalFromItems = Math.max(
+    0,
+    r2(itemsGross - discountAmt + shippingAmt),
+  )
+  const giftCardCode: string | null =
+    (order.metadata?.gift_card_code as string | undefined) || null
+  const giftCardUsed =
+    (order.gift_card_total ?? 0) > 0
+      ? (order.gift_card_total as number)
+      : giftCardCode
+        ? Math.max(0, r2(saleTotalFromItems - (order.total ?? 0)))
+        : 0
+  const hasGiftCard = giftCardUsed > 0.004
+  const saleTotal = hasGiftCard ? saleTotalFromItems : (order.total ?? 0)
+  const itemsTotal = hasGiftCard
+    ? itemsGross
+    : r2((order.total ?? 0) + discountAmt - shippingAmt)
   const capturedTotal = payments
     .filter((p) => p.captured_at)
     .reduce((s, p) => s + (p.amount ?? 0), 0)
@@ -909,36 +935,50 @@ export default function OrderDetailPage({
               {qtyTotal} item{qtyTotal === 1 ? '' : 's'}
             </p>
             <div className='mt-1 space-y-2.5'>
-              <MoneyRow label='Subtotal' value={fmt(subtotal, currency)} />
-              {order.discount_total > 0 && (
+              <MoneyRow
+                label='Items subtotal'
+                sub='Including VAT'
+                value={fmt(itemsTotal, currency)}
+              />
+              {discountAmt > 0 && (
                 <MoneyRow
                   label='Discount'
                   tone='red'
-                  value={`-${fmt(order.discount_total, currency)}`}
+                  value={`-${fmt(discountAmt, currency)}`}
                 />
               )}
               <MoneyRow
                 label='Shipping'
                 sub={shippingMethod?.name}
-                value={
-                  order.shipping_total > 0
-                    ? fmt(order.shipping_total, currency)
-                    : 'Free'
-                }
+                value={shippingAmt > 0 ? fmt(shippingAmt, currency) : 'Free'}
               />
-              {order.tax_total > 0 && (
-                <MoneyRow label='Tax' value={fmt(order.tax_total, currency)} />
-              )}
               <MoneyRow
-                label='Total'
+                label='Sale total'
                 bold
-                value={fmt(order.total ?? 0, currency)}
+                sub={
+                  order.tax_total > 0
+                    ? `Includes VAT: ${fmt(order.tax_total, currency)}`
+                    : undefined
+                }
+                value={fmt(saleTotal, currency)}
               />
             </div>
 
             <Divider className='my-3' />
             <div className='space-y-2.5'>
-              <MoneyRow label='Paid' value={fmt(capturedTotal, currency)} />
+              {hasGiftCard && (
+                <MoneyRow
+                  label='Paid with gift card'
+                  tone='green'
+                  sub={giftCardCode ? `Card ${giftCardCode}` : undefined}
+                  value={`-${fmt(giftCardUsed, currency)}`}
+                />
+              )}
+              <MoneyRow
+                label={hasGiftCard ? 'Paid by customer' : 'Paid'}
+                bold
+                value={fmt(capturedTotal, currency)}
+              />
               {refundedTotal > 0 && (
                 <MoneyRow
                   label='Refunded'

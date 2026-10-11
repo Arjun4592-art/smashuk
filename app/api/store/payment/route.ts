@@ -174,6 +174,8 @@ export async function POST(req: NextRequest) {
           status: res.status,
         })
       }
+      // Gift cards are only issued once the money is really captured.
+      let captureFailed = true
       try {
         const order = data.order ?? data.cart
         const orderId = order?.id
@@ -184,6 +186,7 @@ export async function POST(req: NextRequest) {
             `/admin/orders/${orderId}?fields=*payment_collections.payments`,
           )
           if (orderRes.ok) {
+            captureFailed = false
             const { order: fullOrder } = await orderRes.json()
             const payments = (fullOrder?.payment_collections ?? []).flatMap(
               (pc: any) => pc.payments ?? [],
@@ -202,6 +205,7 @@ export async function POST(req: NextRequest) {
                 },
               )
               if (!capRes.ok) {
+                captureFailed = true
                 console.error(
                   `[/api/store/payment] capture failed for payment ${payment.id}:`,
                   await capRes.text().catch(() => ''),
@@ -211,10 +215,26 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (captureErr) {
+        captureFailed = true
         console.error(
           '[/api/store/payment] post-complete capture step failed:',
           captureErr,
         )
+      }
+      // Gift cards are digital: once the payment is captured, create the card(s)
+      // and email the number + details to the buyer (and the recipient, if the
+      // card was bought as a gift). No-op for orders without a gift card.
+      if (!captureFailed) {
+        try {
+          const order = data.order ?? data.cart
+          if (order?.id) {
+            const { fulfillGiftCardsForOrder } =
+              await import('@/lib/api/gift-card-fulfillment')
+            await fulfillGiftCardsForOrder(order)
+          }
+        } catch (giftErr) {
+          console.error('[/api/store/payment] gift card fulfilment failed:', giftErr)
+        }
       }
       try {
         const order = data.order ?? data.cart

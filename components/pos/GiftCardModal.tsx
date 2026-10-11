@@ -9,12 +9,26 @@ interface Props {
 }
 const fmt = (n: number) => CURRENCY_SYMBOL + (Number(n) || 0).toFixed(2)
 export default function GiftCardModal({ onClose }: Props) {
-  const { total, giftCardCode, giftCardAmount, applyGiftCard, removeGiftCard } =
-    usePOSStore()
+  const {
+    total,
+    items,
+    giftCardCode,
+    giftCardAmount,
+    applyGiftCard,
+    removeGiftCard,
+  } = usePOSStore()
+  const [balanceInfo, setBalanceInfo] = useState('')
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [checking, setChecking] = useState(false)
-  const handleApply = async () => {
+  const reasonText = (reason?: string) =>
+    reason === 'already_redeemed'
+      ? 'This gift card has already been fully redeemed'
+      : reason === 'expired'
+        ? 'This gift card has expired'
+        : 'Invalid gift card code'
+  // Look up a card's remaining balance without applying it to the sale.
+  const handleCheckBalance = async () => {
     const trimmed = code.trim().toUpperCase()
     if (!trimmed) {
       setError('Enter a gift card code')
@@ -22,16 +36,38 @@ export default function GiftCardModal({ onClose }: Props) {
     }
     setChecking(true)
     setError('')
+    setBalanceInfo('')
     try {
       const result = await validateGiftCard(trimmed)
       if (!result.valid || result.balance == null) {
-        setError(
-          result.reason === 'already_redeemed'
-            ? 'This gift card has already been fully redeemed'
-            : result.reason === 'expired'
-              ? 'This gift card has expired'
-              : 'Invalid gift card code',
-        )
+        setError(reasonText(result.reason))
+        return
+      }
+      setBalanceInfo(`Balance on ${trimmed}: ${fmt(result.balance)}`)
+    } catch (err) {
+      console.error('[GiftCardModal] balance check failed:', err)
+      setError('Could not check the balance — please try again')
+    } finally {
+      setChecking(false)
+    }
+  }
+  const handleApply = async () => {
+    const trimmed = code.trim().toUpperCase()
+    if (!trimmed) {
+      setError('Enter a gift card code')
+      return
+    }
+    if (items.some((i) => (i.product as any).giftCardCode)) {
+      setError('A gift card cannot pay for another gift card')
+      return
+    }
+    setChecking(true)
+    setError('')
+    setBalanceInfo('')
+    try {
+      const result = await validateGiftCard(trimmed)
+      if (!result.valid || result.balance == null) {
+        setError(reasonText(result.reason))
         return
       }
       if (result.balance <= 0) {
@@ -160,6 +196,7 @@ export default function GiftCardModal({ onClose }: Props) {
               onChange={(e) => {
                 setCode(e.target.value)
                 setError('')
+                setBalanceInfo('')
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleApply()
@@ -171,6 +208,14 @@ export default function GiftCardModal({ onClose }: Props) {
                 color: '#202223',
               }}
             />
+            {balanceInfo && (
+              <p
+                className='text-xs mt-1 font-medium'
+                style={{ color: '#008060' }}
+              >
+                {balanceInfo}
+              </p>
+            )}
             {error && (
               <p
                 className='text-xs mt-1'
@@ -205,6 +250,14 @@ export default function GiftCardModal({ onClose }: Props) {
             }}
           >
             Cancel
+          </button>
+          <button
+            onClick={handleCheckBalance}
+            disabled={checking}
+            className='py-2.5 px-3 rounded-lg text-sm border transition-colors hover:bg-[#F6F6F7]'
+            style={{ borderColor: '#E1E3E5', color: '#202223' }}
+          >
+            Check balance
           </button>
           <button
             onClick={handleApply}

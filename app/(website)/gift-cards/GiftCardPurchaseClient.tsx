@@ -37,6 +37,8 @@ export default function GiftCardPurchaseClient({
   const selectedVariant = sortedVariants.find(v => v.id === selectedVariantId);
   const selectedAmount = selectedVariant ? getVariantAmount(selectedVariant) : 0;
   const today = new Date().toISOString().split('T')[0];
+  // Scheduled sends are limited to ~30 days ahead by the email provider.
+  const maxSendDate = new Date(Date.now() + 29 * 86400000).toISOString().split('T')[0];
   const emailError = isGift && touched && !isValidEmail(recipientEmail);
   const canAdd = !!selectedVariant && !adding && (!isGift || isValidEmail(recipientEmail));
   const handleAddToCart = () => {
@@ -197,7 +199,7 @@ export default function GiftCardPurchaseClient({
                       (optional)
                     </span>
                   </label>
-                  <input type='date' min={today} value={sendDate} onChange={e => setSendDate(e.target.value)} className='w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm font-lato focus:outline-none focus:border-[#E8553A] transition-colors' />
+                  <input type='date' min={today} max={maxSendDate} value={sendDate} onChange={e => setSendDate(e.target.value)} className='w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm font-lato focus:outline-none focus:border-[#E8553A] transition-colors' />
                   <p className='mt-1 text-[11px] text-gray-400 font-lato'>
                     Leave blank to send right after checkout
                   </p>
@@ -243,6 +245,7 @@ export default function GiftCardPurchaseClient({
 
           <div className='mt-8 space-y-2 text-sm text-gray-500 font-lato'>
             <p>✓ Delivered by email after checkout — use in minutes</p>
+            <p>✓ No shipping charge — nothing is posted</p>
             <p>✓ Valid on anything in-store or online</p>
             <p>✓ No expiry date</p>
             <p>✓ Enter the code at checkout to redeem</p>

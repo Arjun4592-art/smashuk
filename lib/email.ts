@@ -94,6 +94,9 @@ export async function sendMail(opts: {
   html: string
   text?: string
   replyTo?: string
+  // ISO-8601 timestamp: Resend holds the email and sends it at that time
+  // (used for gift cards the buyer asked to be delivered on a later date).
+  scheduledAt?: string
   // Every email type this site sends has its own Resend Template (see
   // scripts/resend-templates.generated.json — one entry per email, built
   // directly from this file's own output — and
@@ -152,6 +155,7 @@ export async function sendMail(opts: {
       subject: opts.subject,
       text: opts.text,
       ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+      ...(opts.scheduledAt ? { scheduledAt: opts.scheduledAt } : {}),
       ...(attachments?.length ? { attachments } : {}),
       ...(useTemplate
         ? {

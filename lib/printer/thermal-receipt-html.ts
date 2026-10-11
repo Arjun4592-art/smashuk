@@ -63,13 +63,6 @@ export function buildThermalReceiptHtml(
     totals.push(row(esc(data.discountLabel), `-${fmt(data.discountAmount)}`))
   if (data.shippingAmount && data.shippingAmount > 0)
     totals.push(row('Shipping', fmt(data.shippingAmount)))
-  if (data.giftCardAmount > 0)
-    totals.push(
-      row(
-        `Gift card${data.giftCardMasked ? ` (${esc(data.giftCardMasked)})` : ''}`,
-        `-${fmt(data.giftCardAmount)}`,
-      ),
-    )
 
   const base = Math.max(0, data.total - data.tax)
   const taxTable = `<table class="tax">
@@ -78,9 +71,24 @@ export function buildThermalReceiptHtml(
     <tr class="tt"><td class="l">TOTAL</td><td>${fmt(base)}</td><td>${fmt(data.tax)}</td><td>${fmt(data.total)}</td></tr>
   </table>`
 
-  const pay: string[] = [
-    row(esc(data.payMethodLabel || 'Payment'), fmt(data.total)),
-  ]
+  // Gift card covers part of the total; the card/cash line is only the rest.
+  const pay: string[] = []
+  if (data.giftCardAmount > 0)
+    pay.push(
+      row(
+        `Gift card${data.giftCardMasked ? ` (${esc(data.giftCardMasked)})` : ''}`,
+        `-${fmt(data.giftCardAmount)}`,
+      ),
+    )
+  pay.push(
+    row(
+      data.giftCardAmount > 0
+        ? `Paid &middot; ${esc(data.payMethodLabel || 'Payment')}`
+        : esc(data.payMethodLabel || 'Payment'),
+      fmt(Math.max(0, data.total - (data.giftCardAmount || 0))),
+      data.giftCardAmount > 0 ? 'b big' : '',
+    ),
+  )
   for (const s of data.splitPayments ?? [])
     pay.push(row(esc(s.label), fmt(s.amount), 'small'))
   if (data.change > 0) pay.push(row('Change', fmt(data.change)))
@@ -153,7 +161,6 @@ export function buildThermalReceiptHtml(
   <div class="meta">
     <div>${esc(data.dateStr)}, ${esc(data.timeStr)}</div>
     <div>Receipt: #${esc(data.orderId)}</div>
-//     <div class="small">Staff: ${esc(data.cashier)}</div>
     <div style="margin-top:10px">${esc(data.footerLine1 ?? 'Thank you for shopping with us!')}</div>
     ${data.footerLine2 ? `<div class="small">${esc(data.footerLine2)}</div>` : ''}
   </div>

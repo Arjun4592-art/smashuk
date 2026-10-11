@@ -194,7 +194,17 @@ export default function CheckoutPage() {
   const [checkoutStep, setCheckoutStep] = useState<'details' | 'payment'>(
     'details',
   )
-  const [deliveryMode, setDeliveryMode] = useState<'ship' | 'pickup'>('ship')
+  const [deliveryModeChoice, setDeliveryMode] = useState<'ship' | 'pickup'>(
+    'ship',
+  )
+  // Gift cards are delivered by email: a cart made only of gift cards needs
+  // no shipping address, no shipping method and no shipping charge.
+  const isGiftCardOnly =
+    items.length > 0 &&
+    items.every((i) => i.product.slug === GIFT_CARD_PRODUCT_HANDLE)
+  const deliveryMode: 'ship' | 'pickup' | 'digital' = isGiftCardOnly
+    ? 'digital'
+    : deliveryModeChoice
   const [storeContact, setStoreContact] = useState<{
     name: string
     email: string
@@ -399,7 +409,8 @@ export default function CheckoutPage() {
   const isChannelIslandsDelivery =
     deliveryMode === 'ship' && vatDestination.vatExempt
 
-  const displayShipping = isPickupSelected
+  const displayShipping =
+    isGiftCardOnly || isPickupSelected
     ? 0
     : isChannelIslandsDelivery
       ? CHANNEL_ISLANDS_SHIPPING_COST
@@ -414,15 +425,24 @@ export default function CheckoutPage() {
           : STANDARD_SHIPPING_COST
 
   const goodsAfterDiscount = subtotal - discountAmount
+  // Selling a gift card is not a VAT-able supply (VAT is charged when the card
+  // is spent on goods) - same rule the POS uses. Keep those lines out of the
+  // VAT base so the checkout never shows VAT on a gift card.
+  const giftCardLinesTotal = items
+    .filter((i) => i.product.slug === GIFT_CARD_PRODUCT_HANDLE)
+    .reduce((s, i) => s + (i.product.price - (i.discount ?? 0)) * i.quantity, 0)
+  const vatableGoods = Math.max(0, goodsAfterDiscount - giftCardLinesTotal)
   const netBeforeGiftCard = vatDestination.vatExempt
-    ? Math.round((goodsAfterDiscount / (1 + taxRate)) * 100) / 100 +
+    ? Math.round((vatableGoods / (1 + taxRate)) * 100) / 100 +
+      giftCardLinesTotal +
       displayShipping
     : goodsAfterDiscount + displayShipping
   const displayTotal = Math.max(0, netBeforeGiftCard - giftCardTotal)
 
+  const vatBase = Math.max(0, displayTotal - giftCardLinesTotal)
   const displayTax = vatDestination.vatExempt
     ? 0
-    : Math.round((displayTotal - displayTotal / (1 + taxRate)) * 100) / 100
+    : Math.round((vatBase - vatBase / (1 + taxRate)) * 100) / 100
   useEffect(() => {
     if (deliveryMode === 'pickup') {
       if (pickupOption && selectedShippingOptionId !== pickupOption.id) {
@@ -554,7 +574,7 @@ export default function CheckoutPage() {
       return
     }
     if (
-      deliveryMode !== 'pickup' &&
+      deliveryMode === 'ship' &&
       !billingSameAsShipping &&
       (!billingForm.name ||
         !billingForm.line1 ||
@@ -568,7 +588,20 @@ export default function CheckoutPage() {
     try {
       const [firstName, ...rest] = form.name.split(' ')
       const shippingAddress =
-        deliveryMode === 'pickup' && storeContact
+        deliveryMode === 'digital'
+          ? {
+              // No delivery address for gift cards - Medusa still needs a
+              // country so the tax region resolves to the UK.
+              first_name: firstName,
+              last_name: rest.join(' ') || '',
+              address_1: '',
+              city: '',
+              province: '',
+              postal_code: '',
+              country_code: 'gb',
+              phone: form.phone || undefined,
+            }
+          : deliveryMode === 'pickup' && storeContact
           ? {
               first_name: firstName,
               last_name: rest.join(' ') || '',
@@ -592,7 +625,7 @@ export default function CheckoutPage() {
               phone: form.phone || undefined,
             }
       const billingAddress =
-        deliveryMode === 'pickup' || billingSameAsShipping
+        deliveryMode !== 'ship' || billingSameAsShipping
           ? undefined
           : (() => {
               const [billingFirstName, ...billingRest] =
@@ -618,7 +651,28 @@ export default function CheckoutPage() {
       const isCIOrder =
         deliveryMode !== 'pickup' && getVatDestination(form.pincode).vatExempt
       await setCartDestination(cartId, destCountry)
-      let optionId = selectedShippingOptionId || shippingOptions[0]?.id
+      let optionId: string | undefined
+      if (isGiftCardOnly) {
+        // Medusa refuses to complete a cart whose items have a shipping
+        // profile unless a shipping method is attached. For gift cards attach
+        // the FREE digital option ("Digital delivery") if one is set up for
+        // the gift-card profile - never a paid one.
+        const giftOptions = (await listShippingOptions(cartId)) ?? []
+        const freeOptions = giftOptions.filter((o: any) => {
+          const amount = Number(o.calculated_price?.calculated_amount ?? o.amount)
+          return (
+            Number.isFinite(amount) &&
+            amount === 0 &&
+            !isPickupOption(o.name ?? '')
+          )
+        })
+        optionId = (
+          freeOptions.find((o: any) => /digital|email|gift/i.test(o.name ?? '')) ??
+          freeOptions[0]
+        )?.id
+      } else {
+        optionId = selectedShippingOptionId || shippingOptions[0]?.id
+      }
       if (isCIOrder) {
         const freshOptions = await listShippingOptions(cartId)
         const ciOption = (freshOptions ?? []).find((o: any) =>
@@ -664,7 +718,8 @@ export default function CheckoutPage() {
       const selectedOption = shippingOptions.find(
         (o) => o.id === (selectedShippingOptionId || shippingOptions[0]?.id),
       )
-      const isPickupOrder = isPickupOption(selectedOption?.name ?? '')
+      const isPickupOrder =
+        !isGiftCardOnly && isPickupOption(selectedOption?.name ?? '')
       const completeRes = await fetch('/api/store/payment', {
         method: 'POST',
         headers: {
@@ -691,7 +746,12 @@ export default function CheckoutPage() {
         throw new Error(completeData?.message ?? 'Order placement failed')
       }
       clearCart()
-      toast.success('Order placed successfully! 🎉')
+      toast.success(
+        isGiftCardOnly
+          ? `Payment received! Your gift card details are on the way to ${form.email}`
+          : 'Order placed successfully! 🎉',
+        isGiftCardOnly ? { duration: 8000 } : undefined,
+      )
       router.push('/profile?tab=orders')
     } catch (err: any) {
       toast.error(err?.message ?? 'Order placement failed. Try again.')
@@ -740,6 +800,16 @@ export default function CheckoutPage() {
           {}
           <div className='lg:col-span-2 space-y-5'>
             {}
+            {isGiftCardOnly ? (
+              <div className='flex items-start gap-3 p-4 rounded-2xl border border-[#10B981]/30 bg-[#ECFDF5]'>
+                <span className='text-xl'>✉️</span>
+                <p className='text-sm font-lato text-[#065F46] leading-relaxed'>
+                  <strong>No delivery needed.</strong> Your gift card number
+                  and details will be emailed to you as soon as payment is
+                  complete.
+                </p>
+              </div>
+            ) : (
             <div className='grid grid-cols-2 gap-0 border border-gray-200 rounded-2xl overflow-hidden bg-white'>
               <button
                 type='button'
@@ -757,10 +827,11 @@ export default function CheckoutPage() {
                 🏬 Pickup
               </button>
             </div>
+            )}
 
             <div className='bg-white rounded-2xl p-6 border border-gray-100'>
               <h2 className='font-montserrat font-black text-xl text-[#0A1F44] mb-5'>
-                {deliveryMode === 'pickup'
+                {deliveryMode === 'pickup' || deliveryMode === 'digital'
                   ? 'Contact Details'
                   : 'Shipping Address'}
               </h2>
@@ -884,7 +955,7 @@ export default function CheckoutPage() {
             </div>
 
             {}
-            {deliveryMode !== 'pickup' && (
+            {deliveryMode === 'ship' && (
               <div className='bg-white rounded-2xl p-6 border border-gray-100'>
                 <div className='flex items-center justify-between mb-5'>
                   <h2 className='font-montserrat font-black text-xl text-[#0A1F44]'>
@@ -1104,7 +1175,11 @@ export default function CheckoutPage() {
                       ?
                     </button>
                   </span>
-                  {!cartId ? (
+                  {isGiftCardOnly ? (
+                    <span className='text-green-600 font-semibold'>
+                      None - sent by email
+                    </span>
+                  ) : !cartId ? (
                     <span className='text-gray-400 text-xs'>
                       Enter shipping address to view methods
                     </span>

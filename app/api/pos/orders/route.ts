@@ -12,6 +12,12 @@ import { adminNewOrderEmail } from '@/lib/email-templates'
 import { sendOrderConfirmationEmail } from '@/lib/api/order-notifications'
 import { signOrderTrackToken } from '@/lib/api/order-track-token'
 import { WALKIN_EMAIL, isSyntheticEmail } from '@/lib/pos/walkin'
+import { issueGiftCard } from '@/lib/api/pos-gift-card-issue'
+import {
+  giftCardAmountError,
+  giftCardCodeError,
+  normalizeGiftCardCode,
+} from '@/lib/pos/gift-card'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL || 'http://localhost:9000'
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
@@ -319,6 +325,48 @@ export async function POST(request: NextRequest) {
         },
       )
     }
+    // Physical gift card sales (custom line carrying `gift_card_code`): enforce
+    // the rules server-side too, never trust the till UI alone.
+    const giftCardSales: { code: string; value: number }[] = []
+    for (const item of items) {
+      const rawCode = item?.custom?.gift_card_code
+      if (!rawCode) continue
+      const code = normalizeGiftCardCode(String(rawCode))
+      const value = Number(item.custom.unit_price)
+      const problem =
+        giftCardCodeError(code) ??
+        giftCardAmountError(value) ??
+        (Number(item.quantity) !== 1
+          ? 'A gift card line must have quantity 1'
+          : null) ??
+        (item.manual_discount && Number(item.manual_discount) > 0
+          ? 'Gift cards cannot be discounted'
+          : null) ??
+        (giftCardSales.some((g) => g.code === code)
+          ? `Card ${code} is on this sale twice`
+          : null)
+      if (problem) {
+        return NextResponse.json({ error: problem }, { status: 400 })
+      }
+      giftCardSales.push({ code, value })
+    }
+    if (giftCardSales.length > 0) {
+      if (gift_card_code) {
+        return NextResponse.json(
+          { error: 'A gift card cannot be used to pay for another gift card' },
+          { status: 400 },
+        )
+      }
+      if (coupon_code || Number(manual_discount_amount) > 0) {
+        return NextResponse.json(
+          {
+            error:
+              'Discounts cannot be applied to a sale containing a gift card',
+          },
+          { status: 400 },
+        )
+      }
+    }
     async function resolveUniqueEmail(
       candidate: string,
       ownerId: string,
@@ -455,6 +503,9 @@ export async function POST(request: NextRequest) {
             unit_price: item.custom.unit_price,
             quantity: item.quantity,
             ref: item.custom.ref,
+            // Gift card sales are VAT-exempt on the backend (VAT is charged
+            // when the card is spent on items).
+            gift_card: Boolean(item.custom.gift_card_code),
           }),
         })
         const customData = await safeJson(customRes, 'add custom item')
@@ -549,30 +600,6 @@ export async function POST(request: NextRequest) {
     // single-use, unconditional promotion is created on the fly to carry the
     // discount into the cart, then cleaned up in `finally` if the sale never
     // completes (see `tempPromotionIds` above).
-    // The temp promotions below carry a fixed amount typed in the POS. Medusa
-    // treats a promotion's amount as EX-VAT unless promotion.is_tax_inclusive
-    // is true, and then adds VAT on top: a typed £10 off a VAT-inclusive cart
-    // became £12 off (10 x 1.2) and the customer was charged £2 too little.
-    // The POS cart (computePOSTotals) subtracts the typed amount as-is when
-    // prices include VAT, so mirror the cart's actual tax mode here.
-    let promoTaxInclusive = true
-    try {
-      const modeRes = await storeFetch(
-        `/store/carts/${cartId}?fields=items.is_tax_inclusive`,
-      )
-      if (modeRes.ok) {
-        const modeData = await safeJson(modeRes, 'cart tax mode fetch')
-        const flags = (modeData?.cart?.items ?? [])
-          .map((i: any) => i?.is_tax_inclusive)
-          .filter((v: unknown) => typeof v === 'boolean')
-        if (flags.length > 0) promoTaxInclusive = flags.every(Boolean)
-      }
-    } catch (err) {
-      console.warn(
-        '[POS orders] could not read cart tax mode, assuming VAT-inclusive:',
-        err,
-      )
-    }
     const promoCodesToApply: string[] = []
     if (coupon_code) {
       promoCodesToApply.push(String(coupon_code).trim().toUpperCase())
@@ -606,8 +633,11 @@ export async function POST(request: NextRequest) {
           code: lineCode,
           type: 'standard',
           is_automatic: false,
+          // POS prices include VAT, so a £ discount entered at the till is
+          // VAT-inclusive. Without this Medusa treats it as ex-VAT and adds
+          // VAT back on top. (Promotion-level field in Medusa 2.17.)
+          is_tax_inclusive: true,
           status: 'active',
-          is_tax_inclusive: promoTaxInclusive,
           application_method: {
             type: 'fixed',
             target_type: 'items',
@@ -659,8 +689,8 @@ export async function POST(request: NextRequest) {
           code: tempCode,
           type: 'standard',
           is_automatic: false,
+          is_tax_inclusive: true,
           status: 'active',
-          is_tax_inclusive: promoTaxInclusive,
           application_method: {
             type: 'fixed',
             target_type: 'order',
@@ -1050,6 +1080,34 @@ export async function POST(request: NextRequest) {
     }
     const order = completeData.order
     orderCompleted = true
+    // Activate sold physical gift cards only now that the sale is complete and
+    // paid — never before, or an abandoned sale would leave a live card.
+    const giftCardsIssued: {
+      code: string
+      value: number
+      ok: boolean
+      error?: string
+    }[] = []
+    for (const g of giftCardSales) {
+      const r = await issueGiftCard({
+        code: g.code,
+        value: g.value,
+        orderId: order.id,
+        cashier,
+      })
+      if (!r.ok) {
+        console.error(
+          `[POS orders] gift card ${g.code} NOT activated for order ${order.id}:`,
+          r.error,
+        )
+      }
+      giftCardsIssued.push({
+        code: g.code,
+        value: g.value,
+        ok: r.ok,
+        ...(r.ok ? {} : { error: r.error }),
+      })
+    }
     const metadataPayload = {
       source: 'pos',
       cashier: cashier ?? '',
@@ -1063,6 +1121,11 @@ export async function POST(request: NextRequest) {
         ? {
             gift_card_code: String(gift_card_code).toUpperCase(),
           }
+        : {}),
+      // Cards sold on this order (flat JSON string — Medusa metadata values
+      // can't be arrays). `ok:false` entries need manual activation.
+      ...(giftCardsIssued.length > 0
+        ? { gift_cards_sold: JSON.stringify(giftCardsIssued) }
         : {}),
       // Cash+card breakdown for a 'split' sale, so a reprint can show the
       // same lines as the original receipt. JSON-stringified because Medusa
@@ -1263,6 +1326,7 @@ export async function POST(request: NextRequest) {
       order,
       fulfilled,
       captured,
+      giftCardsIssued,
       // Signed token for the public, no-login order-status page/QR (see
       // lib/api/order-track-token.ts + app/(website)/track/[id]) — the POS
       // receipt needs this alongside order.id to build a working link.

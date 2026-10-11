@@ -38,6 +38,8 @@ import CameraBarcodeScanner from '@/components/pos/CameraBarcodeScanner'
 import NoteModal from '@/components/pos/NoteModal'
 import FulfillmentModal from '@/components/pos/FulfillmentModal'
 import CustomItemModal from '@/components/pos/CustomItemModal'
+import SellGiftCardModal from '@/components/pos/SellGiftCardModal'
+import { giftCardLineTitle } from '@/lib/pos/gift-card'
 import VoidModal from '@/components/pos/VoidModal'
 import SavedCarts from '@/components/pos/SavedCarts'
 import ReturnModal from '@/components/pos/ReturnModal'
@@ -110,6 +112,7 @@ export default function BillingPage() {
   const [showCameraScan, setShowCameraScan] = useState(false)
   const [showNote, setShowNote] = useState(false)
   const [showCustomItem, setShowCustomItem] = useState(false)
+  const [showSellGiftCard, setShowSellGiftCard] = useState(false)
   const [showFulfillment, setShowFulfillment] = useState(false)
   const [showVoid, setShowVoid] = useState(false)
   const [showSavedCarts, setShowSavedCarts] = useState(false)
@@ -683,7 +686,57 @@ export default function BillingPage() {
   // neither, so they now go Charge -> Take now -> payment.
   const handleChargeClick = () => {
     setPendingCharge(false)
+    const problem = giftCardSaleProblem()
+    if (problem) {
+      toast.error(problem)
+      return
+    }
     setShowFulfillment(true)
+  }
+  // Physical gift card sales: a card is sold at face value, one per line, and
+  // is never discounted or paid for with another gift card. The order route
+  // enforces the same rules; this just stops the cashier before payment.
+  const giftCardSaleProblem = (): string | null => {
+    const cardLines = items.filter((i) => (i.product as any).giftCardCode)
+    if (cardLines.length === 0) return null
+    if (cardLines.some((i) => i.quantity !== 1))
+      return 'A gift card must be quantity 1 — remove the extra copies'
+    if (cardLines.some((i) => i.discount && i.discount > 0))
+      return 'Gift cards cannot be discounted — remove the line discount'
+    if (customDiscount > 0 || couponCode)
+      return 'Gift cards cannot be discounted — remove the discount from this sale'
+    if (giftCardCode)
+      return 'A gift card cannot pay for another gift card — remove the redeemed card'
+    return null
+  }
+  // Sell a physical gift card: a custom line carrying the card number. The
+  // card is only activated in Medusa after the sale is paid.
+  const handleAddGiftCardSale = (card: { code: string; amount: number }) => {
+    const ref = `giftcard-${card.code}`
+    const product = {
+      id: ref,
+      name: giftCardLineTitle(card.code),
+      slug: 'gift-card-sale',
+      description: '',
+      brand: 'Gift card',
+      sport: '',
+      category: 'Gift card',
+      categoryId: '',
+      price: card.amount,
+      images: [],
+      stock: 9999,
+      sku: card.code,
+      rating: 0,
+      reviewCount: 0,
+      inStock: true,
+      tags: [],
+      specs: [],
+      isCustom: true,
+      customRef: ref,
+      giftCardCode: card.code,
+    } as unknown as Parameters<typeof addItem>[0]
+    addItem(product, 1)
+    toast.success(`Gift card ${card.code} added`)
   }
   // Custom sale: an item that isn't registered in the catalogue. It lives in
   // the cart as a normal line with a one-off id (so two custom lines never
@@ -755,6 +808,7 @@ export default function BillingPage() {
                 title: i.product.name,
                 unit_price: unitPrice,
                 ref: (i.product as any).customRef ?? i.product.id,
+                gift_card_code: (i.product as any).giftCardCode ?? undefined,
               },
               quantity: i.quantity,
             }
@@ -811,6 +865,22 @@ export default function BillingPage() {
         })
         medusaOrderId = orderResult?.order?.id
         trackingToken = orderResult?.trackingToken
+        const failedCards = (orderResult?.giftCardsIssued ?? []).filter(
+          (g) => !g.ok,
+        )
+        if (failedCards.length > 0) {
+          // The customer has paid but the card isn't live yet. Keep this on
+          // screen until the cashier acts on it.
+          toast.error('Gift card NOT activated', {
+            description: `${failedCards
+              .map((g) => `${g.code} (£${g.value.toFixed(2)})`)
+              .join(
+                ', ',
+              )} — ${failedCards[0].error}. Do not hand the card over until it is activated: Dashboard → Gift cards → Issue Gift Card, using the same number and amount.`,
+            duration: Infinity,
+            closeButton: true,
+          })
+        }
       } catch (err: unknown) {
         console.error('[BillingPage] Medusa order create failed:', err)
         toast.error('Sale not synced to Medusa', {
@@ -1532,6 +1602,32 @@ export default function BillingPage() {
           </button>
 
           <button
+            onClick={() => setShowSellGiftCard(true)}
+            className='flex items-center gap-1 px-2 py-1.5 rounded text-xs border transition-all shrink-0'
+            title='Sell a physical gift card'
+            style={{
+              borderColor: '#E1E3E5',
+              color: '#6D7175',
+              background: '#FFFFFF',
+            }}
+          >
+            <svg
+              width='13'
+              height='13'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1.5'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <rect x='2' y='6' width='20' height='12' rx='2' />
+              <path d='M12 9v6M9 12h6' />
+            </svg>
+            <span className='whitespace-nowrap'>Sell Card</span>
+          </button>
+
+          <button
             onClick={() => setShowSavedCarts(true)}
             className='p-1.5 rounded border transition-all'
             title='Saved carts'
@@ -1702,10 +1798,27 @@ export default function BillingPage() {
           onAdd={handleAddCustomItem}
         />
       )}
+      {showSellGiftCard && (
+        <SellGiftCardModal
+          onClose={() => setShowSellGiftCard(false)}
+          codesInCart={items
+            .map((i) => (i.product as any).giftCardCode as string | undefined)
+            .filter((c): c is string => Boolean(c))}
+          onAdd={handleAddGiftCardSale}
+        />
+      )}
       {showFulfillment && (
         <FulfillmentModal
           onClose={() => setShowFulfillment(false)}
-          onSave={() => setShowPayment(true)}
+          onSave={() => {
+            const problem = giftCardSaleProblem()
+            if (problem) {
+              setShowFulfillment(false)
+              toast.error(problem)
+              return
+            }
+            setShowPayment(true)
+          }}
         />
       )}
       {showVoid && (

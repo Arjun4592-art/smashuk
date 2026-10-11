@@ -226,9 +226,39 @@ export default function OrderDetailModal({
     stock: 0,
     category: '',
   }))
+  // ── Sale breakdown (all VAT-inclusive, like the till) ──────────────────
+  // Medusa's order.subtotal is ex-VAT and order.total is net of any gift card,
+  // so rebuild the figures staff actually care about: what was sold, how much
+  // of it a gift card covered, and what was really paid.
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  const itemsGross = r2(
+    order.items.reduce((sum, i) => sum + i.price * i.quantity, 0),
+  )
+  const shippingAmt = order.shippingTotal ?? 0
+  const saleTotalFromItems = Math.max(
+    0,
+    r2(itemsGross - order.discountTotal + shippingAmt),
+  )
+  const giftCardUsed =
+    order.giftCardTotal && order.giftCardTotal > 0
+      ? order.giftCardTotal
+      : order.giftCardCode
+        ? Math.max(0, r2(saleTotalFromItems - order.total))
+        : 0
+  const hasGiftCard = giftCardUsed > 0.004
+  // Total value of the sale (before the gift card is taken off).
+  const saleTotal = hasGiftCard ? saleTotalFromItems : order.total
+  // Items subtotal, incl. VAT, before discount/shipping.
+  const itemsTotal = hasGiftCard
+    ? itemsGross
+    : r2(order.total + order.discountTotal - shippingAmt)
+  // What the customer actually paid with cash/card (after the gift card).
+  const amountPaid = hasGiftCard
+    ? Math.max(0, r2(saleTotal - giftCardUsed))
+    : order.total
   const rounding =
-    order.paymentMethod === 'cash' ? Math.ceil(order.total) - order.total : 0
-  const adjustedTotal = order.total + rounding
+    order.paymentMethod === 'cash' ? Math.ceil(amountPaid) - amountPaid : 0
+  const adjustedTotal = amountPaid + rounding
   const change = order.paymentMethod === 'cash' ? rounding : 0
   const canPrintReceipt = !!(order.medusaOrderId || order.id)
   const buildReceiptData = (): ReceiptData => ({
@@ -247,17 +277,17 @@ export default function OrderDetailModal({
       quantity: i.quantity,
       lineTotal: i.price * i.quantity,
     })),
-    subtotal: order.subtotal,
+    subtotal: itemsTotal,
     discountAmount: order.discountTotal,
     discountLabel: 'Discount',
     shippingAmount: order.shippingTotal ?? 0,
-    giftCardAmount: order.giftCardTotal ?? 0,
+    giftCardAmount: hasGiftCard ? giftCardUsed : 0,
     giftCardMasked: order.giftCardCode
       ? `Code: ${order.giftCardCode}`
       : undefined,
     tax: order.tax,
     vatPct: Math.round(VAT_RATE * 100),
-    total: order.total,
+    total: saleTotal,
     rounding: 0,
     payMethodLabel: PAY_LABELS[order.paymentMethod] || order.paymentMethod,
     change: 0,
@@ -580,7 +610,11 @@ export default function OrderDetailModal({
                     {qtyTotal} item{qtyTotal === 1 ? '' : 's'}
                   </p>
                   <div className='mt-1 space-y-2.5'>
-                    <MoneyRow label='Subtotal' value={fmt(order.subtotal)} />
+                    <MoneyRow
+                      label='Items subtotal'
+                      sub='Including VAT'
+                      value={fmt(itemsTotal)}
+                    />
                     {order.discountTotal > 0 && (
                       <MoneyRow
                         label='Discount'
@@ -588,20 +622,35 @@ export default function OrderDetailModal({
                         value={`-${fmt(order.discountTotal)}`}
                       />
                     )}
+                    {shippingAmt > 0 && (
+                      <MoneyRow label='Shipping' value={fmt(shippingAmt)} />
+                    )}
                     <MoneyRow
-                      label={`VAT (${Math.round(VAT_RATE * 100)}%)`}
-                      value={fmt(order.tax)}
+                      label='Sale total'
+                      bold
+                      sub={`Includes VAT (${Math.round(VAT_RATE * 100)}%): ${fmt(order.tax)}`}
+                      value={fmt(saleTotal)}
                     />
-                    <MoneyRow label='Total' bold value={fmt(order.total)} />
                   </div>
                   <Divider className='my-3' />
                   <div className='space-y-2.5'>
-                    <MoneyRow label='Paid' value={fmt(order.total)} />
+                    {hasGiftCard && (
+                      <MoneyRow
+                        label='Paid with gift card'
+                        tone='green'
+                        sub={
+                          order.giftCardCode
+                            ? `Card ${order.giftCardCode}`
+                            : undefined
+                        }
+                        value={`-${fmt(giftCardUsed)}`}
+                      />
+                    )}
                     <MoneyRow
-                      label='Payment method'
-                      value={
-                        PAY_LABELS[order.paymentMethod] || order.paymentMethod
-                      }
+                      label={hasGiftCard ? 'Paid by customer' : 'Paid'}
+                      bold
+                      sub={`${PAY_LABELS[order.paymentMethod] || order.paymentMethod}`}
+                      value={fmt(amountPaid)}
                     />
                     {order.paymentMethod === 'split' &&
                       order.splitPayments?.map((s, i) => (
@@ -665,10 +714,12 @@ export default function OrderDetailModal({
         <ReceiptBody
           orderId={order.medusaOrderId ?? order.id}
           items={receiptItems}
-          subtotal={order.subtotal}
+          subtotal={itemsTotal}
           discountAmount={order.discountTotal}
           gst={order.tax}
-          total={order.total}
+          total={saleTotal}
+          giftCardCode={hasGiftCard ? order.giftCardCode : undefined}
+          giftCardAmount={hasGiftCard ? giftCardUsed : 0}
           payMethod={order.paymentMethod}
           splitPayments={order.splitPayments}
           cashier={order.cashier}

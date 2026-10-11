@@ -123,7 +123,14 @@ function computeTotals(
   // preTax is the VAT-inclusive amount the customer is actually charged (goods + shipping)
   const preTax = taxable + shipping
   // VAT portion already baked into preTax, shown for transparency only
-  const tax = Math.round((preTax - preTax / (1 + taxRate)) * 100) / 100
+  // Selling a gift card is not a VAT-able supply (VAT is charged when the card
+  // is spent on goods) - same rule as the POS - so keep gift card lines out of
+  // the VAT base.
+  const giftCardLines = items
+    .filter((i) => i.product.slug === GIFT_CARD_PRODUCT_HANDLE)
+    .reduce((s, i) => s + (i.product.price - (i.discount ?? 0)) * i.quantity, 0)
+  const vatBase = Math.max(0, preTax - giftCardLines)
+  const tax = Math.round((vatBase - vatBase / (1 + taxRate)) * 100) / 100
   const total = Math.max(0, preTax - giftCardTotal)
   const itemCount = items.reduce((s, i) => s + i.quantity, 0)
   return {

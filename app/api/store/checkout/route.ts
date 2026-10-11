@@ -135,6 +135,16 @@ export async function POST(req: NextRequest) {
           )
         }
         try {
+          const giftOrder = completeData.order ?? completeData.cart
+          if (giftOrder?.id) {
+            const { fulfillGiftCardsForOrder } =
+              await import('@/lib/api/gift-card-fulfillment')
+            await fulfillGiftCardsForOrder(giftOrder)
+          }
+        } catch (giftErr) {
+          console.error('[/api/store/checkout] gift card fulfilment failed:', giftErr)
+        }
+        try {
           const newOrder = completeData.order ?? completeData.cart
           if (newOrder?.id) {
             await notifyNewOrder(newOrder, 'website')

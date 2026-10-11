@@ -1,4 +1,5 @@
 import { UK_ONLY_MESSAGE, isUkDeliveryPostcode } from '@/lib/uk-shipping'
+import { GIFT_CARD_PRODUCT_HANDLE } from '@/lib/constants'
 
 export async function getNonUkDeliveryError(
   cartId: string,
@@ -7,7 +8,7 @@ export async function getNonUkDeliveryError(
 ): Promise<string | null> {
   try {
     const res = await fetch(
-      `${medusaUrl}/store/carts/${cartId}?fields=*shipping_address,*shipping_methods`,
+      `${medusaUrl}/store/carts/${cartId}?fields=*shipping_address,*shipping_methods,*items`,
       { headers },
     )
     if (!res.ok) {
@@ -15,6 +16,14 @@ export async function getNonUkDeliveryError(
       return null
     }
     const { cart } = await res.json()
+    // Gift-card-only carts are emailed, not delivered - nothing to check.
+    const lines: any[] = cart?.items ?? []
+    if (
+      lines.length > 0 &&
+      lines.every((i) => i?.product_handle === GIFT_CARD_PRODUCT_HANDLE)
+    ) {
+      return null
+    }
     const addr = cart?.shipping_address
     if (!addr) return null
     const isPickup = (cart?.shipping_methods ?? []).some((m: any) =>
