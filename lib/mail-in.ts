@@ -22,7 +22,11 @@ export function isMailInSport(v: unknown): v is MailInSport {
 
 /** Medusa product handles the form depends on. Create these in the dashboard. */
 export const MAIL_IN_HANDLES = {
-  /** 3 variants, priced PER RACKET: "1 racket", "2 rackets", "3+ rackets". */
+  /**
+   * Delivery for ONE box. 3 variants, each priced as the TOTAL for
+   * the box (not per racket): "1 racket", "2 rackets", "3+ rackets". The tier
+   * is picked from the number of rackets in the box.
+   */
   delivery: 'mail-in-delivery',
   /** Reusable Racket Box Kit, one variant. */
   boxKit: 'mail-in-box-kit',
@@ -30,7 +34,10 @@ export const MAIL_IN_HANDLES = {
   priority: 'mail-in-priority',
 } as const
 
-/** Optional extras. An extra with no matching Medusa product is hidden. */
+/**
+ * Optional extras. The box cannot take anything else, so only grips and
+ * dampeners are offered. An extra with no matching Medusa product is hidden.
+ */
 export const MAIL_IN_EXTRAS = [
   {
     key: 'replacement-grip',
@@ -42,6 +49,12 @@ export const MAIL_IN_EXTRAS = [
     key: 'overgrip',
     handle: 'mail-in-overgrip',
     label: 'Overgrip',
+    hint: 'Fitted when we restring.',
+  },
+  {
+    key: 'dampener',
+    handle: 'mail-in-dampener',
+    label: 'Racket dampener',
     hint: 'Fitted when we restring.',
   },
 ] as const
@@ -57,17 +70,18 @@ export const FALLBACK_PRICES = {
   boxKit: 11.95,
 }
 
-export const MAX_RACKETS = 10
+/** How many rackets fit in one box. Shipping is charged per box. */
+export const BOX_CAPACITY: Record<MailInSport, number> = {
+  badminton: 5,
+  tennis: 3,
+}
 
-export const TENSION_RANGE: Record<MailInSport, { min: number; max: number }> =
-  {
-    badminton: { min: 18, max: 35 },
-    tennis: { min: 40, max: 70 },
-  }
+/** One booking = one box, so the most rackets per booking is the box capacity. */
+export function maxRackets(sport: MailInSport | null): number {
+  return BOX_CAPACITY[sport ?? 'badminton']
+}
 
-/** Working days, from the landing page: 2 to us + 2 stringing + 2 back. */
-export const TURNAROUND_DAYS = { haveBox: 6, needBox: 8 } as const
-
+/** Tier from the number of rackets in ONE box. */
 export function deliveryTier(rackets: number): DeliveryTier {
   if (rackets >= 3) return '3plus'
   return rackets === 2 ? '2' : '1'
@@ -79,6 +93,15 @@ export function tierOfVariantTitle(title: string): DeliveryTier | null {
   if (!Number.isFinite(n) || n < 1) return null
   return deliveryTier(n)
 }
+
+export const TENSION_RANGE: Record<MailInSport, { min: number; max: number }> =
+  {
+    badminton: { min: 18, max: 35 },
+    tennis: { min: 40, max: 70 },
+  }
+
+/** Working days, from the landing page: 2 to us + 2 stringing + 2 back. */
+export const TURNAROUND_DAYS = { haveBox: 6, needBox: 8 } as const
 
 /** Same price lookup the gift-card page uses (amounts are in pounds). */
 export function variantAmount(v: any): number {
@@ -94,19 +117,20 @@ export function variantAmount(v: any): number {
 const pennies = (n: number) => Math.round(n * 100) / 100
 
 export interface QuoteInput {
+  /** Rackets in the box. */
   rackets: number
   hasBox: boolean | null
   service: 'standard' | 'priority'
   stringingTotal: number
   extrasTotal: number
-  deliveryEach: Record<DeliveryTier, number>
+  /** Delivery total for the box, by how many rackets are in it. */
+  deliveryByTier: Record<DeliveryTier, number>
   boxPrice: number
   priorityFee: number
 }
 
 export interface Quote {
   tier: DeliveryTier
-  deliveryEach: number
   delivery: number
   box: number
   priority: number
@@ -117,15 +141,15 @@ export interface Quote {
 
 export function computeQuote(i: QuoteInput): Quote {
   const tier = deliveryTier(i.rackets)
-  const deliveryEach = i.deliveryEach[tier]
-  const delivery = pennies(deliveryEach * i.rackets)
+  // The tier price IS the delivery total for the box. It is never multiplied
+  // by the number of rackets.
+  const delivery = i.deliveryByTier[tier]
   const box = i.hasBox === false ? i.boxPrice : 0
   const priority = i.service === 'priority' ? i.priorityFee : 0
   const stringing = pennies(i.stringingTotal)
   const extras = pennies(i.extrasTotal)
   return {
     tier,
-    deliveryEach,
     delivery,
     box,
     priority,

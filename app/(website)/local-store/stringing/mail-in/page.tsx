@@ -1,7 +1,11 @@
 import Link from 'next/link'
 import { SITE_NAME } from '@/lib/constants'
 import Accordion from '@/components/website/local-store/Accordion'
-import { MAIL_IN_BOOKING_HREF } from '@/lib/mail-in'
+import {
+  BOX_CAPACITY,
+  FALLBACK_PRICES,
+  MAIL_IN_BOOKING_HREF,
+} from '@/lib/mail-in'
 
 export const metadata = {
   title: `Mail-In Racket Stringing — Badminton & Tennis, UK-wide | ${SITE_NAME}`,
@@ -41,11 +45,25 @@ const STEPS = [
   },
 ]
 
+const gbp = (n: number) => `£${n.toFixed(2)}`
 const PRICES = [
-  { rackets: '1 racket', price: '£12.95', best: false },
-  { rackets: '2 rackets', price: '£8.95', best: false },
-  { rackets: '3+ rackets', price: '£5.95', best: true },
+  {
+    rackets: '1 racket',
+    price: gbp(FALLBACK_PRICES.delivery['1']),
+    best: false,
+  },
+  {
+    rackets: '2 rackets',
+    price: gbp(FALLBACK_PRICES.delivery['2']),
+    best: false,
+  },
+  {
+    rackets: '3+ rackets',
+    price: gbp(FALLBACK_PRICES.delivery['3plus']),
+    best: true,
+  },
 ]
+const BOX_CAPACITY_TEXT = `up to ${BOX_CAPACITY.badminton} badminton or ${BOX_CAPACITY.tennis} tennis rackets`
 
 const PACK_STEPS = [
   'Racket inside the box',
@@ -98,12 +116,12 @@ const FAQS = [
   {
     id: 'several',
     q: 'Can I send several rackets together?',
-    a: 'Yes. In fact, you save on delivery when sending multiple rackets.',
+    a: `Yes. One box holds ${BOX_CAPACITY_TEXT}, and you save on delivery the more rackets you send in the same box. Delivery is charged per box.`,
   },
   {
     id: 'sports',
     q: 'Can I send badminton and tennis rackets?',
-    a: 'Yes.',
+    a: 'Yes. Book each sport separately, as badminton and tennis rackets are strung and boxed separately.',
   },
   {
     id: 'string',
@@ -168,7 +186,10 @@ function StepIcon({ name }: { name: 'book' | 'pack' | 'send' | 'string' }) {
     <svg {...ICON_PROPS} className={cls}>
       <g transform='rotate(-35 26 26)'>
         <ellipse cx='26' cy='20' rx='12' ry='15' />
-        <path d='M20 8v24M26 5v30M32 8v24M15 14h22M14 20h24M15 26h22' opacity='.55' />
+        <path
+          d='M20 8v24M26 5v30M32 8v24M15 14h22M14 20h24M15 26h22'
+          opacity='.55'
+        />
         <path d='M26 35v14' />
       </g>
       <path d='M58 40a10 10 0 1 0-4 12' {...ACCENT} />
@@ -188,8 +209,17 @@ function StepArrow({ delay = 0 }: { delay?: number }) {
         aria-hidden
         className='hidden lg:flex absolute top-1/2 -translate-y-1/2 -left-6 w-6 items-center justify-center z-10 pointer-events-none'
       >
-        <svg viewBox='0 0 20 44' className='mail-arrow-x w-5 h-11' style={style}>
-          <path d='M2 2 18 22 2 42' fill='none' stroke='#E8553A' strokeWidth='7' />
+        <svg
+          viewBox='0 0 20 44'
+          className='mail-arrow-x w-5 h-11'
+          style={style}
+        >
+          <path
+            d='M2 2 18 22 2 42'
+            fill='none'
+            stroke='#E8553A'
+            strokeWidth='7'
+          />
         </svg>
       </span>
       {/* mobile / tablet: sits in the 32px gap above the panel, points down */}
@@ -197,8 +227,17 @@ function StepArrow({ delay = 0 }: { delay?: number }) {
         aria-hidden
         className='lg:hidden flex absolute -top-8 left-0 right-0 h-8 items-center justify-center z-10 pointer-events-none'
       >
-        <svg viewBox='0 0 44 20' className='mail-arrow-y w-11 h-5' style={style}>
-          <path d='M2 2 22 18 42 2' fill='none' stroke='#E8553A' strokeWidth='7' />
+        <svg
+          viewBox='0 0 44 20'
+          className='mail-arrow-y w-11 h-5'
+          style={style}
+        >
+          <path
+            d='M2 2 22 18 42 2'
+            fill='none'
+            stroke='#E8553A'
+            strokeWidth='7'
+          />
         </svg>
       </span>
     </>
@@ -231,7 +270,11 @@ function PackArrow({ delay = 0 }: { delay?: number }) {
           className='pack-arrow-line'
           style={style}
         />
-        <path d='M31.5 1.5 37 6l-5.5 4.5' className='pack-arrow-head' style={style} />
+        <path
+          d='M31.5 1.5 37 6l-5.5 4.5'
+          className='pack-arrow-head'
+          style={style}
+        />
       </svg>
     </span>
   )
@@ -304,7 +347,9 @@ export default function MailInStringingPage() {
               style={{ lineHeight: 1.08 }}
             >
               Professional Racket Stringing.{' '}
-              <span className='text-[#E8553A]'>Delivered Back To Your Door.</span>
+              <span className='text-[#E8553A]'>
+                Delivered Back To Your Door.
+              </span>
             </h1>
             <p className='text-white/80 text-base leading-relaxed mb-3'>
               Send your badminton or tennis rackets to Smash Racket Pro from
@@ -396,8 +441,7 @@ export default function MailInStringingPage() {
             Send More Rackets. Pay Less For Delivery.
           </h2>
           <p className='text-white/50 text-sm mb-10'>
-            Round-trip delivery price, depending on how many rackets are in the
-            box.
+            Delivery price, depending on how many rackets are in the box.
           </p>
           <div className='grid md:grid-cols-3 gap-5'>
             {PRICES.map((p) => (
@@ -429,19 +473,15 @@ export default function MailInStringingPage() {
                     p.best ? 'text-white/80' : 'text-white/40'
                   }`}
                 >
-                  round-trip delivery
+                  delivery per box
                 </p>
-                {p.best && (
-                  <p className='mt-5 text-white font-black text-sm font-montserrat tracking-wide'>
-                    FREE RETURN DELIVERY
-                  </p>
-                )}
               </div>
             ))}
           </div>
           <p className='text-white/60 text-sm text-center mt-8 max-w-xl mx-auto'>
             Sending several rackets in the same box reduces the delivery cost,
-            so we pass the saving back to you.
+            so we pass the saving back to you. One box holds {BOX_CAPACITY_TEXT}
+            .
           </p>
 
           <div className='mt-12 bg-white rounded-2xl p-8 md:p-10 grid md:grid-cols-[1fr_auto] gap-6 items-center'>
@@ -653,7 +693,9 @@ export default function MailInStringingPage() {
                       <img src='/local-store/mail-in-machine.jpg' ... /> */}
                   <div className='aspect-[4/3] rounded-2xl bg-[#F5F3EF] border border-dashed border-[#0A1F44]/20 flex flex-col items-center justify-center text-center p-4'>
                     <span className='text-3xl mb-2'>📷</span>
-                    <span className='text-xs text-gray-400 font-mono'>Photo</span>
+                    <span className='text-xs text-gray-400 font-mono'>
+                      Photo
+                    </span>
                   </div>
                   <figcaption className='mt-3 text-sm text-[#0A1F44] font-bold font-montserrat'>
                     {label}
@@ -701,7 +743,7 @@ export default function MailInStringingPage() {
                 <p className='text-white font-black text-2xl font-montserrat'>
                   {p.price}
                 </p>
-                <p className='text-white/40 text-xs'>round-trip delivery</p>
+                <p className='text-white/40 text-xs'>delivery per box</p>
               </div>
             ))}
           </div>

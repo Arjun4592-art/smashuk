@@ -10,12 +10,13 @@ import { formatCurrency } from '@/lib/utils'
 import { getTensionsForSport } from '@/lib/stringing-options'
 import type { Product } from '@/types'
 import {
+  BOX_CAPACITY,
   FALLBACK_PRICES,
   MAIL_IN_SPORTS,
-  MAX_RACKETS,
   TENSION_RANGE,
   computeQuote,
   estimateTurnaround,
+  maxRackets,
   tierOfVariantTitle,
   type DeliveryTier,
   type MailInSport,
@@ -61,7 +62,11 @@ interface RacketSetup {
 }
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
-const emptyRacket = (): RacketSetup => ({ model: '', stringId: '', tension: '' })
+const emptyRacket = (): RacketSetup => ({
+  model: '',
+  stringId: '',
+  tension: '',
+})
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -90,7 +95,9 @@ function mapStringOptions(products: any[]): StringOption[] {
         title.split(' ')[0] ||
         ''
       const name =
-        brand && title.startsWith(brand) ? title.slice(brand.length).trim() : title
+        brand && title.startsWith(brand)
+          ? title.slice(brand.length).trim()
+          : title
       return {
         id: String(match.id),
         productId: String(match.id),
@@ -101,7 +108,9 @@ function mapStringOptions(products: any[]): StringOption[] {
       }
     })
     .filter((o): o is StringOption => o !== null)
-    .sort((a, b) => `${a.brand} ${a.name}`.localeCompare(`${b.brand} ${b.name}`))
+    .sort((a, b) =>
+      `${a.brand} ${a.name}`.localeCompare(`${b.brand} ${b.name}`),
+    )
 }
 
 const money = (n: number) => (n === 0 ? 'Free' : formatCurrency(n))
@@ -219,7 +228,9 @@ function Section({
         <h2 className='font-montserrat font-bold text-[#0A1F44] text-lg sm:text-xl leading-tight'>
           {title}
           {optional && (
-            <span className='ml-2 text-xs font-medium text-gray-400'>Optional</span>
+            <span className='ml-2 text-xs font-medium text-gray-400'>
+              Optional
+            </span>
           )}
         </h2>
         {hint && <p className='text-sm text-gray-500 mt-1'>{hint}</p>}
@@ -280,7 +291,10 @@ function Tile({
         </span>
       )}
       <span className='flex-1 min-w-0'>
-        <span className='block font-montserrat font-bold text-sm text-[#0A1F44] data-[off=true]:text-gray-400' data-off={disabled}>
+        <span
+          className='block font-montserrat font-bold text-sm text-[#0A1F44] data-[off=true]:text-gray-400'
+          data-off={disabled}
+        >
           {title}
         </span>
         {detail && (
@@ -357,7 +371,10 @@ function Stepper({
       >
         &minus;
       </button>
-      <span className='w-6 text-center font-bold text-[#0A1F44]' aria-live='polite'>
+      <span
+        className='w-6 text-center font-bold text-[#0A1F44]'
+        aria-live='polite'
+      >
         {value}
       </span>
       <button
@@ -414,17 +431,24 @@ export default function MailInBookingClient({
     return out
   }, [delivery])
 
-  const deliveryEach: Record<DeliveryTier, number> = {
+  // Each price is the delivery TOTAL for one box with that many rackets.
+  const deliveryByTier: Record<DeliveryTier, number> = {
     '1': deliveryVariants['1']?.price ?? FALLBACK_PRICES.delivery['1'],
     '2': deliveryVariants['2']?.price ?? FALLBACK_PRICES.delivery['2'],
-    '3plus': deliveryVariants['3plus']?.price ?? FALLBACK_PRICES.delivery['3plus'],
+    '3plus':
+      deliveryVariants['3plus']?.price ?? FALLBACK_PRICES.delivery['3plus'],
   }
   const boxPrice = boxKit?.variants[0]?.price ?? FALLBACK_PRICES.boxKit
   const priorityFee = priority?.variants[0]?.price ?? null
 
   const deliveryTiersOk =
-    !!deliveryVariants['1'] && !!deliveryVariants['2'] && !!deliveryVariants['3plus']
+    !!deliveryVariants['1'] &&
+    !!deliveryVariants['2'] &&
+    !!deliveryVariants['3plus']
   const bookingReady = !!delivery && deliveryTiersOk && !!boxKit
+
+  /* ---- one booking = one box ---- */
+  const racketLimit = maxRackets(sport)
 
   /* ---- load strings for the chosen sport ---- */
   useEffect(() => {
@@ -436,7 +460,9 @@ export default function MailInBookingClient({
     let cancelled = false
     setLoadState('loading')
     fetch(`/api/store/stringing-options?sport=${sport}`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((r) =>
+        r.ok ? r.json() : Promise.reject(new Error(String(r.status))),
+      )
       .then((d) => {
         if (cancelled) return
         setOptions(mapStringOptions(d.products ?? []))
@@ -454,12 +480,14 @@ export default function MailInBookingClient({
   function chooseSport(next: MailInSport) {
     if (next === sport) return
     setSport(next)
+    // A tennis box holds fewer rackets than a badminton one.
+    if (count > maxRackets(next)) changeCount(maxRackets(next))
     // Strings and tension ranges differ per sport, so those picks are reset.
     setRackets((rs) => rs.map((r) => ({ ...r, stringId: '', tension: '' })))
   }
 
   function changeCount(n: number) {
-    const next = Math.min(MAX_RACKETS, Math.max(1, n))
+    const next = Math.min(maxRackets(sport), Math.max(1, n))
     setCount(next)
     setRackets((rs) =>
       next > rs.length
@@ -511,7 +539,7 @@ export default function MailInBookingClient({
     service,
     stringingTotal,
     extrasTotal,
-    deliveryEach,
+    deliveryByTier,
     boxPrice,
     priorityFee: priorityFee ?? 0,
   })
@@ -527,7 +555,9 @@ export default function MailInBookingClient({
       toast.error('Please complete the highlighted fields.')
       setTimeout(() => {
         document
-          .querySelector<HTMLElement>('[data-invalid="true"], [aria-invalid="true"]')
+          .querySelector<HTMLElement>(
+            '[data-invalid="true"], [aria-invalid="true"]',
+          )
           ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       }, 0)
       return
@@ -583,21 +613,28 @@ export default function MailInBookingClient({
           tags: [],
           specs: [],
         }
-        addItem(stub, 1, { id: opt.variantId }, {
-          ...base,
-          mail_in_part: 'stringing',
-          racket_number: i + 1,
-          racket_model: model,
-          string_choice: `${opt.brand} ${opt.name}`,
-          string_tension: `${r.tension} lbs`,
-          linked_config: `mail-in:${model.toLowerCase()}`,
-        })
+        addItem(
+          stub,
+          1,
+          { id: opt.variantId },
+          {
+            ...base,
+            mail_in_part: 'stringing',
+            racket_number: i + 1,
+            racket_model: model,
+            string_choice: `${opt.brand} ${opt.name}`,
+            string_tension: `${r.tension} lbs`,
+            linked_config: `mail-in:${model.toLowerCase()}`,
+          },
+        )
       })
 
+      // One box, one delivery charge: the variant for the number of rackets
+      // in the box, quantity 1 (the price is the total for the box).
       const dv = deliveryVariants[quote.tier]!
       addItem(
         { ...delivery!.product, price: dv.price },
-        count,
+        1,
         { id: dv.id, size: dv.title },
         { ...base, mail_in_part: 'delivery', mail_in_rackets: count },
       )
@@ -689,7 +726,9 @@ export default function MailInBookingClient({
                 {[
                   ...missingProducts,
                   ...(delivery && !deliveryTiersOk
-                    ? ['mail-in-delivery variants "1 racket" / "2 rackets" / "3+ rackets"']
+                    ? [
+                        'mail-in-delivery variants "1 racket" / "2 rackets" / "3+ rackets"',
+                      ]
                     : []),
                 ].join(', ') || 'nothing'}
               </p>
@@ -713,7 +752,9 @@ export default function MailInBookingClient({
                   checked={sport === s.value}
                   onChange={() => chooseSport(s.value)}
                   title={s.label}
-                  icon={s.value === 'badminton' ? <ShuttleIcon /> : <BallIcon />}
+                  icon={
+                    s.value === 'badminton' ? <ShuttleIcon /> : <BallIcon />
+                  }
                 />
               ))}
             </div>
@@ -724,44 +765,16 @@ export default function MailInBookingClient({
           <Section
             n={2}
             title='How many rackets?'
-            hint='The more you send in one box, the less each racket costs to deliver.'
+            hint={`One box holds up to ${BOX_CAPACITY.badminton} badminton or ${BOX_CAPACITY.tennis} tennis rackets. The more rackets in the box, the lower the delivery price.`}
             done
           >
-            <div
-              role='group'
-              aria-label='Number of rackets'
-              className='inline-grid grid-cols-4 gap-1 rounded-full bg-[#F5F3EF] p-1'
-            >
-              {[1, 2, 3, 4].map((n) => {
-                const active = n === 4 ? count >= 4 : count === n
-                return (
-                  <button
-                    key={n}
-                    type='button'
-                    aria-pressed={active}
-                    onClick={() => changeCount(n === 4 ? Math.max(count, 4) : n)}
-                    className={`h-11 min-w-14 rounded-full px-5 font-montserrat text-sm font-bold transition-all ${focusRing} ${
-                      active
-                        ? 'bg-[#0A1F44] text-white shadow'
-                        : 'text-[#0A1F44] hover:bg-white'
-                    }`}
-                  >
-                    {n === 4 ? '4+' : n}
-                  </button>
-                )
-              })}
-            </div>
-            {count >= 4 && (
-              <div className='mt-3'>
-                <Stepper
-                  value={count}
-                  min={4}
-                  max={MAX_RACKETS}
-                  onChange={changeCount}
-                  label='number of rackets'
-                />
-              </div>
-            )}
+            <Stepper
+              value={count}
+              min={1}
+              max={racketLimit}
+              onChange={changeCount}
+              label='number of rackets'
+            />
 
             <div className='mt-5 grid grid-cols-3 gap-2' aria-hidden>
               {tierRows.map((t) => {
@@ -781,17 +794,19 @@ export default function MailInBookingClient({
                         active ? 'text-[#E8553A]' : 'text-[#0A1F44]'
                       }`}
                     >
-                      {formatCurrency(deliveryEach[t.tier])}
+                      {formatCurrency(deliveryByTier[t.tier])}
                     </p>
-                    <p className='text-[11px] text-gray-400'>each</p>
+                    <p className='text-[11px] text-gray-400'>per box</p>
                   </div>
                 )
               })}
             </div>
             <p className='mt-4 text-sm text-[#0A1F44]'>
-              Delivery for {countLabel(count)}:{' '}
+              Delivery for {countLabel(count)} in one box:{' '}
               <strong>{formatCurrency(quote.delivery)}</strong>
-              {quote.tier === '3plus' && ', with free return delivery'}.
+              {sport
+                ? `. A ${sport} box holds up to ${racketLimit}. Need to send more? Make a second booking.`
+                : '. Choose your sport above to see how many fit in a box.'}
             </p>
           </Section>
 
@@ -818,7 +833,9 @@ export default function MailInBookingClient({
               </div>
             )}
             {sport && loadState === 'loading' && (
-              <p className='text-sm text-gray-500 mb-3'>Loading strings&hellip;</p>
+              <p className='text-sm text-gray-500 mb-3'>
+                Loading strings&hellip;
+              </p>
             )}
             {sport && loadState === 'error' && (
               <p role='alert' className='text-sm text-red-600 mb-3'>
@@ -873,11 +890,15 @@ export default function MailInBookingClient({
                               ? 'e.g. Babolat Pure Drive'
                               : 'e.g. Yonex Astrox 99'
                           }
-                          onChange={(e) => updateRacket(i, { model: e.target.value })}
+                          onChange={(e) =>
+                            updateRacket(i, { model: e.target.value })
+                          }
                           aria-invalid={touched && !!err.model}
                           className={inputCls}
                         />
-                        {touched && err.model && <FieldError>{err.model}</FieldError>}
+                        {touched && err.model && (
+                          <FieldError>{err.model}</FieldError>
+                        )}
                       </div>
 
                       {inherited ? (
@@ -946,7 +967,9 @@ export default function MailInBookingClient({
                               className={inputCls}
                             >
                               <option value=''>
-                                {sport ? 'Select tension' : 'Choose sport first'}
+                                {sport
+                                  ? 'Select tension'
+                                  : 'Choose sport first'}
                               </option>
                               {tensionOptions.map((t) => (
                                 <option key={t} value={t}>
@@ -1019,13 +1042,23 @@ export default function MailInBookingClient({
                     ? 'Coming soon.'
                     : 'Priority stringing and faster delivery.'
                 }
-                price={priorityFee === null ? undefined : `+${formatCurrency(priorityFee)}`}
+                price={
+                  priorityFee === null
+                    ? undefined
+                    : `+${formatCurrency(priorityFee)}`
+                }
               />
             </div>
           </Section>
 
           {/* STEP 6 */}
-          <Section n={6} title='Optional extras' done={quote.extras > 0} optional last>
+          <Section
+            n={6}
+            title='Optional extras'
+            done={quote.extras > 0}
+            optional
+            last
+          >
             <div className='space-y-3'>
               {extras.map((e) => {
                 const qty = extraQty[e.key] ?? 0
@@ -1063,31 +1096,19 @@ export default function MailInBookingClient({
                         min={1}
                         max={20}
                         label={e.label.toLowerCase()}
-                        onChange={(n) => setExtraQty((q) => ({ ...q, [e.key]: n }))}
+                        onChange={(n) =>
+                          setExtraQty((q) => ({ ...q, [e.key]: n }))
+                        }
                       />
                     )}
                   </div>
                 )
               })}
 
-              <Link
-                href='/shop'
-                target='_blank'
-                rel='noopener'
-                className={`flex items-center justify-between gap-3 rounded-2xl border-2 border-dashed border-[#0A1F44]/20 p-4 text-sm transition-colors hover:border-[#E8553A] hover:bg-[#E8553A]/[0.04] ${focusRing}`}
-              >
-                <span>
-                  <span className='block font-montserrat font-bold text-[#0A1F44]'>
-                    Other racket accessories
-                  </span>
-                  <span className='block text-[13px] text-gray-500'>
-                    Opens the shop in a new tab. Anything you add lands in the same cart.
-                  </span>
-                </span>
-                <span aria-hidden className='text-[#E8553A] text-lg'>
-                  &#8599;
-                </span>
-              </Link>
+              <p className='text-[13px] text-gray-500'>
+                Your rackets travel in the box, so we can only add grips and
+                dampeners to a mail-in booking.
+              </p>
             </div>
           </Section>
         </div>
@@ -1107,7 +1128,9 @@ export default function MailInBookingClient({
             Order summary
           </h2>
           <p className='text-xs text-white/85'>
-            {sport ? MAIL_IN_SPORTS.find((s) => s.value === sport)?.label : 'Mail-in'}{' '}
+            {sport
+              ? MAIL_IN_SPORTS.find((s) => s.value === sport)?.label
+              : 'Mail-in'}{' '}
             stringing, {countLabel(count)}
           </p>
         </div>
@@ -1142,8 +1165,7 @@ export default function MailInBookingClient({
               <span>{formatCurrency(quote.delivery)}</span>
             </dt>
             <dd className='mt-1.5 text-gray-500'>
-              {formatCurrency(quote.deliveryEach)} &times; {countLabel(count)}, round trip
-              {quote.tier === '3plus' && ' (free return delivery)'}
+              One box with {countLabel(count)}
             </dd>
           </div>
 
@@ -1182,7 +1204,10 @@ export default function MailInBookingClient({
         </dl>
 
         {/* perforation */}
-        <div aria-hidden className='relative my-5 h-0 border-t-2 border-dashed border-[#0A1F44]/15'>
+        <div
+          aria-hidden
+          className='relative my-5 h-0 border-t-2 border-dashed border-[#0A1F44]/15'
+        >
           <span className='absolute -left-3 -top-3 h-6 w-6 rounded-full bg-[#F5F3EF]' />
           <span className='absolute -right-3 -top-3 h-6 w-6 rounded-full bg-[#F5F3EF]' />
         </div>
@@ -1196,16 +1221,23 @@ export default function MailInBookingClient({
           </div>
 
           <p className='mt-4 text-sm text-gray-600'>
-            <span className='font-bold text-[#0A1F44]'>Estimated turnaround: </span>
+            <span className='font-bold text-[#0A1F44]'>
+              Estimated turnaround:{' '}
+            </span>
             {estimateTurnaround(hasBox, service)}
           </p>
           <p className='mt-1 text-xs text-gray-400'>
-            Estimates vary with weekends, public holidays and courier performance.
+            Estimates vary with weekends, public holidays and courier
+            performance.
           </p>
 
           {touched && hasErrors && (
-            <p role='alert' className='mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700'>
-              A few details are missing. The highlighted steps need your attention.
+            <p
+              role='alert'
+              className='mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700'
+            >
+              A few details are missing. The highlighted steps need your
+              attention.
             </p>
           )}
 
