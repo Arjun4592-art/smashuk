@@ -1,7 +1,9 @@
 'use client'
 
+import { groupMailInLines, racketsLabel } from '@/lib/mail-in'
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   getOrder,
@@ -76,7 +78,14 @@ const ORDER_METADATA_SKIP = new Set([
 ])
 
 type Action =
-  'confirm' | 'cancel' | 'archive' | 'fulfill' | 'capture' | 'ship' | 'deliver'
+  | 'confirm'
+  | 'cancel'
+  | 'archive'
+  | 'fulfill'
+  | 'capture'
+  | 'ship'
+  | 'deliver'
+  | 'ship-box'
 
 const ACTION_VERB: Record<Action, string> = {
   confirm: 'complete',
@@ -86,6 +95,7 @@ const ACTION_VERB: Record<Action, string> = {
   capture: 'capture payment for',
   ship: 'dispatch',
   deliver: 'mark as delivered',
+  'ship-box': 'ship the box for',
 }
 
 function fmt(amount: number, currency = 'GBP') {
@@ -124,6 +134,10 @@ export default function OrderDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
+  const searchParams = useSearchParams()
+  const fromMailIn = searchParams.get('from') === 'mail-in'
+  const backHref = fromMailIn ? '/dashboard/mail-in' : '/dashboard/orders'
+  const backLabel = fromMailIn ? 'Back to mail-in stringing' : 'Back to orders'
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -245,6 +259,16 @@ export default function OrderDetailPage({
         } else {
           toast.success('Order cancelled')
         }
+      } else if (action === 'ship-box') {
+        if (result?.mail_in_box?.already_shipped) {
+          toast.success('The box was already shipped')
+        } else if (result?.mail_in_label?.ok === false) {
+          toast.warning(
+            `Box shipped, but the label was not emailed: ${result.mail_in_label.error ?? 'unknown error'}`,
+          )
+        } else {
+          toast.success('Box shipped — label emailed to the customer')
+        }
       } else {
         toast.success(
           action === 'fulfill'
@@ -362,7 +386,11 @@ export default function OrderDetailPage({
   if (error || !order) {
     return (
       <div className='lg:max-w-6xl lg:mx-auto'>
-        <Link href='/dashboard/orders' className={`${roundBtnClass}`}>
+        <Link
+          href={backHref}
+          aria-label={backLabel}
+          className={`${roundBtnClass}`}
+        >
           <IconBack />
         </Link>
         <div className='mt-4 p-5 bg-[#FFF4F4] rounded-xl text-[#D82C0D] text-[14px] flex items-center justify-between gap-3'>
@@ -375,18 +403,61 @@ export default function OrderDetailPage({
 
   const currency = order.currency_code ?? 'gbp'
   const items: any[] = order.items ?? []
+  // A mail-in booking is made of several order lines (a stringing line per
+  // racket, the shipping, the box kit, ...). Show it as ONE item.
+  const mailInGroups = groupMailInLines<any>(
+    items,
+    (i) => (i.unit_price ?? 0) * (i.quantity ?? 0),
+    (i) => i.quantity ?? 1,
+    (i) => i.title ?? '',
+  )
   const payments: any[] = order.payments ?? []
   const returns: any[] = order.metadata?.returns ?? []
   const shippingMethod = order.shipping_methods?.[0]
 
-  const fs: string = order.fulfillment_status ?? 'not_fulfilled'
+  // Mail-in orders where the customer has no box: the box kit ships first
+  // (its own fulfilment), the restrung rackets go back later. Until the box
+  // is shipped only "Ship box" is offered; afterwards the status is worked
+  // out from the remaining (return) fulfilment alone.
+  const mailInBoxLine = (order.items ?? []).find(
+    (i: any) =>
+      (i?.metadata?.mail_in === true || i?.metadata?.mail_in === 'true') &&
+      i?.metadata?.mail_in_part === 'box-kit',
+  )
+  const mailInBoxShipped = Boolean(order.metadata?.mail_in_box?.shipped_at)
+  const mailInBoxOrder =
+    Boolean(mailInBoxLine) &&
+    order.status !== 'canceled' &&
+    order.fulfillment_status !== 'canceled'
+  let returnLegFs: string | null = null
+  if (mailInBoxOrder && mailInBoxShipped) {
+    const boxFid = order.metadata?.mail_in_box?.fulfillment_id
+    const returnLeg = (order.fulfillments ?? []).filter(
+      (f: any) => !f.canceled_at && f.id !== boxFid,
+    )
+    returnLegFs =
+      returnLeg.length === 0
+        ? 'not_fulfilled'
+        : returnLeg.every((f: any) => f.delivered_at)
+          ? 'delivered'
+          : returnLeg.every((f: any) => f.shipped_at || f.delivered_at)
+            ? 'shipped'
+            : 'fulfilled'
+  }
+  const fs: string = returnLegFs ?? order.fulfillment_status ?? 'not_fulfilled'
   const isPOS = order.metadata?.source === 'pos'
   const isPickup = order.metadata?.fulfillment_type === 'pickup'
   const isCanceled = order.status === 'canceled' || fs === 'canceled'
   const isArchived = order.status === 'archived'
-  const p2g: any = (order.fulfillments ?? []).find(
-    (f: any) => f?.data?.parcel2go_order_id && !f.canceled_at,
-  )?.data
+  // Newest first: mail-in orders have two shipments (box kit, then the
+  // restrung rackets) and the latest is the one to show.
+  const p2g: any = [...(order.fulfillments ?? [])]
+    .sort(
+      (a: any, b: any) =>
+        new Date(b.created_at ?? 0).getTime() -
+        new Date(a.created_at ?? 0).getTime(),
+    )
+    .find((f: any) => f?.data?.parcel2go_order_id && !f.canceled_at)?.data
   const isUnfulfilled =
     (fs === 'not_fulfilled' || fs === 'partially_fulfilled' || !fs) &&
     !isCanceled
@@ -489,9 +560,17 @@ export default function OrderDetailPage({
     loading: actionLoading === 'fulfill',
   }
 
+  const shipBoxBtn = {
+    label: 'Ship box to customer',
+    onClick: () => setConfirmAction('ship-box'),
+    loading: actionLoading === 'ship-box',
+  }
+
   let btns: Btns = {}
   if (isCanceled || isDelivered) {
     btns = {}
+  } else if (mailInBoxOrder && !mailInBoxShipped) {
+    btns = { primary: shipBoxBtn }
   } else if (isUnfulfilled) {
     btns =
       canShowLabel && !LABEL_REQUIRES_FULFILLMENT
@@ -591,6 +670,10 @@ export default function OrderDetailPage({
       title: 'Confirm payment received',
       body: 'Confirm the cash/card payment for this order has been received.',
     },
+    'ship-box': {
+      title: 'Ship the box to the customer?',
+      body: 'This books the courier for the racket box. As soon as it is booked, the customer is emailed a prepaid label to send their rackets back to you.',
+    },
     ship: {
       title: 'Dispatch this order?',
       body: "Confirm this order has been handed to the courier / left the store. This marks it 'Dispatched' for the customer.",
@@ -610,11 +693,7 @@ export default function OrderDetailPage({
     <div className='-m-4 lg:m-0 bg-[#F6F6F7] lg:bg-transparent lg:max-w-6xl lg:mx-auto pb-6 lg:pb-10'>
       {/* Header */}
       <header className='bg-white lg:bg-transparent px-4 pt-3 pb-4 lg:px-0 lg:pt-0 lg:pb-5 grid grid-cols-[auto_1fr_auto] items-center gap-x-3'>
-        <Link
-          href='/dashboard/orders'
-          aria-label='Back to orders'
-          className={roundBtnClass}
-        >
+        <Link href={backHref} aria-label={backLabel} className={roundBtnClass}>
           <IconBack />
         </Link>
 
@@ -794,7 +873,97 @@ export default function OrderDetailPage({
             )}
 
             <div className='mt-2 divide-y divide-[#F6F6F7]'>
-              {items.map((item) => {
+              {mailInGroups.bookings.map((b) => {
+                const racketTotal = b.rackets.length
+                const sportName = b.sport
+                  ? b.sport.charAt(0).toUpperCase() + b.sport.slice(1)
+                  : 'Mail-in'
+                const rows: {
+                  k: string
+                  label: string
+                  sub?: string
+                  amount: number
+                }[] = []
+                b.rackets.forEach((r) =>
+                  rows.push({
+                    k: `r${r.n}`,
+                    label: `${racketTotal > 1 ? `Racket ${r.n}` : 'Racket'}${r.model ? `: ${r.model}` : ''}`,
+                    sub: `${r.string}${r.tension ? ` · ${r.tension}` : ''}`,
+                    amount: r.amount,
+                  }),
+                )
+                if (b.delivery)
+                  rows.push({
+                    k: 'delivery',
+                    label: 'Round-trip shipping',
+                    sub: b.delivery.line.variant_title ?? undefined,
+                    amount: b.delivery.amount,
+                  })
+                if (b.boxKit)
+                  rows.push({
+                    k: 'box',
+                    label: 'Reusable Racket Box Kit',
+                    amount: b.boxKit.amount,
+                  })
+                if (b.priorityLine)
+                  rows.push({
+                    k: 'prio',
+                    label: 'Priority service',
+                    amount: b.priorityLine.amount,
+                  })
+                b.extras.forEach((e, i) =>
+                  rows.push({
+                    k: `x${i}`,
+                    label: `${e.qty} × ${e.label}`,
+                    amount: e.amount,
+                  }),
+                )
+                const declared = Number(
+                  b.delivery?.line?.metadata?.mail_in_rackets ?? 0,
+                )
+                const stringMissing =
+                  racketTotal === 0 || (declared > 0 && racketTotal < declared)
+                return (
+                  <ItemRow
+                    key={`mail-in-${b.id}`}
+                    thumb={null}
+                    title={`Mail-in stringing: ${sportName}, ${racketsLabel(racketTotal || declared || 1)}`}
+                    chips={[
+                      b.hasBox ? 'Own box' : 'Box kit to send',
+                      ...(b.priority ? ['Priority'] : []),
+                    ]}
+                    meta={`${b.lines.length} lines in this booking`}
+                    total={fmt(b.total, currency)}
+                  >
+                    <ul className='mt-2 space-y-1.5 text-[13px]'>
+                      {rows.map((r) => (
+                        <li key={r.k} className='flex justify-between gap-4'>
+                          <span className='min-w-0'>
+                            <span className='text-[#202223]'>{r.label}</span>
+                            {r.sub && (
+                              <span className='block text-[#6D7175]'>
+                                {r.sub}
+                              </span>
+                            )}
+                          </span>
+                          <span className='shrink-0 tabular-nums text-[#6D7175]'>
+                            {fmt(r.amount, currency)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {stringMissing && (
+                      <p className='mt-2 rounded-md bg-[#FFF5EA] px-2.5 py-1.5 text-[12.5px] text-[#8A4B00]'>
+                        The string and tension for{' '}
+                        {declared > racketTotal ? 'some of' : 'the'} rackets are
+                        not on this order. Ask the customer which string they
+                        want.
+                      </p>
+                    )}
+                  </ItemRow>
+                )
+              })}
+              {mailInGroups.others.map((item) => {
                 const chips: string[] = []
                 if (item.variant_title && item.variant_title !== 'Default')
                   chips.push(item.variant_title)

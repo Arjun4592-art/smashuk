@@ -281,6 +281,18 @@ export async function POST(req: NextRequest) {
           notifyErr,
         )
       }
+      // Mail-in stringing orders: book the prepaid label and email it to the
+      // customer automatically. No-op for any other order; never throws.
+      try {
+        const order = data.order ?? data.cart
+        if (order?.id) {
+          const { sendMailInLabelForOrder } =
+            await import('@/lib/api/order-labels')
+          await sendMailInLabelForOrder(order.id)
+        }
+      } catch (labelErr) {
+        console.error('[/api/store/payment] mail-in label step failed:', labelErr)
+      }
       return NextResponse.json(data, {
         status: res.status,
       })

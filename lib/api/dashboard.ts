@@ -252,11 +252,16 @@ export async function refreshCourierTracking(id: string): Promise<{
 }> {
   return mutate(`/api/admin/orders/${id}/courier-tracking`, 'POST')
 }
-export async function getShippingLabel(id: string): Promise<{
+export async function getShippingLabel(
+  id: string,
+  leg?: 'box' | 'inbound' | 'return',
+): Promise<{
   label_url: string
   tracking_number: string | null
 }> {
-  return api(`/api/admin/orders/${id}/shipping-label`)
+  return api(
+    `/api/admin/orders/${id}/shipping-label${leg ? `?leg=${leg}` : ''}`,
+  )
 }
 export async function resendOrderConfirmation(id: string): Promise<{
   sent: boolean

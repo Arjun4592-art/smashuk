@@ -38,7 +38,8 @@ function statusBadge(
     | 'ready_for_pickup'
     | 'return_requested'
     | 'return_declined'
-    | 'return_label',
+    | 'return_label'
+    | 'mail_in_label',
 ) {
   const map = {
     confirmed: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'ORDER CONFIRMED' },
@@ -70,6 +71,7 @@ function statusBadge(
     },
     return_declined: { bg: '#FDF0ED', fg: CORAL, label: 'RETURN DECLINED' },
     return_label: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'RETURN LABEL' },
+    mail_in_label: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'MAIL-IN LABEL' },
   }[kind]
   return pillBadge(map.label, map.bg, map.fg)
 }
@@ -150,7 +152,56 @@ function ctaButton(label: string, href: string) {
   `
 }
 
-// Shared shell — navy header band, white card body, footer with contact info.
+// Public logo used in every email header. Absolute https URL on purpose:
+// emails (and the Resend dashboard templates built from this file) can only
+// load images from a public address. Override with EMAIL_LOGO_URL if needed.
+const LOGO_URL =
+  process.env.EMAIL_LOGO_URL || 'https://smashuk.co/icons/logo.png'
+
+// Numbered "what happens next" list — used for step-by-step instructions.
+export function stepList(steps: { title: string; body?: string }[]) {
+  const rows = steps
+    .map(
+      (s, i) => `
+        <tr>
+          <td valign="top" style="width:36px;padding:0 0 18px;">
+            <div style="width:26px;height:26px;line-height:26px;border-radius:50%;background:${NAVY};color:#FFFFFF;font-size:12px;font-weight:700;text-align:center;">${i + 1}</div>
+          </td>
+          <td valign="top" style="padding:2px 0 18px;">
+            <p style="margin:0;font-size:14px;font-weight:700;line-height:1.4;color:${TEXT};">${s.title}</p>
+            ${s.body ? `<p style="margin:3px 0 0;font-size:13.5px;line-height:1.6;color:${MUTED};">${s.body}</p>` : ''}
+          </td>
+        </tr>`,
+    )
+    .join('')
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
+      ${rows}
+    </table>
+  `
+}
+
+// Titled info panel (tracking number, order summary, tips ...).
+export function infoBox(label: string, innerHtml: string) {
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;">
+      <tr>
+        <td style="padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-left:3px solid ${CORAL};border-radius:8px;">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">${label}</p>
+          ${innerHtml}
+        </td>
+      </tr>
+    </table>
+  `
+}
+
+// Small section heading inside an email body.
+export function sectionHeading(text: string) {
+  return `<p style="margin:26px 0 10px;font-size:12px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};border-bottom:1px solid ${BORDER};padding-bottom:8px;">${text}</p>`
+}
+
+// Shared shell used by EVERY email: white card, logo header with a brand
+// accent bar, body, then a footer with contact details and quick links.
 // Table-based layout on purpose: it's the one thing every email client
 // (Gmail, Outlook, Apple Mail) renders the same way.
 //
@@ -160,31 +211,51 @@ function ctaButton(label: string, href: string) {
 // that dedicated Resend Template instead (each email type has its own, see
 // scripts/resend-templates.generated.json), and this html is unused for
 // that send but still returned so nothing else has to change shape.
+// After changing this shell, re-run scripts/generate-resend-templates.ts and
+// scripts/sync-resend-templates.ts to push the new look to Resend.
 function renderShell(badge: string, title: string, bodyHtml: string): string {
+  const link = (label: string, href: string) =>
+    `<a href="${href}" style="color:${NAVY};text-decoration:none;font-weight:600;">${label}</a>`
   return `
-  <div style="background:#F2F4F7;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;">
+  <div style="background:#F2F4F7;padding:32px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid ${BORDER};border-radius:12px;overflow:hidden;">
       <tr>
-        <td style="background:${NAVY};padding:26px 32px;border-radius:12px 12px 0 0;text-align:center;">
-          <span style="font-size:19px;font-weight:800;color:#FFFFFF;letter-spacing:0.5px;">${SITE_NAME.toUpperCase()}</span>
+        <td style="padding:0;font-size:0;line-height:0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td width="72%" style="background:${NAVY};height:5px;font-size:0;line-height:0;">&nbsp;</td>
+            <td width="28%" style="background:${CORAL};height:5px;font-size:0;line-height:0;">&nbsp;</td>
+          </tr></table>
         </td>
       </tr>
       <tr>
-        <td style="background:#FFFFFF;padding:36px 32px;border-left:1px solid ${BORDER};border-right:1px solid ${BORDER};">
+        <td align="center" style="padding:28px 32px 22px;background:#FFFFFF;border-bottom:1px solid ${BORDER};">
+          <a href="${SITE_URL}" style="text-decoration:none;">
+            <img src="${LOGO_URL}" width="160" alt="${SITE_NAME}" style="display:block;border:0;outline:none;height:auto;max-width:160px;margin:0 auto;" />
+          </a>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:34px 32px 30px;">
           ${badge}
-          <h1 style="margin:16px 0 6px;font-size:21px;line-height:1.3;color:${TEXT};">${title}</h1>
+          <h1 style="margin:16px 0 10px;font-size:22px;line-height:1.3;color:${TEXT};">${title}</h1>
           ${bodyHtml}
+          <p style="margin:30px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+            Thank you,<br /><strong style="color:${TEXT};">The ${SITE_NAME} team</strong>
+          </p>
         </td>
       </tr>
       <tr>
-        <td style="background:#F9FAFB;padding:24px 32px;border:1px solid ${BORDER};border-top:none;border-radius:0 0 12px 12px;text-align:center;">
-          <p style="margin:0 0 6px;font-size:13px;color:${MUTED};">
-            Questions about your order?
-            <a href="mailto:${CONTACT_EMAIL}" style="color:${CORAL};text-decoration:none;font-weight:600;">Email us</a>
-            or call ${CONTACT_PHONE}
+        <td style="background:#F9FAFB;padding:24px 32px;border-top:1px solid ${BORDER};text-align:center;">
+          <p style="margin:0 0 10px;font-size:13px;line-height:1.6;color:${MUTED};">
+            Need help? <a href="mailto:${CONTACT_EMAIL}" style="color:${CORAL};text-decoration:none;font-weight:600;">${CONTACT_EMAIL}</a>
+            &nbsp;·&nbsp; ${CONTACT_PHONE}
           </p>
-          <p style="margin:0;font-size:12px;color:#9CA3AF;">
-            ${STORE_DISPLAY_NAME} · ${STORE_ADDRESS_LINE1}, ${STORE_ADDRESS_LINE2}
+          <p style="margin:0 0 12px;font-size:12.5px;color:${MUTED};">
+            ${link('Shop', `${SITE_URL}/shop`)} &nbsp;|&nbsp; ${link('Track your order', `${SITE_URL}/track`)} &nbsp;|&nbsp; ${link('Shipping', `${SITE_URL}/shipping`)} &nbsp;|&nbsp; ${link('Returns', `${SITE_URL}/returns`)}
+          </p>
+          <p style="margin:0;font-size:11.5px;line-height:1.6;color:#9CA3AF;">
+            ${STORE_DISPLAY_NAME} · ${STORE_ADDRESS_LINE1}, ${STORE_ADDRESS_LINE2}<br />
+            © ${new Date().getFullYear()} ${SITE_NAME}. All rights reserved.
           </p>
         </td>
       </tr>
@@ -1225,28 +1296,124 @@ export function returnLabelEmail(
 ) {
   const orderNumber = orderNumberOf(order)
   const carrier = opts.carrierName || 'the courier'
-  const subject = `Your return label for order ${orderNumber} — ${SITE_NAME}`
+  const firstName = order?.shipping_address?.first_name
+  const subject = `Your return label — order ${orderNumber} | ${SITE_NAME}`
   const html = renderShell(
     statusBadge('return_label'),
-    'Your prepaid return label is attached',
+    'Your prepaid return label is ready',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Your prepaid return label for order <strong style="color:${TEXT};">${orderNumber}</strong> is attached to this email as a PDF.
+      <p style="margin:0;font-size:14.5px;line-height:1.65;color:${MUTED};">
+        ${firstName ? `Hi ${firstName}, y` : 'Y'}our return for order <strong style="color:${TEXT};">${orderNumber}</strong> has been approved. The prepaid label is attached to this email as a PDF.
       </p>
-      <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
-        <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">How to use it</p>
-        <p style="margin:0;font-size:14px;line-height:1.6;color:${TEXT};">Print the label, attach it securely to your parcel, and drop it off at a ${carrier} drop-off point.</p>
-        ${opts.trackingNumber ? `<p style="margin:10px 0 0;font-size:13px;color:${MUTED};">Tracking number: <strong style="color:${TEXT};">${opts.trackingNumber}</strong></p>` : ''}
-      </div>
-      <p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:${MUTED};">
-        Please keep your proof of postage until the return reaches us. If you have any trouble printing the label, just reply to this email.
+      ${sectionHeading('How to return your parcel')}
+      ${stepList([
+        {
+          title: 'Pack your items',
+          body: 'Include everything you are returning, in its original packaging where possible.',
+        },
+        {
+          title: 'Print and attach the label',
+          body: 'Print the attached PDF and stick it flat on the outside of the parcel. Remove or cover any old labels.',
+        },
+        {
+          title: `Drop it off at a ${carrier} drop-off point`,
+          body: 'Keep your proof of postage until the return reaches us.',
+        },
+      ])}
+      ${
+        opts.trackingNumber
+          ? infoBox(
+              'Parcel tracking',
+              `<p style="margin:0;font-size:14px;color:${TEXT};">Tracking number: <strong>${opts.trackingNumber}</strong></p>`,
+            )
+          : ''
+      }
+      <p style="margin:20px 0 0;font-size:13.5px;line-height:1.6;color:${MUTED};">
+        Any trouble printing the label? Just reply to this email and we will help.
       </p>
     `,
   )
-  const text = `Your prepaid return label for order ${orderNumber} is attached as a PDF. Print it, attach it to your parcel and drop it off at a ${carrier} drop-off point.${opts.trackingNumber ? ` Tracking number: ${opts.trackingNumber}.` : ''} Reply to this email if you need help.`
+  const text = `${firstName ? `Hi ${firstName}, your` : 'Your'} return for order ${orderNumber} is approved. Your prepaid return label is attached as a PDF. 1) Pack your items. 2) Print and attach the label. 3) Drop the parcel off at a ${carrier} drop-off point and keep your proof of postage.${opts.trackingNumber ? ` Tracking number: ${opts.trackingNumber}.` : ''} Reply to this email if you need help.`
   return { subject, html, text }
 }
 
+// Sent automatically when a mail-in stringing order is placed: the prepaid
+// label the customer prints to post their rackets to us.
+export function mailInLabelEmail(
+  order: any,
+  opts: {
+    carrierName?: string
+    trackingNumber?: string
+    /** Set when your box kit has just been posted to the customer. */
+    boxShipped?: boolean
+    boxTrackingNumber?: string
+  },
+) {
+  const orderNumber = orderNumberOf(order)
+  const carrier = opts.carrierName || 'the courier'
+  const firstName = order?.shipping_address?.first_name
+  const subject = `Your prepaid shipping label — order ${orderNumber} | ${SITE_NAME}`
+
+  const steps = opts.boxShipped
+    ? [
+        {
+          title: 'Wait for your racket box',
+          body: `It is on its way to you${opts.boxTrackingNumber ? ` (tracking number <strong style="color:${TEXT};">${opts.boxTrackingNumber}</strong>)` : ''}. Keep this email handy — your label is attached.`,
+        },
+        {
+          title: 'Pack your rackets',
+          body: 'Place your rackets in the box and seal it securely.',
+        },
+        {
+          title: 'Print and attach the label',
+          body: 'Print the attached PDF and stick it flat on the outside of the box. Remove or cover any old labels.',
+        },
+        {
+          title: `Drop it off at a ${carrier} drop-off point`,
+          body: 'Keep your proof of postage until we have received your rackets.',
+        },
+      ]
+    : [
+        {
+          title: 'Pack your rackets',
+          body: 'Place your rackets in your box and seal it securely.',
+        },
+        {
+          title: 'Print and attach the label',
+          body: 'Print the attached PDF and stick it flat on the outside of the parcel. Remove or cover any old labels.',
+        },
+        {
+          title: `Drop it off at a ${carrier} drop-off point`,
+          body: 'Keep your proof of postage until we have received your rackets.',
+        },
+      ]
+
+  const html = renderShell(
+    statusBadge('mail_in_label'),
+    'Your prepaid shipping label is ready',
+    `
+      <p style="margin:0;font-size:14.5px;line-height:1.65;color:${MUTED};">
+        ${firstName ? `Hi ${firstName}, t` : 'T'}hanks for booking mail-in stringing with us. Your prepaid label for order <strong style="color:${TEXT};">${orderNumber}</strong> is attached to this email as a PDF. Here is what to do next:
+      </p>
+      ${sectionHeading('How to send your rackets')}
+      ${stepList(steps)}
+      ${
+        opts.trackingNumber
+          ? infoBox(
+              'Parcel tracking',
+              `<p style="margin:0;font-size:14px;color:${TEXT};">Tracking number: <strong>${opts.trackingNumber}</strong></p>`,
+            )
+          : ''
+      }
+      ${infoBox(
+        'What happens next',
+        `<p style="margin:0;font-size:13.5px;line-height:1.6;color:${MUTED};">Once your rackets arrive we will restring them, then post them back to you and email your tracking details. Trouble printing the label? Just reply to this email and we will help.</p>`,
+      )}
+    `,
+  )
+  const text = `${firstName ? `Hi ${firstName}, ` : ''}${opts.boxShipped ? `your racket box is on its way${opts.boxTrackingNumber ? ` (tracking number ${opts.boxTrackingNumber})` : ''}. ` : ''}Your prepaid mail-in label for order ${orderNumber} is attached as a PDF. ${opts.boxShipped ? '1) Wait for your box. 2) Pack your rackets. 3) Print and attach the label. 4)' : '1) Pack your rackets. 2) Print and attach the label. 3)'} Drop the parcel off at a ${carrier} drop-off point and keep your proof of postage.${opts.trackingNumber ? ` Tracking number: ${opts.trackingNumber}.` : ''} Once we receive your rackets we will restring and post them back. Reply to this email if you need help.`
+  return { subject, html, text }
+}
 
 // ---------------------------------------------------------------------------
 // Gift cards (sold on the website - emailed, never shipped)
@@ -1374,10 +1541,8 @@ export function giftCardOrderReceiptEmail(order: any) {
     text,
     // No dedicated Resend template for this variant yet -> raw html is used.
     resendTemplate: undefined as
-      | { name: string; variables: Record<string, string> }
-      | undefined,
+      { name: string; variables: Record<string, string> } | undefined,
     attachments: undefined as
-      | ReturnType<typeof qrInlineAttachment>[]
-      | undefined,
+      ReturnType<typeof qrInlineAttachment>[] | undefined,
   }
 }

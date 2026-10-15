@@ -1,5 +1,6 @@
 'use client'
 
+import { groupMailInLines, racketsLabel } from '@/lib/mail-in'
 import { use, useEffect, useState } from 'react'
 import { getOrder } from '@/lib/api/dashboard'
 import { usePrinterStore } from '@/store/printerStore'
@@ -270,7 +271,52 @@ export default function PackingSlipPage({
             </tr>
           </thead>
           <tbody className='divide-y divide-gray-100'>
-            {(order.items ?? []).map((item: any) => (
+            {groupMailInLines<any>(
+              order.items ?? [],
+              (i) => (i.unit_price ?? 0) * (i.quantity ?? 0),
+              (i) => i.quantity ?? 1,
+              (i) => i.title ?? '',
+            ).bookings.map((b) => (
+              <tr key={`mail-in-${b.id}`}>
+                <td className='py-3 pr-4'>
+                  <p className='text-sm font-medium text-gray-900'>
+                    Mail-in stringing:{' '}
+                    {b.sport
+                      ? b.sport.charAt(0).toUpperCase() + b.sport.slice(1)
+                      : ''}
+                    , {racketsLabel(b.rackets.length || 1)}
+                  </p>
+                  {b.rackets.map((r) => (
+                    <p key={r.n} className='text-xs text-gray-600 mt-0.5'>
+                      Racket {r.n}
+                      {r.model ? ` (${r.model})` : ''}: {r.string}
+                      {r.tension ? ` at ${r.tension}` : ''}
+                    </p>
+                  ))}
+                  <p className='text-xs text-gray-400 mt-0.5'>
+                    {b.hasBox ? 'Customer uses own box' : 'Box kit to be sent'}
+                    {b.priority ? ' · Priority' : ''}
+                    {b.extras.length > 0
+                      ? ` · ${b.extras.map((e) => `${e.qty} × ${e.label}`).join(', ')}`
+                      : ''}
+                  </p>
+                </td>
+                <td className='py-3 px-4 text-center'>
+                  <span className='text-sm font-semibold text-gray-900'>1</span>
+                </td>
+                <td className='py-3 pl-4 text-right'>
+                  <span className='text-sm text-gray-700'>
+                    {fmt(b.total, currency)}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            {groupMailInLines<any>(
+              order.items ?? [],
+              () => 0,
+              () => 1,
+              (i) => i.title ?? '',
+            ).others.map((item: any) => (
               <tr key={item.id}>
                 <td className='py-3 pr-4'>
                   <p className='text-sm font-medium text-gray-900'>

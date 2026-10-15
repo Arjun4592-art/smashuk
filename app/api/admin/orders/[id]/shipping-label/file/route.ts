@@ -35,10 +35,12 @@ export async function GET(
   }
   const { id } = await params
 
-  const labelRes = await fetch(
-    new URL(`/admin/orders/${id}/shipping-label`, MEDUSA_URL).toString(),
-    { headers: { Authorization: authHeaderRaw } },
-  )
+  const labelUrlObj = new URL(`/admin/orders/${id}/shipping-label`, MEDUSA_URL)
+  const leg = new URL(req.url).searchParams.get('leg')
+  if (leg) labelUrlObj.searchParams.set('leg', leg)
+  const labelRes = await fetch(labelUrlObj.toString(), {
+    headers: { Authorization: authHeaderRaw },
+  })
   if (!labelRes.ok) {
     return NextResponse.json(
       { error: `Backend returned ${labelRes.status}` },

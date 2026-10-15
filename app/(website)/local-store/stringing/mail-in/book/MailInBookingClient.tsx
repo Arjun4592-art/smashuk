@@ -5,12 +5,11 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { useCartStore } from '@/store/cartStore'
-import { createCart } from '@/lib/api/store'
 import { formatCurrency } from '@/lib/utils'
 import { getTensionsForSport } from '@/lib/stringing-options'
 import type { Product } from '@/types'
 import {
-  BOX_CAPACITY,
+  boxCapacityText,
   FALLBACK_PRICES,
   MAIL_IN_SPORTS,
   TENSION_RANGE,
@@ -157,6 +156,26 @@ function BallIcon() {
     >
       <circle cx='24' cy='24' r='17' />
       <path d='M9 14c8 3 12 9 12 17M39 34c-8-3-12-9-12-17' />
+    </svg>
+  )
+}
+
+function SquashIcon() {
+  return (
+    <svg
+      viewBox='0 0 48 48'
+      className='h-8 w-8 sm:h-10 sm:w-10'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='2'
+      strokeLinecap='round'
+      strokeLinejoin='round'
+      aria-hidden
+    >
+      <path d='M17 4c-6 0-9 5-9 11s3 11 9 11 9-5 9-11-3-11-9-11Z' />
+      <path d='M17 26v6M14 32l-1 12h8l-1-12' />
+      <path d='M11 11h12M10 17h14M12 22h10' opacity='.55' />
+      <circle cx='37' cy='36' r='5' />
     </svg>
   )
 }
@@ -517,7 +536,7 @@ export default function MailInBookingClient({
     // shows those two errors
     hidden: sameSetup && i > 0,
   }))
-  const sportError = sport ? '' : 'Choose badminton or tennis.'
+  const sportError = sport ? '' : 'Choose your sport.'
   const boxError = hasBox === null ? 'Tell us whether you have a box.' : ''
   const racketsInvalid = racketErrors.some(
     (e) => e.model || (!e.hidden && (e.string || e.tension)),
@@ -565,16 +584,6 @@ export default function MailInBookingClient({
     if (submitting) return
     setSubmitting(true)
     try {
-      // Make sure the cart exists BEFORE the first addItem. addItem creates a
-      // cart itself when there is none, and several quick calls would each
-      // create their own.
-      const store = useCartStore.getState()
-      if (!store.cartId) {
-        const created = await createCart()
-        if (created?.id) store.setCartId(created.id)
-      }
-      const addItem = useCartStore.getState().addItem
-
       const bookingId =
         typeof crypto !== 'undefined' && 'randomUUID' in crypto
           ? crypto.randomUUID().slice(0, 8)
@@ -587,16 +596,24 @@ export default function MailInBookingClient({
         mail_in_has_box: hasBox ? 'Yes' : 'No',
       }
 
+      type BookingLine = {
+        product: Product
+        quantity: number
+        variant: { id: string; size?: string }
+        metadata: Record<string, any>
+      }
+      const lines: BookingLine[] = []
+
       // One stringing line per racket, carrying model + string + tension.
-      // linked_config is part of the cart's line key, so rackets with
-      // different models never merge into one line.
+      // The string comes from the same "stringing-options" list the racket
+      // page uses for its String Selection.
       effective.forEach((r, i) => {
         const opt = options.find((o) => o.id === r.stringId)
         if (!opt) return
         const model = r.model.trim()
         const stub: Product = {
           id: opt.productId,
-          name: `${opt.brand} ${opt.name} Stringing (${model})`,
+          name: `${opt.brand} ${opt.name} Stringing`,
           slug: '',
           description: '',
           brand: opt.brand,
@@ -613,67 +630,87 @@ export default function MailInBookingClient({
           tags: [],
           specs: [],
         }
-        addItem(
-          stub,
-          1,
-          { id: opt.variantId },
-          {
+        lines.push({
+          product: stub,
+          quantity: 1,
+          variant: { id: opt.variantId },
+          metadata: {
             ...base,
             mail_in_part: 'stringing',
             racket_number: i + 1,
             racket_model: model,
             string_choice: `${opt.brand} ${opt.name}`,
             string_tension: `${r.tension} lbs`,
-            linked_config: `mail-in:${model.toLowerCase()}`,
+            linked_config: `mail-in:${bookingId}:${i + 1}`,
           },
-        )
+        })
       })
 
       // One box, one delivery charge: the variant for the number of rackets
       // in the box, quantity 1 (the price is the total for the box).
       const dv = deliveryVariants[quote.tier]!
-      addItem(
-        { ...delivery!.product, price: dv.price },
-        1,
-        { id: dv.id, size: dv.title },
-        { ...base, mail_in_part: 'delivery', mail_in_rackets: count },
-      )
-
+      lines.push({
+        product: { ...delivery!.product, price: dv.price },
+        quantity: 1,
+        variant: { id: dv.id, size: dv.title },
+        metadata: { ...base, mail_in_part: 'delivery', mail_in_rackets: count },
+      })
       if (hasBox === false) {
         const bv = boxKit!.variants[0]
-        addItem(
-          { ...boxKit!.product, price: bv.price },
-          1,
-          { id: bv.id, size: bv.title },
-          { ...base, mail_in_part: 'box-kit' },
-        )
+        lines.push({
+          product: { ...boxKit!.product, price: bv.price },
+          quantity: 1,
+          variant: { id: bv.id, size: bv.title },
+          metadata: { ...base, mail_in_part: 'box-kit' },
+        })
       }
       if (service === 'priority' && priority) {
         const pv = priority.variants[0]
-        addItem(
-          { ...priority.product, price: pv.price },
-          1,
-          { id: pv.id, size: pv.title },
-          { ...base, mail_in_part: 'priority' },
-        )
+        lines.push({
+          product: { ...priority.product, price: pv.price },
+          quantity: 1,
+          variant: { id: pv.id, size: pv.title },
+          metadata: { ...base, mail_in_part: 'priority' },
+        })
       }
       for (const e of extras) {
         const qty = extraQty[e.key] ?? 0
         if (qty < 1) continue
         const ev = e.service.variants[0]
-        addItem(
-          { ...e.service.product, price: ev.price },
-          qty,
-          { id: ev.id, size: ev.title },
-          { ...base, mail_in_part: 'extra', mail_in_extra: e.key },
-        )
+        lines.push({
+          product: { ...e.service.product, price: ev.price },
+          quantity: qty,
+          variant: { id: ev.id, size: ev.title },
+          metadata: { ...base, mail_in_part: 'extra', mail_in_extra: e.key },
+        })
       }
+
+      // Stringing is a service, not stock: stop Medusa refusing a service
+      // that has no inventory count (see the route for details).
+      await fetch('/api/store/mail-in/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: lines.map((l) => ({
+            productId: l.product.id,
+            variantId: l.variant.id,
+          })),
+        }),
+      }).catch(() => {})
+
+      // All lines go into the cart together, one after another. If any of
+      // them is refused nothing is kept and the error is shown.
+      await useCartStore.getState().addMailInBooking(lines)
 
       toast.success('Booking added to your cart.')
       router.push('/cart')
     } catch (err) {
       console.error('[mail-in] booking failed', err)
-      toast.error('Could not add your booking to the cart. Please try again.')
+      toast.error(
+        err instanceof Error && err.message
+          ? `Could not add your booking: ${err.message}`
+          : 'Could not add your booking to the cart. Please try again.',
+      )
       setSubmitting(false)
     }
   }
@@ -693,11 +730,6 @@ export default function MailInBookingClient({
 
   const racketsDone = !!sport && !racketsInvalid
   const countLabel = (n: number) => (n === 1 ? '1 racket' : `${n} rackets`)
-  const tierRows: { tier: DeliveryTier; label: string }[] = [
-    { tier: '1', label: '1 racket' },
-    { tier: '2', label: '2 rackets' },
-    { tier: '3plus', label: '3+ rackets' },
-  ]
 
   /* ----------------------------------------------------------------- JSX */
   return (
@@ -744,7 +776,7 @@ export default function MailInBookingClient({
             done={!!sport}
             invalid={touched && !!sportError}
           >
-            <div className='grid sm:grid-cols-2 gap-3'>
+            <div className='grid sm:grid-cols-3 gap-3'>
               {MAIL_IN_SPORTS.map((s) => (
                 <Tile
                   key={s.value}
@@ -753,7 +785,13 @@ export default function MailInBookingClient({
                   onChange={() => chooseSport(s.value)}
                   title={s.label}
                   icon={
-                    s.value === 'badminton' ? <ShuttleIcon /> : <BallIcon />
+                    s.value === 'badminton' ? (
+                      <ShuttleIcon />
+                    ) : s.value === 'squash' ? (
+                      <SquashIcon />
+                    ) : (
+                      <BallIcon />
+                    )
                   }
                 />
               ))}
@@ -765,7 +803,7 @@ export default function MailInBookingClient({
           <Section
             n={2}
             title='How many rackets?'
-            hint={`One box holds up to ${BOX_CAPACITY.badminton} badminton or ${BOX_CAPACITY.tennis} tennis rackets. The more rackets in the box, the lower the delivery price.`}
+            hint={`One box holds ${boxCapacityText()}. Shipping is a flat ${formatCurrency(deliveryByTier['1'])} per box, there and back.`}
             done
           >
             <Stepper
@@ -776,36 +814,23 @@ export default function MailInBookingClient({
               label='number of rackets'
             />
 
-            <div className='mt-5 grid grid-cols-3 gap-2' aria-hidden>
-              {tierRows.map((t) => {
-                const active = quote.tier === t.tier
-                return (
-                  <div
-                    key={t.tier}
-                    className={`rounded-xl border-2 px-3 py-2.5 text-center transition-colors ${
-                      active
-                        ? 'border-[#E8553A] bg-[#E8553A]/[0.06]'
-                        : 'border-transparent bg-[#F5F3EF]'
-                    }`}
-                  >
-                    <p className='text-xs text-gray-500'>{t.label}</p>
-                    <p
-                      className={`font-montserrat font-bold text-base ${
-                        active ? 'text-[#E8553A]' : 'text-[#0A1F44]'
-                      }`}
-                    >
-                      {formatCurrency(deliveryByTier[t.tier])}
-                    </p>
-                    <p className='text-[11px] text-gray-400'>per box</p>
-                  </div>
-                )
-              })}
+            <div
+              className='mt-5 rounded-xl border-2 border-[#E8553A] bg-[#E8553A]/[0.06] px-4 py-3 text-center'
+              aria-hidden
+            >
+              <p className='text-xs text-gray-500'>Round-trip shipping</p>
+              <p className='font-montserrat font-bold text-base text-[#E8553A]'>
+                {formatCurrency(quote.delivery)}
+              </p>
+              <p className='text-[11px] text-gray-400'>
+                flat fee per box, up to {racketLimit} rackets
+              </p>
             </div>
             <p className='mt-4 text-sm text-[#0A1F44]'>
-              Delivery for {countLabel(count)} in one box:{' '}
+              Round-trip shipping for {countLabel(count)} in one box:{' '}
               <strong>{formatCurrency(quote.delivery)}</strong>
               {sport
-                ? `. A ${sport} box holds up to ${racketLimit}. Need to send more? Make a second booking.`
+                ? `. A ${sport} box holds up to ${racketLimit}. Need to send more? Make a second booking (another ${formatCurrency(deliveryByTier['1'])}).`
                 : '. Choose your sport above to see how many fit in a box.'}
             </p>
           </Section>
@@ -888,7 +913,9 @@ export default function MailInBookingClient({
                           placeholder={
                             sport === 'tennis'
                               ? 'e.g. Babolat Pure Drive'
-                              : 'e.g. Yonex Astrox 99'
+                              : sport === 'squash'
+                                ? 'e.g. Tecnifibre Carboflex 125'
+                                : 'e.g. Yonex Astrox 99'
                           }
                           onChange={(e) =>
                             updateRacket(i, { model: e.target.value })

@@ -356,6 +356,10 @@ const NAV_ITEMS: NavItem[] = [
         label: 'Abandoned Checkouts',
         href: '/dashboard/orders?status=abandoned',
       },
+      {
+        label: 'Mail-in Stringing',
+        href: '/dashboard/mail-in',
+      },
     ],
   },
   {

@@ -29,7 +29,9 @@ import {
   findParentItem,
   itemKey,
   lineTotal,
+  splitMailInBookings,
 } from '@/lib/cart-links'
+import { MailInCartRow } from '@/components/cart/MailInBookingRow'
 export default function CartPage() {
   const {
     items,
@@ -43,6 +45,7 @@ export default function CartPage() {
     giftCards,
     giftCardTotal,
     removeItem,
+    removeMailInBooking,
     updateQuantity,
     applyCoupon,
     removeCoupon,
@@ -148,14 +151,24 @@ export default function CartPage() {
   const physicalItems = items.filter(
     (i) => i.product.slug !== GIFT_CARD_PRODUCT_HANDLE,
   )
-  const physicalSubtotal = physicalItems.reduce(
+  // Mail-in bookings carry their own shipping, so they are neither charged
+  // standard delivery nor counted towards the free-shipping threshold.
+  const { bookings: mailInBookings, others: nonMailInItems } = useMemo(
+    () => splitMailInBookings(items),
+    [items],
+  )
+  const shippableItems = physicalItems.filter(
+    (i) => !i.metadata?.mail_in && !i.metadata?.mail_in_booking,
+  )
+  const physicalSubtotal = shippableItems.reduce(
     (s, i) => s + i.product.price * i.quantity,
     0,
   )
   const amountToFreeShipping =
-    physicalItems.length === 0
+    shippableItems.length === 0
       ? 0
       : Math.max(0, freeShippingThreshold - physicalSubtotal)
+  const mailInOnly = items.length > 0 && nonMailInItems.length === 0
   const eligibleForFreeShipping = amountToFreeShipping <= 0
   const totalSaved = useMemo(
     () =>
@@ -208,7 +221,11 @@ export default function CartPage() {
           My cart
         </h1>
         <p className='font-lato text-sm mt-1.5'>
-          {eligibleForFreeShipping ? (
+          {mailInOnly ? (
+            <span className='text-gray-500'>
+              Round-trip shipping is already included in your mail-in booking.
+            </span>
+          ) : eligibleForFreeShipping ? (
             <span className='text-green-600 font-semibold'>
               You are eligible for free shipping!
             </span>
@@ -233,8 +250,15 @@ export default function CartPage() {
             </div>
 
             <div className='divide-y divide-gray-100'>
-              {displayRows(items).map(({ item, stringAddon }) => {
-                const parentItem = findParentItem(item, items)
+              {mailInBookings.map((booking) => (
+                <MailInCartRow
+                  key={`mail-in-${booking.id}`}
+                  booking={booking}
+                  onRemove={() => removeMailInBooking(booking.id)}
+                />
+              ))}
+              {displayRows(nonMailInItems).map(({ item, stringAddon }) => {
+                const parentItem = findParentItem(item, nonMailInItems)
                 return (
                   <div
                     key={`${item.product.id}-${item.variant?.id}-${itemKey(item)}`}
@@ -626,7 +650,11 @@ export default function CartPage() {
                 <div className='flex justify-between text-gray-600'>
                   <span>Shipping</span>
                   <span className='font-medium text-[#0A1F44]'>
-                    {shipping > 0 ? formatCurrency(shipping) : 'Free'}
+                    {shipping > 0
+                      ? formatCurrency(shipping)
+                      : mailInOnly
+                        ? 'Included'
+                        : 'Free'}
                   </span>
                 </div>
               </div>

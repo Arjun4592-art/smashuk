@@ -7,7 +7,7 @@ import MailInBookingClient from './MailInBookingClient'
 export const metadata: Metadata = {
   title: `Book Mail-In Stringing | ${SITE_NAME}`,
   description:
-    'Book mail-in badminton or tennis racket stringing. Choose your string and tension, see the delivery price instantly and post your rackets to Smash Racket Pro.',
+    'Book mail-in badminton, tennis or squash racket stringing. Choose your string and tension, see the delivery price instantly and post your rackets to Smash Racket Pro.',
 }
 
 // Prices come from Medusa, so never serve a cached copy.

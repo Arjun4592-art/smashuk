@@ -13,6 +13,8 @@ export async function GET(
   const { id } = await params
 
   const url = new URL(`/admin/orders/${id}/shipping-label`, MEDUSA_URL)
+  const leg = new URL(req.url).searchParams.get('leg')
+  if (leg) url.searchParams.set('leg', leg)
   const r = await fetch(url.toString(), {
     headers: { Authorization: authHeaderRaw },
   })

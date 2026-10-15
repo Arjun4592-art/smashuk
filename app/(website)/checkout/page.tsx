@@ -10,6 +10,7 @@ import {
   useState,
   useEffect,
   useRef,
+  useMemo,
   forwardRef,
   useImperativeHandle,
 } from 'react'
@@ -32,7 +33,9 @@ import {
 } from '@/lib/api/store'
 import { useAuthStore } from '@/store/authStore'
 import { trackBeginCheckout } from '@/lib/analytics-events'
-import { displayRows, itemKey } from '@/lib/cart-links'
+import { displayRows, itemKey, splitMailInBookings } from '@/lib/cart-links'
+import { MailInSummaryRow } from '@/components/cart/MailInBookingRow'
+import { isMailInMeta } from '@/lib/mail-in'
 import {
   FREE_SHIPPING_THRESHOLD,
   STANDARD_SHIPPING_COST,
@@ -202,6 +205,14 @@ export default function CheckoutPage() {
   const isGiftCardOnly =
     items.length > 0 &&
     items.every((i) => i.product.slug === GIFT_CARD_PRODUCT_HANDLE)
+  // A cart made only of mail-in bookings already pays its own round-trip
+  // shipping (the "Mail-in Stringing Shipping" line), so no standard delivery
+  // charge is added on top.
+  const { bookings: mailInBookings, others: nonMailInItems } = useMemo(
+    () => splitMailInBookings(items),
+    [items],
+  )
+  const isMailInOnly = items.length > 0 && nonMailInItems.length === 0
   const deliveryMode: 'ship' | 'pickup' | 'digital' = isGiftCardOnly
     ? 'digital'
     : deliveryModeChoice
@@ -333,9 +344,12 @@ export default function CheckoutPage() {
             const variantId =
               item.variant?.id ?? (item.product as any).variants?.[0]?.id
             if (variantId) {
-              await addToCart(newCart.id, variantId, item.quantity).catch(
-                () => {},
-              )
+              await addToCart(
+                newCart.id,
+                variantId,
+                item.quantity,
+                item.metadata,
+              ).catch(() => {})
             }
           }
           setCartId(newCart.id)
@@ -371,7 +385,11 @@ export default function CheckoutPage() {
     }
   }, [cartId])
   const physicalSubtotal = items
-    .filter((i) => i.product.slug !== GIFT_CARD_PRODUCT_HANDLE)
+    .filter(
+      (i) =>
+        i.product.slug !== GIFT_CARD_PRODUCT_HANDLE &&
+        !isMailInMeta(i.metadata),
+    )
     .reduce((s, i) => s + i.product.price * i.quantity, 0)
   const isPickupOption = (name: string) => /pickup|store|collect/i.test(name)
   const isChannelIslandsOption = (name: string) =>
@@ -388,12 +406,23 @@ export default function CheckoutPage() {
     !EXPRESS_OPTION_RE.test(opt.name ?? '')
   const freeDeliveryOption = shippingOptions.find(isFreeDeliveryOption)
   const paidDeliveryOption = shippingOptions.find(isPaidDeliveryOption)
-  const resolvedDeliveryOption =
-    (physicalSubtotal >= freeShippingThreshold
-      ? freeDeliveryOption
-      : paidDeliveryOption) ??
-    freeDeliveryOption ??
-    paidDeliveryOption
+  const optionAmount = (o: any) =>
+    Number(o?.calculated_price?.calculated_amount ?? o?.amount)
+  // Mail-in only: take a delivery option that costs nothing.
+  const zeroDeliveryOption = shippingOptions.find(
+    (o) =>
+      !isPickupOption(o.name ?? '') &&
+      !isChannelIslandsOption(o.name ?? '') &&
+      !EXPRESS_OPTION_RE.test(o.name ?? '') &&
+      optionAmount(o) === 0,
+  )
+  const resolvedDeliveryOption = isMailInOnly
+    ? (zeroDeliveryOption ?? freeDeliveryOption ?? paidDeliveryOption)
+    : ((physicalSubtotal >= freeShippingThreshold
+        ? freeDeliveryOption
+        : paidDeliveryOption) ??
+      freeDeliveryOption ??
+      paidDeliveryOption)
 
   const isPickupSelected =
     !!pickupOption && selectedShippingOptionId === pickupOption.id
@@ -411,18 +440,22 @@ export default function CheckoutPage() {
 
   const displayShipping =
     isGiftCardOnly || isPickupSelected
-    ? 0
-    : isChannelIslandsDelivery
-      ? CHANNEL_ISLANDS_SHIPPING_COST
-      : activeDeliveryOption
-        ? activeDeliveryOption === freeDeliveryOption
-          ? 0
-          : (activeDeliveryOption.calculated_price?.calculated_amount ??
-            activeDeliveryOption.amount ??
-            shipping)
-        : physicalSubtotal >= freeShippingThreshold
-          ? 0
-          : STANDARD_SHIPPING_COST
+      ? 0
+      : isMailInOnly && !isChannelIslandsDelivery
+        ? activeDeliveryOption
+          ? optionAmount(activeDeliveryOption) || 0
+          : 0
+        : isChannelIslandsDelivery
+          ? CHANNEL_ISLANDS_SHIPPING_COST
+          : activeDeliveryOption
+            ? activeDeliveryOption === freeDeliveryOption
+              ? 0
+              : (activeDeliveryOption.calculated_price?.calculated_amount ??
+                activeDeliveryOption.amount ??
+                shipping)
+            : physicalSubtotal >= freeShippingThreshold
+              ? 0
+              : STANDARD_SHIPPING_COST
 
   const goodsAfterDiscount = subtotal - discountAmount
   // Selling a gift card is not a VAT-able supply (VAT is charged when the card
@@ -602,28 +635,28 @@ export default function CheckoutPage() {
               phone: form.phone || undefined,
             }
           : deliveryMode === 'pickup' && storeContact
-          ? {
-              first_name: firstName,
-              last_name: rest.join(' ') || '',
-              address_1: storeContact.address.line1,
-              address_2: storeContact.address.line2 || undefined,
-              city: storeContact.address.city,
-              province: storeContact.address.state,
-              postal_code: storeContact.address.pincode,
-              country_code: 'gb',
-              phone: form.phone || undefined,
-            }
-          : {
-              first_name: firstName,
-              last_name: rest.join(' ') || '',
-              address_1: form.line1,
-              address_2: form.line2 || undefined,
-              city: form.city,
-              province: form.state,
-              postal_code: form.pincode,
-              country_code: getVatDestination(form.pincode).countryCode,
-              phone: form.phone || undefined,
-            }
+            ? {
+                first_name: firstName,
+                last_name: rest.join(' ') || '',
+                address_1: storeContact.address.line1,
+                address_2: storeContact.address.line2 || undefined,
+                city: storeContact.address.city,
+                province: storeContact.address.state,
+                postal_code: storeContact.address.pincode,
+                country_code: 'gb',
+                phone: form.phone || undefined,
+              }
+            : {
+                first_name: firstName,
+                last_name: rest.join(' ') || '',
+                address_1: form.line1,
+                address_2: form.line2 || undefined,
+                city: form.city,
+                province: form.state,
+                postal_code: form.pincode,
+                country_code: getVatDestination(form.pincode).countryCode,
+                phone: form.phone || undefined,
+              }
       const billingAddress =
         deliveryMode !== 'ship' || billingSameAsShipping
           ? undefined
@@ -659,7 +692,9 @@ export default function CheckoutPage() {
         // the gift-card profile - never a paid one.
         const giftOptions = (await listShippingOptions(cartId)) ?? []
         const freeOptions = giftOptions.filter((o: any) => {
-          const amount = Number(o.calculated_price?.calculated_amount ?? o.amount)
+          const amount = Number(
+            o.calculated_price?.calculated_amount ?? o.amount,
+          )
           return (
             Number.isFinite(amount) &&
             amount === 0 &&
@@ -667,8 +702,9 @@ export default function CheckoutPage() {
           )
         })
         optionId = (
-          freeOptions.find((o: any) => /digital|email|gift/i.test(o.name ?? '')) ??
-          freeOptions[0]
+          freeOptions.find((o: any) =>
+            /digital|email|gift/i.test(o.name ?? ''),
+          ) ?? freeOptions[0]
         )?.id
       } else {
         optionId = selectedShippingOptionId || shippingOptions[0]?.id
@@ -804,29 +840,28 @@ export default function CheckoutPage() {
               <div className='flex items-start gap-3 p-4 rounded-2xl border border-[#10B981]/30 bg-[#ECFDF5]'>
                 <span className='text-xl'>✉️</span>
                 <p className='text-sm font-lato text-[#065F46] leading-relaxed'>
-                  <strong>No delivery needed.</strong> Your gift card number
-                  and details will be emailed to you as soon as payment is
-                  complete.
+                  <strong>No delivery needed.</strong> Your gift card number and
+                  details will be emailed to you as soon as payment is complete.
                 </p>
               </div>
             ) : (
-            <div className='grid grid-cols-2 gap-0 border border-gray-200 rounded-2xl overflow-hidden bg-white'>
-              <button
-                type='button'
-                onClick={() => setDeliveryMode('ship')}
-                className={`flex items-center justify-center gap-2 py-3.5 font-montserrat font-bold text-sm transition-colors ${deliveryMode === 'ship' ? 'bg-[#0A1F44] text-white' : 'text-gray-400 hover:bg-gray-50'}`}
-              >
-                🚚 Ship
-              </button>
-              <button
-                type='button'
-                onClick={() => setDeliveryMode('pickup')}
-                disabled={!pickupOption}
-                className={`flex items-center justify-center gap-2 py-3.5 font-montserrat font-bold text-sm transition-colors border-l border-gray-200 ${deliveryMode === 'pickup' ? 'bg-[#0A1F44] text-white' : 'text-gray-400 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-transparent'}`}
-              >
-                🏬 Pickup
-              </button>
-            </div>
+              <div className='grid grid-cols-2 gap-0 border border-gray-200 rounded-2xl overflow-hidden bg-white'>
+                <button
+                  type='button'
+                  onClick={() => setDeliveryMode('ship')}
+                  className={`flex items-center justify-center gap-2 py-3.5 font-montserrat font-bold text-sm transition-colors ${deliveryMode === 'ship' ? 'bg-[#0A1F44] text-white' : 'text-gray-400 hover:bg-gray-50'}`}
+                >
+                  🚚 Ship
+                </button>
+                <button
+                  type='button'
+                  onClick={() => setDeliveryMode('pickup')}
+                  disabled={!pickupOption}
+                  className={`flex items-center justify-center gap-2 py-3.5 font-montserrat font-bold text-sm transition-colors border-l border-gray-200 ${deliveryMode === 'pickup' ? 'bg-[#0A1F44] text-white' : 'text-gray-400 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-transparent'}`}
+                >
+                  🏬 Pickup
+                </button>
+              </div>
             )}
 
             <div className='bg-white rounded-2xl p-6 border border-gray-100'>
@@ -1104,7 +1139,13 @@ export default function CheckoutPage() {
               </div>
 
               <div className='space-y-3 mb-5 max-h-48 overflow-y-auto'>
-                {displayRows(items).map(({ item, stringAddon }) => (
+                {mailInBookings.map((booking) => (
+                  <MailInSummaryRow
+                    key={`mail-in-${booking.id}`}
+                    booking={booking}
+                  />
+                ))}
+                {displayRows(nonMailInItems).map(({ item, stringAddon }) => (
                   <div
                     key={`${item.product.id}-${item.variant?.id}-${itemKey(item)}`}
                     className='flex items-center gap-3'

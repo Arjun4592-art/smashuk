@@ -75,9 +75,16 @@ export async function shipOrder(orderId: string, fetcher: Fetcher) {
   }
   const order = orderData.order
   if (!order) throw new Error('Order not found')
+  // An order can be partly shipped/delivered while another fulfilment is
+  // still waiting (mail-in orders: the box goes out first, the restrung
+  // rackets later), so only call it finished when nothing is waiting.
+  const waiting = (order.fulfillments ?? []).filter(
+    (f: any) => !f.canceled_at && !f.shipped_at && !f.delivered_at,
+  )
   if (
-    order.fulfillment_status === 'shipped' ||
-    order.fulfillment_status === 'partially_shipped'
+    waiting.length === 0 &&
+    (order.fulfillment_status === 'shipped' ||
+      order.fulfillment_status === 'partially_shipped')
   ) {
     return {
       alreadyShipped: true,
@@ -85,8 +92,9 @@ export async function shipOrder(orderId: string, fetcher: Fetcher) {
     }
   }
   if (
-    order.fulfillment_status === 'delivered' ||
-    order.fulfillment_status === 'partially_delivered'
+    waiting.length === 0 &&
+    (order.fulfillment_status === 'delivered' ||
+      order.fulfillment_status === 'partially_delivered')
   ) {
     throw new Error('Order has already been delivered.')
   }
@@ -154,9 +162,11 @@ export async function fulfillOrder(
   orderId: string,
   fetcher: Fetcher,
   markDelivered = false,
+  /** Fulfil only these order line item ids (e.g. just a mail-in box kit). */
+  onlyLineItemIds?: string[],
 ) {
   const orderRes = await fetcher(
-    `/admin/orders/${orderId}?fields=id,fulfillment_status,*items`,
+    `/admin/orders/${orderId}?fields=id,fulfillment_status,*items,*fulfillments,*fulfillments.items`,
   )
   const orderData = await readJson(orderRes)
   if (!orderRes.ok) {
@@ -166,22 +176,38 @@ export async function fulfillOrder(
   }
   const order = orderData.order
   if (!order) throw new Error('Order not found')
-  if (
-    order.fulfillment_status &&
-    order.fulfillment_status !== 'not_fulfilled' &&
-    order.fulfillment_status !== 'partially_fulfilled'
-  ) {
+  if (order.fulfillment_status === 'canceled') {
     return {
       alreadyFulfilled: true,
       order,
     }
   }
-  const items = (order.items ?? []).map((item: any) => ({
-    id: item.id,
-    quantity: item.quantity,
-  }))
+  // Quantity already covered by an active fulfilment, per line item.
+  const coveredQty = new Map<string, number>()
+  for (const f of order.fulfillments ?? []) {
+    if (f.canceled_at) continue
+    for (const fi of f.items ?? []) {
+      const key = fi.line_item_id ?? fi.id
+      coveredQty.set(key, (coveredQty.get(key) ?? 0) + Number(fi.quantity ?? 0))
+    }
+  }
+  const items = (order.items ?? [])
+    .filter(
+      (item: any) => !onlyLineItemIds || onlyLineItemIds.includes(item.id),
+    )
+    .map((item: any) => ({
+      id: item.id,
+      quantity: Number(item.quantity) - (coveredQty.get(item.id) ?? 0),
+    }))
+    .filter((item: any) => item.quantity > 0)
   if (items.length === 0) {
-    throw new Error('Order has no items to fulfill')
+    if ((order.items ?? []).length === 0) {
+      throw new Error('Order has no items to fulfill')
+    }
+    return {
+      alreadyFulfilled: true,
+      order,
+    }
   }
   const locRes = await fetcher('/admin/stock-locations?limit=1')
   const locData = await readJson(locRes)

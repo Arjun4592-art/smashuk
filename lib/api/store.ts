@@ -591,6 +591,12 @@ export async function getCustomerOrders() {
     credentials: 'include',
   })
   const data = await res.json().catch(() => ({}))
+  // The API answers 200 with an empty list when the Medusa customer token is
+  // missing/unsynced. Don't show that as "No orders yet" - surface it.
+  if (res.status === 401 || data?.error === 'not_synced') {
+    throw new Error('not_synced')
+  }
+  if (!res.ok) throw new Error(data?.message ?? 'Failed to load orders')
   return data.orders ?? []
 }
 export async function getCustomerOrder(id: string) {

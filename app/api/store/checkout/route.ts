@@ -166,6 +166,16 @@ export async function POST(req: NextRequest) {
             confirmErr,
           )
         }
+        try {
+          const newOrder = completeData.order ?? completeData.cart
+          if (newOrder?.id) {
+            const { sendMailInLabelForOrder } =
+              await import('@/lib/api/order-labels')
+            await sendMailInLabelForOrder(newOrder.id)
+          }
+        } catch (labelErr) {
+          console.error('[/api/store/checkout] mail-in label step failed:', labelErr)
+        }
         return NextResponse.json(completeData, {
           status: res.status,
         })

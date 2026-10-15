@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/authStore'
 const BREADCRUMB_MAP: Record<string, string> = {
   '/dashboard': 'Overview',
   '/dashboard/orders': 'Orders',
+  '/dashboard/mail-in': 'Mail-in Stringing',
   '/dashboard/products': 'Products',
   '/dashboard/products/new': 'Add Product',
   '/dashboard/categories': 'Categories',

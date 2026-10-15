@@ -12,6 +12,7 @@ import {
 } from '@/lib/api/store'
 import { GIFT_CARD_PRODUCT_HANDLE } from '@/lib/constants'
 import { trackAddToCart } from '@/lib/analytics-events'
+import { isMailInMeta } from '@/lib/mail-in'
 import {
   configKeyOf,
   getLinkedItems,
@@ -55,6 +56,22 @@ interface CartState {
     metadata?: Record<string, any>,
     discountPerUnit?: number,
   ) => void
+  /**
+   * Adds every line of ONE mail-in booking. The lines are written to the
+   * Medusa cart one after another (never in parallel) and, if any of them is
+   * refused, the whole booking is rolled back and the error is thrown, so the
+   * storefront cart can never show lines that Medusa does not have.
+   */
+  addMailInBooking: (
+    lines: {
+      product: Product
+      quantity: number
+      variant: CartItem['variant']
+      metadata: Record<string, any>
+    }[],
+  ) => Promise<void>
+  /** Removes every line of one mail-in booking. */
+  removeMailInBooking: (bookingId: string) => Promise<void>
   removeItem: (
     productId: string,
     variantId?: string,
@@ -84,9 +101,18 @@ function findMedusaLine(
   variantId: string,
   metadata?: Record<string, any> | null,
 ) {
-  const lines: any[] = (medusaCart?.items ?? []).filter(
+  let lines: any[] = (medusaCart?.items ?? []).filter(
     (li: any) => li.variant_id === variantId,
   )
+  // Two mail-in bookings can hold the same variant (e.g. the delivery
+  // product): the booking id tells them apart.
+  const bookingId = metadata?.mail_in_booking
+  if (bookingId) {
+    const mine = lines.filter(
+      (li: any) => li.metadata?.mail_in_booking === bookingId,
+    )
+    if (mine.length > 0) lines = mine
+  }
   if (lines.length <= 1) return lines[0]
   const want = configKeyOf(metadata)
   return lines.find((li: any) => configKeyOf(li.metadata) === want) ?? lines[0]
@@ -115,8 +141,16 @@ function computeTotals(
     (s, i) => s + (i.product.price - (i.discount ?? 0)) * i.quantity,
     0,
   )
+  // Mail-in bookings already include their own round-trip shipping (the
+  // "Mail-in Stringing Shipping" line), so they never attract the standard
+  // delivery charge and do not count towards the free-shipping threshold.
+  const shippableItems = physicalItems.filter((i) => !isMailInMeta(i.metadata))
+  const shippableSubtotal = shippableItems.reduce(
+    (s, i) => s + (i.product.price - (i.discount ?? 0)) * i.quantity,
+    0,
+  )
   const shipping =
-    physicalItems.length === 0 || physicalSubtotal >= FREE_SHIPPING_THRESHOLD
+    shippableItems.length === 0 || shippableSubtotal >= FREE_SHIPPING_THRESHOLD
       ? 0
       : SHIPPING_COST
   const taxable = Math.max(0, subtotal - discountAmount)
@@ -141,6 +175,30 @@ function computeTotals(
     itemCount,
   }
 }
+// Adds a line to the Medusa cart. If the saved cart id no longer exists in the
+// backend (DB reset, deleted cart, old browser state), create a fresh cart and
+// retry once instead of failing. Returns the cart id that was actually used.
+async function addToCartSafe(
+  cartId: string,
+  variantId: string,
+  quantity: number,
+  metadata: Record<string, any> | undefined,
+  onNewCart: (id: string) => void,
+): Promise<string> {
+  try {
+    await addToCart(cartId, variantId, quantity, metadata)
+    return cartId
+  } catch (e: any) {
+    if (!/cart.*not found/i.test(e?.message ?? '')) throw e
+    const created = await createCart()
+    const freshId = created?.id ?? null
+    if (!freshId) throw new Error('Could not create a cart.')
+    onNewCart(freshId)
+    await addToCart(freshId, variantId, quantity, metadata)
+    return freshId
+  }
+}
+
 export const useCartStore = create<CartState>()(
   persist(
     (set, get) => ({
@@ -232,12 +290,113 @@ export const useCartStore = create<CartState>()(
                   })
               }
               if (id) {
-                await addToCart(id, variantId, quantity, metadata)
+                await addToCartSafe(id, variantId, quantity, metadata, (n) =>
+                  set({ cartId: n }),
+                )
               }
             } catch (err) {
               console.error('Failed to sync cart with backend:', err)
             }
           })()
+        }
+      },
+      addMailInBooking: async (lines) => {
+        // 1. Make sure ONE cart exists before anything is added.
+        let cartId = get().cartId
+        if (!cartId) {
+          const created = await createCart()
+          cartId = created?.id ?? null
+          if (!cartId) throw new Error('Could not create a cart.')
+          set({ cartId })
+        }
+        // 2. Write to Medusa first, one line at a time. Medusa locks the
+        //    cart while it changes, so parallel calls fail at random.
+        const added: { variantId: string; metadata: Record<string, any> }[] = []
+        try {
+          for (const l of lines) {
+            const variantId = l.variant?.id
+            if (!variantId) throw new Error('A booking item has no variant.')
+            cartId = await addToCartSafe(
+              cartId,
+              variantId,
+              l.quantity,
+              l.metadata,
+              (n) => set({ cartId: n }),
+            )
+            added.push({ variantId, metadata: l.metadata })
+          }
+        } catch (err) {
+          // Roll back what did go in, so Medusa and the cart stay identical.
+          try {
+            const medusaCart = await getCart(cartId)
+            for (const a of added) {
+              const li = findMedusaLine(medusaCart, a.variantId, a.metadata)
+              if (li) await removeFromCart(cartId, li.id)
+            }
+          } catch {}
+          throw err
+        }
+        // 3. Only now show the booking in the storefront cart.
+        set((state) => {
+          const newItems = [
+            ...state.items,
+            ...lines.map((l) => ({
+              product: l.product,
+              quantity: l.quantity,
+              variant: l.variant,
+              metadata: l.metadata,
+            })),
+          ]
+          return {
+            items: newItems,
+            ...computeTotals(
+              newItems,
+              state.discountAmount,
+              state.giftCardTotal,
+              state.taxRate,
+            ),
+          }
+        })
+        for (const l of lines) {
+          trackAddToCart({
+            itemId: l.variant?.id ?? l.product.id,
+            itemName: l.product.name ?? 'Product',
+            price: l.product.price,
+            quantity: l.quantity,
+          })
+        }
+      },
+      removeMailInBooking: async (bookingId) => {
+        const targets = get().items.filter(
+          (i) =>
+            isMailInMeta(i.metadata) &&
+            String(i.metadata?.mail_in_booking ?? '') === bookingId,
+        )
+        if (targets.length === 0) return
+        set((state) => {
+          const newItems = state.items.filter((i) => !targets.includes(i))
+          return {
+            items: newItems,
+            ...computeTotals(
+              newItems,
+              state.discountAmount,
+              state.giftCardTotal,
+              state.taxRate,
+            ),
+          }
+        })
+        const cartId = get().cartId
+        if (!cartId) return
+        try {
+          const medusaCart = await getCart(cartId)
+          for (const t of targets) {
+            const variantId = t.variant?.id
+            if (!variantId) continue
+            const li = findMedusaLine(medusaCart, variantId, t.metadata)
+            if (li) await removeFromCart(cartId, li.id)
+          }
+        } catch (err) {
+          console.error('Failed to remove mail-in booking from cart:', err)
         }
       },
       removeItem: (productId, variantId, configKey) => {

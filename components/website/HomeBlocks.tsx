@@ -5,7 +5,7 @@ import BrandsBar from '@/components/website/BrandsBar'
 import CategoryFilter from '@/components/website/CategoryFilter'
 import HomeProductSection from '@/components/website/HomePageProducts'
 import NewsletterForm from '@/components/website/NewsletterForm'
-import ReviewsSlider from '@/components/website/ReviewsSlider'
+import HomeReviews from '@/components/website/HomeReviews'
 import {
   BoltIcon,
   CheckIcon,
@@ -225,7 +225,7 @@ function renderBlock(block: HomeBlock, heroSlides: HeroSlide[]) {
     case 'brands':
       return <BrandsBar />
     case 'reviews':
-      return <ReviewsSlider />
+      return <HomeReviews />
     case 'newsletter':
       return <Newsletter block={block} />
     default:

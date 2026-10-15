@@ -1,4 +1,5 @@
 import type { CartItem } from '@/store/cartStore'
+import { groupMailInLines } from '@/lib/mail-in'
 
 /**
  * A racket can have add-on lines (string service, grip) that are added to the
@@ -86,4 +87,19 @@ export function displayRows(
   return items
     .filter((i) => !isMergedStringAddon(i, items))
     .map((item) => ({ item, stringAddon: getStringAddon(item, items) }))
+}
+
+/**
+ * Mail-in stringing is sold as ONE booking, but it is made of several cart
+ * lines (a stringing line per racket, the round-trip shipping, a box kit, ...).
+ * The cart and checkout show each booking as a single row, so they split the
+ * lines here first.
+ */
+export function splitMailInBookings(items: CartItem[]) {
+  return groupMailInLines(
+    items,
+    lineTotal,
+    (i) => i.quantity,
+    (i) => i.product.name,
+  )
 }

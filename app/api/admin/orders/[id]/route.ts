@@ -32,6 +32,14 @@ import {
   returnDeclinedEmail,
   returnLabelEmail,
 } from '@/lib/email-templates'
+import {
+  bookCustomerLabel,
+  shipMailInBox,
+  resendMailInLabel,
+  emailReturnLabel,
+  hasEmailableAddress,
+  type BookedLabel,
+} from '@/lib/api/order-labels'
 import { signOrderTrackToken } from '@/lib/api/order-track-token'
 export async function GET(
   req: NextRequest,
@@ -59,7 +67,7 @@ export async function GET(
   try {
     const FIELDS =
       'id,display_id,email,created_at,updated_at,canceled_at,status,currency_code,metadata,payment_status,' +
-      '*items,*payment_collections.payments,*shipping_methods,*fulfillments,fulfillment_status,' +
+      '*items,items.metadata,*payment_collections.payments,*shipping_methods,*fulfillments,fulfillment_status,' +
       'subtotal,total,discount_total,shipping_total,gift_card_total,tax_total,' +
       'customer.id,customer.first_name,customer.last_name,customer.phone,' +
       'shipping_address.first_name,shipping_address.last_name,shipping_address.phone,' +
@@ -67,7 +75,7 @@ export async function GET(
       'shipping_address.province,shipping_address.postal_code,shipping_address.country_code'
     const FALLBACK_FIELDS =
       'id,display_id,email,created_at,metadata,payment_status,' +
-      '*items,*payment_collections.payments,fulfillment_status,' +
+      '*items,items.metadata,*payment_collections.payments,fulfillment_status,' +
       'subtotal,total,discount_total,shipping_total,tax_total'
     async function fetchOrder(fields: string) {
       const url = new URL(`/admin/orders/${id}`, MEDUSA_URL)
@@ -418,6 +426,48 @@ export async function PATCH(
           console.error(
             `[order fulfill] ready-for-pickup email failed for ${id}:`,
             pickupEmailErr,
+          )
+        }
+        break
+      }
+      case 'resend-mail-in-label': {
+        try {
+          const labelResult = await resendMailInLabel(id, fetcher)
+          if (!labelResult.ok) {
+            return NextResponse.json(
+              { error: labelResult.error ?? 'Could not send the label' },
+              { status: 400 },
+            )
+          }
+          const orderRes = await fetcher(`/admin/orders/${id}`)
+          data = await orderRes.json().catch(() => ({}))
+        } catch (labelErr: any) {
+          return NextResponse.json(
+            { error: labelErr.message ?? 'Could not send the label' },
+            { status: 400 },
+          )
+        }
+        break
+      }
+      case 'ship-box': {
+        // Mail-in orders where the customer has no box: ship the box kit,
+        // then email the customer -> store label automatically.
+        try {
+          const boxResult = await shipMailInBox(id, fetcher)
+          const orderRes = await fetcher(`/admin/orders/${id}`)
+          const orderData = await orderRes.json().catch(() => ({}))
+          data = {
+            ...orderData,
+            mail_in_box: {
+              already_shipped: boxResult.alreadyShipped,
+              tracking_number: boxResult.trackingNumber,
+            },
+            mail_in_label: boxResult.label,
+          }
+        } catch (boxErr: any) {
+          return NextResponse.json(
+            { error: boxErr.message ?? 'Failed to ship the box' },
+            { status: 400 },
           )
         }
         break
@@ -836,8 +886,9 @@ export async function PATCH(
         break
       }
       case 'approve-return': {
-        const { returnId } = body as {
+        const { returnId, skip_label: skipLabel } = body as {
           returnId?: string
+          skip_label?: boolean
         }
         if (!returnId) {
           return NextResponse.json(
@@ -874,6 +925,21 @@ export async function PATCH(
               },
             )
           }
+          // Approving a return emails the customer a prepaid label. Book it
+          // FIRST so a booking problem (no address, low Prepay balance...)
+          // stops the approval before anything is refunded. Pass
+          // skip_label: true to approve without a label.
+          let approvedLabel: BookedLabel | null = null
+          if (!skipLabel && hasEmailableAddress(order.email)) {
+            approvedLabel = await bookCustomerLabel(
+              id,
+              (record.items ?? []).map((i: any) => ({
+                item_id: i.item_id,
+                quantity: i.quantity,
+              })),
+              fetcher,
+            )
+          }
           await refundOrderAmount(order, record.refund_amount, fetcher)
           const result = await updateReturnRecord(
             id,
@@ -882,11 +948,32 @@ export async function PATCH(
             {
               status: 'refunded',
               processed_at: new Date().toISOString(),
+              ...(approvedLabel
+                ? {
+                    label: {
+                      tracking_number: approvedLabel.trackingNumber,
+                      carrier: approvedLabel.carrierName,
+                      parcel2go_order_id: approvedLabel.parcel2goOrderId,
+                    },
+                  }
+                : {}),
             },
             fetcher,
             actor,
           )
           data = result.data
+          if (approvedLabel) {
+            const labelResult = await emailReturnLabel(order, approvedLabel, id)
+            data = {
+              ...data,
+              return_label: {
+                emailed: labelResult.emailed,
+                tracking_number: approvedLabel.trackingNumber,
+                parcel2go_order_id: approvedLabel.parcel2goOrderId,
+                error: labelResult.error,
+              },
+            }
+          }
           if (order.email) {
             try {
               const { subject, html, text, resendTemplate } =
