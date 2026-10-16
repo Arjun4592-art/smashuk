@@ -21,10 +21,18 @@ export interface ReturnRecord {
   reason: string
   note?: string
   refund_amount: number
-  status: 'requested' | 'refunded' | 'rejected'
+  /**
+   * requested       - customer asked for a return, waiting for staff
+   * awaiting_return - approved / label sent, waiting for the goods to arrive
+   * refunded        - goods received & inspected, money sent back
+   * rejected        - declined / cancelled
+   */
+  status: 'requested' | 'awaiting_return' | 'refunded' | 'rejected'
   source: 'customer' | 'dashboard' | 'pos'
   requested_at: string
   processed_at?: string
+  /** When the returned goods were received and inspected */
+  received_at?: string
   /** Set when a prepaid return label was booked and emailed to the customer */
   label?: {
     tracking_number?: string

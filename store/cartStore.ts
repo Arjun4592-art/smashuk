@@ -199,6 +199,76 @@ async function addToCartSafe(
   }
 }
 
+// All backend (Medusa) cart writes go through this queue, one at a time.
+// Medusa locks a cart while it changes, so parallel writes fail at random, and
+// it lets applyCoupon / applyGiftCard wait until pending writes have finished.
+let syncChain: Promise<unknown> = Promise.resolve()
+function enqueueSync<T>(task: () => Promise<T>): Promise<T> {
+  const run = syncChain.then(task, task)
+  syncChain = run.catch(() => undefined)
+  return run
+}
+
+// One shared in-flight cart creation, so two quick "add to cart" clicks never
+// create two different carts.
+let cartCreation: Promise<string> | null = null
+async function getOrCreateCartId(
+  get: () => CartState,
+  set: (partial: Partial<CartState>) => void,
+): Promise<string> {
+  const existing = get().cartId
+  if (existing) return existing
+  if (!cartCreation) {
+    cartCreation = (async () => {
+      const created = await createCart()
+      const id: string | null = created?.id ?? null
+      if (!id) throw new Error('Could not create a cart.')
+      set({ cartId: id })
+      return id
+    })().finally(() => {
+      cartCreation = null
+    })
+  }
+  return cartCreation
+}
+
+// The storefront cart can show items while there is no backend cart (the
+// first sync failed, the backend was down, old browser state, ...). Coupons and
+// gift cards live on the backend cart, so before applying one we make sure the
+// backend cart exists and holds every line the customer sees.
+async function ensureBackendCart(
+  get: () => CartState,
+  set: (partial: Partial<CartState>) => void,
+): Promise<string | null> {
+  // Let in-flight add-to-cart writes finish first, so lines are not doubled.
+  await syncChain
+  if (get().items.length === 0) return get().cartId
+  let cartId = await getOrCreateCartId(get, set)
+  await enqueueSync(async () => {
+    let medusaCart = await getCart(cartId)
+    if (!medusaCart) {
+      // saved cart id no longer exists in the backend
+      set({ cartId: null })
+      cartId = await getOrCreateCartId(get, set)
+      medusaCart = await getCart(cartId)
+    }
+    for (const item of get().items) {
+      const variantId =
+        item.variant?.id ?? (item.product as any).variants?.[0]?.id
+      if (!variantId) continue
+      if (findMedusaLine(medusaCart, variantId, item.metadata)) continue
+      cartId = await addToCartSafe(
+        cartId,
+        variantId,
+        item.quantity,
+        item.metadata,
+        (n) => set({ cartId: n }),
+      )
+    }
+  })
+  return get().cartId
+}
+
 export const useCartStore = create<CartState>()(
   persist(
     (set, get) => ({
@@ -278,26 +348,15 @@ export const useCartStore = create<CartState>()(
         })
         const variantId = variant?.id ?? (product as any).variants?.[0]?.id
         if (variantId) {
-          ;(async () => {
-            try {
-              let id = get().cartId
-              if (!id) {
-                const newCart = await createCart()
-                id = newCart?.id ?? null
-                if (id)
-                  set({
-                    cartId: id,
-                  })
-              }
-              if (id) {
-                await addToCartSafe(id, variantId, quantity, metadata, (n) =>
-                  set({ cartId: n }),
-                )
-              }
-            } catch (err) {
-              console.error('Failed to sync cart with backend:', err)
-            }
-          })()
+          enqueueSync(async () => {
+            const id = await getOrCreateCartId(get, set)
+            await addToCartSafe(id, variantId, quantity, metadata, (n) =>
+              set({ cartId: n }),
+            )
+          }).catch((err) => {
+            // cartId may stay null here; applyCoupon / applyGiftCard repair it.
+            console.error('Failed to sync cart with backend:', err)
+          })
         }
       },
       addMailInBooking: async (lines) => {
@@ -552,11 +611,26 @@ export const useCartStore = create<CartState>()(
         }
       },
       applyCoupon: async (code) => {
-        const cartId = get().cartId
-        if (!cartId) {
+        if (get().items.length === 0) {
           return {
             success: false,
             error: 'Add an item to your cart before applying a code.',
+          }
+        }
+        let cartId: string | null = get().cartId
+        let prepError: string | null = null
+        try {
+          cartId = await ensureBackendCart(get, set)
+        } catch (err: any) {
+          console.error('[cartStore] could not prepare backend cart:', err)
+          prepError = /inventory|stock/i.test(err?.message ?? '')
+            ? 'Some items in your cart are out of stock, so a code cannot be applied. Remove them and try again.'
+            : (err?.message ?? "We couldn't reach the cart service.")
+        }
+        if (prepError || !cartId) {
+          return {
+            success: false,
+            error: prepError ?? "We couldn't reach the cart service.",
           }
         }
         try {
@@ -624,11 +698,26 @@ export const useCartStore = create<CartState>()(
         }
       },
       applyGiftCard: async (code) => {
-        const cartId = get().cartId
-        if (!cartId) {
+        if (get().items.length === 0) {
           return {
             success: false,
             error: 'Add an item to your cart before applying a gift card.',
+          }
+        }
+        let cartId: string | null = get().cartId
+        let prepError: string | null = null
+        try {
+          cartId = await ensureBackendCart(get, set)
+        } catch (err: any) {
+          console.error('[cartStore] could not prepare backend cart:', err)
+          prepError = /inventory|stock/i.test(err?.message ?? '')
+            ? 'Some items in your cart are out of stock, so a code cannot be applied. Remove them and try again.'
+            : (err?.message ?? "We couldn't reach the cart service.")
+        }
+        if (prepError || !cartId) {
+          return {
+            success: false,
+            error: prepError ?? "We couldn't reach the cart service.",
           }
         }
         const upperCode = code.trim().toUpperCase()

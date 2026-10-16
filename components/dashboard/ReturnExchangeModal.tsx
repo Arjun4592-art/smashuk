@@ -349,14 +349,14 @@ export default function ReturnExchangeModal({
                         </div>
                         <div className='flex items-center justify-between mt-3 text-[15px] tabular-nums'>
                           <span className='text-[#202223]'>
-                            {fmt(item.unit_price, currency)}{' '}
+                            {fmt(unitRefund(item), currency)}{' '}
                             <span className='text-[#8C9196]'>×</span>{' '}
                             <span className='inline-block min-w-6 text-center rounded-md bg-[#F1F2F3] px-1.5'>
                               {qty}
                             </span>
                           </span>
                           <span className='text-[#202223]'>
-                            {fmt(item.unit_price * qty, currency)}
+                            {fmt(unitRefund(item) * qty, currency)}
                           </span>
                         </div>
                       </div>
@@ -497,7 +497,7 @@ export default function ReturnExchangeModal({
                       <span className='text-[#6D7175]'>× {quantity}</span>
                     </span>
                     <span className='text-[#202223] tabular-nums shrink-0'>
-                      {fmt((item?.unit_price ?? 0) * quantity, currency)}
+                      {fmt(unitRefund(item) * quantity, currency)}
                     </span>
                   </div>
                 ))}
@@ -515,6 +515,12 @@ export default function ReturnExchangeModal({
                 {!useCustomAmount && (
                   <p className='text-[12.5px] text-[#6D7175]'>
                     Final amount is calculated after any discounts.
+                  </p>
+                )}
+                {!refundOnly && (
+                  <p className='text-[12.5px] text-[#6D7175] rounded-lg bg-[#F1F8F5] border border-[#CDE5DB] px-3 py-2'>
+                    Nothing is refunded yet. The refund is issued when you mark
+                    the return as received on the order page.
                   </p>
                 )}
 

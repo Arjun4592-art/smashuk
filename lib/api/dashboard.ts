@@ -298,6 +298,17 @@ export async function approveOrderReturn(id: string, returnId: string) {
     returnId,
   })
 }
+export async function receiveOrderReturn(
+  id: string,
+  returnId: string,
+  refundAmount?: number,
+) {
+  return mutate(`/api/admin/orders/${id}`, 'PATCH', {
+    action: 'receive-return',
+    returnId,
+    refund_amount: refundAmount,
+  })
+}
 export async function rejectOrderReturn(
   id: string,
   returnId: string,

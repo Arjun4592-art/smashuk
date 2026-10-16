@@ -10,6 +10,7 @@ import {
   updateOrderStatus,
   processOrderReturn,
   approveOrderReturn,
+  receiveOrderReturn,
   rejectOrderReturn,
   getShippingLabel,
   swapOrderItem,
@@ -148,6 +149,9 @@ export default function OrderDetailPage({
   const [showSwapModal, setShowSwapModal] = useState(false)
   const [courierLoading, setCourierLoading] = useState(false)
   const [returnActionLoading, setReturnActionLoading] = useState('')
+  // Return currently being "received & refunded" + the amount being confirmed
+  const [receivingReturnId, setReceivingReturnId] = useState('')
+  const [receiveAmount, setReceiveAmount] = useState('')
   const [showDetails, setShowDetails] = useState(false)
   const [showLabelSize, setShowLabelSize] = useState(false)
 
@@ -334,14 +338,16 @@ export default function OrderDetailPage({
       refundOnly,
     )
     toast.success(
-      refundOnly ? 'Refund issued' : 'Return processed and refund issued',
+      refundOnly
+        ? 'Refund issued'
+        : 'Return created — refund will be issued once the item is received',
     )
     if (shippingOption === 'email_label') {
       if (result?.return_label?.emailed) {
         toast.success('Return label emailed to the customer')
       } else {
         toast.warning(
-          `Return processed, but the label email did not go out: ${result?.return_label?.error ?? 'unknown error'}`,
+          `Return created, but the label email did not go out: ${result?.return_label?.error ?? 'unknown error'}`,
         )
       }
     }
@@ -352,11 +358,51 @@ export default function OrderDetailPage({
   const handleApproveReturn = async (returnId: string) => {
     setReturnActionLoading(returnId)
     try {
-      await approveOrderReturn(id, returnId)
-      toast.success('Return approved and refunded')
+      const result = await approveOrderReturn(id, returnId)
+      if (result?.return_label && !result.return_label.emailed) {
+        toast.warning(
+          `Return approved, but the label email did not go out: ${result.return_label.error ?? 'unknown error'}`,
+        )
+      } else {
+        toast.success(
+          'Return approved — label sent. Refund after the item is received.',
+        )
+      }
       await fetchOrder(true)
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to approve return')
+    } finally {
+      setReturnActionLoading('')
+    }
+  }
+
+  const startReceive = (r: any) => {
+    setReceivingReturnId(r.id)
+    setReceiveAmount(Number(r.refund_amount ?? 0).toFixed(2))
+  }
+
+  const handleReceiveReturn = async (r: any) => {
+    const amount = parseFloat(receiveAmount)
+    if (Number.isNaN(amount) || amount <= 0) {
+      toast.error('Enter a valid refund amount')
+      return
+    }
+    setReturnActionLoading(r.id)
+    try {
+      await receiveOrderReturn(
+        id,
+        r.id,
+        Math.abs(amount - Number(r.refund_amount ?? 0)) > 0.005
+          ? amount
+          : undefined,
+      )
+      toast.success(
+        `Return received — ${fmt(amount, order?.currency_code ?? 'gbp')} refunded`,
+      )
+      setReceivingReturnId('')
+      await fetchOrder(true)
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to refund return')
     } finally {
       setReturnActionLoading('')
     }
@@ -1049,10 +1095,16 @@ export default function OrderDetailPage({
                             ? 'green'
                             : r.status === 'rejected'
                               ? 'red'
-                              : 'yellow'
+                              : r.status === 'awaiting_return'
+                                ? 'blue'
+                                : 'yellow'
                         }
                       >
-                        <span className='capitalize'>{r.status}</span>
+                        <span className='capitalize'>
+                          {r.status === 'awaiting_return'
+                            ? 'Awaiting item'
+                            : r.status}
+                        </span>
                       </Badge>
                       <span className='text-[12.5px] text-[#6D7175] capitalize'>
                         {r.source}
@@ -1071,6 +1123,66 @@ export default function OrderDetailPage({
                         {r.note}
                       </p>
                     )}
+                    {r.label?.tracking_number && (
+                      <p className='text-[13px] text-[#6D7175] mt-0.5'>
+                        Return tracking: {r.label.tracking_number}
+                        {r.label.carrier ? ` (${r.label.carrier})` : ''}
+                      </p>
+                    )}
+                    {r.status === 'awaiting_return' &&
+                      receivingReturnId !== r.id && (
+                        <div className='grid grid-cols-2 gap-3 mt-3'>
+                          <Btn
+                            variant='primary'
+                            disabled={!!returnActionLoading}
+                            onClick={() => startReceive(r)}
+                          >
+                            Received & refund
+                          </Btn>
+                          <Btn
+                            variant='dangerOutline'
+                            loading={returnActionLoading === r.id}
+                            disabled={!!returnActionLoading}
+                            onClick={() => handleRejectReturn(r.id)}
+                          >
+                            Cancel return
+                          </Btn>
+                        </div>
+                      )}
+                    {r.status === 'awaiting_return' &&
+                      receivingReturnId === r.id && (
+                        <div className='mt-3 space-y-2'>
+                          <p className='text-[13px] text-[#202223]'>
+                            Item received and checked? Confirm the amount to
+                            refund (lower it if the item is damaged).
+                          </p>
+                          <input
+                            type='number'
+                            inputMode='decimal'
+                            step='0.01'
+                            min='0'
+                            value={receiveAmount}
+                            onChange={(e) => setReceiveAmount(e.target.value)}
+                            className='w-full h-12 px-4 rounded-xl border border-[#C4C8CC] bg-white text-[15px] text-[#202223] outline-none focus:border-[#008060]'
+                          />
+                          <div className='grid grid-cols-2 gap-3'>
+                            <Btn
+                              variant='primary'
+                              loading={returnActionLoading === r.id}
+                              disabled={!!returnActionLoading}
+                              onClick={() => handleReceiveReturn(r)}
+                            >
+                              Confirm refund
+                            </Btn>
+                            <Btn
+                              disabled={!!returnActionLoading}
+                              onClick={() => setReceivingReturnId('')}
+                            >
+                              Back
+                            </Btn>
+                          </div>
+                        </div>
+                      )}
                     {r.status === 'requested' && (
                       <div className='grid grid-cols-2 gap-3 mt-3'>
                         <Btn
@@ -1079,7 +1191,7 @@ export default function OrderDetailPage({
                           disabled={!!returnActionLoading}
                           onClick={() => handleApproveReturn(r.id)}
                         >
-                          Approve & refund
+                          Approve & send label
                         </Btn>
                         <Btn
                           variant='dangerOutline'

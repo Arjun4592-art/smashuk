@@ -9,6 +9,7 @@ import {
   getShippingLabel,
   processOrderReturn,
   approveOrderReturn,
+  receiveOrderReturn,
   rejectOrderReturn,
 } from '@/lib/api/dashboard'
 import { fetchPOSOrder } from '@/lib/api/pos'
@@ -482,6 +483,34 @@ export default function OrderDetailPage({
       await reloadOrder()
     } catch (err: any) {
       alert(err.message ?? 'Failed to approve return')
+    } finally {
+      setReturnActionLoading('')
+    }
+  }
+
+  const handleReceiveReturn = async (r: any) => {
+    const input = window.prompt(
+      'Item received and checked? Confirm the amount to refund (£):',
+      Number(r.refund_amount ?? 0).toFixed(2),
+    )
+    if (input === null) return
+    const amount = parseFloat(input)
+    if (Number.isNaN(amount) || amount <= 0) {
+      alert('Enter a valid refund amount')
+      return
+    }
+    setReturnActionLoading(r.id)
+    try {
+      await receiveOrderReturn(
+        id,
+        r.id,
+        Math.abs(amount - Number(r.refund_amount ?? 0)) > 0.005
+          ? amount
+          : undefined,
+      )
+      await reloadOrder()
+    } catch (err: any) {
+      alert(err.message ?? 'Failed to refund return')
     } finally {
       setReturnActionLoading('')
     }
@@ -1101,9 +1130,11 @@ export default function OrderDetailPage({
                   >
                     <div className='flex items-center justify-between mb-1'>
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold capitalize ${r.status === 'refunded' ? 'bg-[#008060]/10 text-[#008060]' : r.status === 'rejected' ? 'bg-[#D82C0D]/10 text-[#D82C0D]' : 'bg-[#FFC453]/20 text-[#916A00]'}`}
+                        className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold capitalize ${r.status === 'refunded' ? 'bg-[#008060]/10 text-[#008060]' : r.status === 'rejected' ? 'bg-[#D82C0D]/10 text-[#D82C0D]' : r.status === 'awaiting_return' ? 'bg-[#2C6ECB]/10 text-[#2C6ECB]' : 'bg-[#FFC453]/20 text-[#916A00]'}`}
                       >
-                        {r.status}
+                        {r.status === 'awaiting_return'
+                          ? 'awaiting item'
+                          : r.status}
                       </span>
                       <span className='text-[11px] text-[#8C9196] capitalize'>
                         {r.source}
@@ -1117,6 +1148,26 @@ export default function OrderDetailPage({
                     <p className='text-[11.5px] text-[#8C9196]'>
                       {r.reason} · £{(r.refund_amount / 100).toFixed(2)}
                     </p>
+                    {r.status === 'awaiting_return' && (
+                      <div className='flex gap-2 mt-2'>
+                        <button
+                          onClick={() => handleReceiveReturn(r)}
+                          disabled={!!returnActionLoading}
+                          className='px-3 py-1.5 bg-[#008060] hover:bg-[#006e52] text-white text-[12px] font-medium rounded-lg transition-colors disabled:opacity-50'
+                        >
+                          {returnActionLoading === r.id
+                            ? 'Refunding…'
+                            : 'Received & Refund'}
+                        </button>
+                        <button
+                          onClick={() => handleRejectReturn(r.id)}
+                          disabled={!!returnActionLoading}
+                          className='px-3 py-1.5 border border-[#D82C0D] text-[#D82C0D] hover:bg-[#FFF4F4] text-[12px] font-medium rounded-lg transition-colors disabled:opacity-50'
+                        >
+                          Cancel return
+                        </button>
+                      </div>
+                    )}
                     {r.status === 'requested' && (
                       <div className='flex gap-2 mt-2'>
                         <button
@@ -1125,8 +1176,8 @@ export default function OrderDetailPage({
                           className='px-3 py-1.5 bg-[#008060] hover:bg-[#006e52] text-white text-[12px] font-medium rounded-lg transition-colors disabled:opacity-50'
                         >
                           {returnActionLoading === r.id
-                            ? 'Refunding…'
-                            : 'Approve & Refund'}
+                            ? 'Approving…'
+                            : 'Approve & Send Label'}
                         </button>
                         <button
                           onClick={() => handleRejectReturn(r.id)}

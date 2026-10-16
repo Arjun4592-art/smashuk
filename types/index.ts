@@ -22,7 +22,10 @@ export interface CustomerAddress {
   postal_code: string
   country_code: string
   phone?: string
+  company?: string
+  address_name?: string | null
   is_default_shipping?: boolean
+  is_default_billing?: boolean
 }
 export interface AuthCookiePayload {
   userId: string

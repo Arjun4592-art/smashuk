@@ -129,11 +129,27 @@ function buildTimeline(order: any): TimelineEvent[] {
         id: `return-req-${r.id}`,
         type: 'return_requested',
         message:
-          r.status === 'refunded' && r.source !== 'customer'
+          r.source !== 'customer'
             ? 'Return was created'
             : 'Return was requested',
         timestamp: requestedAt,
         extra: [r.reason, r.note].filter(Boolean).join(' · ') || undefined,
+      })
+    }
+    if (r.status === 'awaiting_return' && r.processed_at) {
+      events.push({
+        id: `return-awaiting-${r.id}`,
+        type: 'return_approved',
+        message: 'Return approved — waiting for the item to arrive',
+        timestamp: r.processed_at,
+      })
+    }
+    if (r.received_at) {
+      events.push({
+        id: `return-received-${r.id}`,
+        type: 'return_approved',
+        message: 'Returned item was received',
+        timestamp: r.received_at,
       })
     }
     const doneAt = r.processed_at ?? r.refunded_at

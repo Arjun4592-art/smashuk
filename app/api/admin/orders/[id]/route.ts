@@ -791,7 +791,15 @@ export async function PATCH(
               base64: labelData.label_base64 ?? undefined,
             }
           }
-          await refundOrderAmount(order, refund_amount, fetcher)
+          // Refund-only (nothing coming back) is refunded straight away.
+          // A real return is NOT refunded here: the customer still has the
+          // goods. It's saved as "awaiting_return" and refunded later from
+          // the "receive-return" action once the item is back and inspected.
+          const awaitingGoods = !refundOnly
+          if (!awaitingGoods) {
+            await refundOrderAmount(order, refund_amount, fetcher)
+          }
+          const nowIso = new Date().toISOString()
           data = await appendReturnRecord(
             id,
             order,
@@ -818,10 +826,10 @@ export async function PATCH(
                   }
                 : {}),
               refund_amount,
-              status: 'refunded',
+              status: awaitingGoods ? 'awaiting_return' : 'refunded',
               source: 'dashboard',
-              requested_at: new Date().toISOString(),
-              processed_at: new Date().toISOString(),
+              requested_at: nowIso,
+              ...(awaitingGoods ? {} : { processed_at: nowIso }),
             },
             fetcher,
             {},
@@ -866,7 +874,8 @@ export async function PATCH(
               },
             }
           }
-          if (order.email) {
+          // Refund emails only go out when money actually moved.
+          if (!awaitingGoods && order.email) {
             try {
               const { subject, html, text, resendTemplate } =
                 refundConfirmationEmail(order, refund_amount, builtItems)
@@ -959,13 +968,15 @@ export async function PATCH(
               fetcher,
             )
           }
-          await refundOrderAmount(order, record.refund_amount, fetcher)
+          // Approving only accepts the return and sends the label. The
+          // refund is issued later, by "receive-return", once the goods
+          // are back and inspected.
           const result = await updateReturnRecord(
             id,
             order,
             returnId,
             {
-              status: 'refunded',
+              status: 'awaiting_return',
               processed_at: new Date().toISOString(),
               ...(approvedLabel
                 ? {
@@ -993,14 +1004,97 @@ export async function PATCH(
               },
             }
           }
+        } catch (returnErr: any) {
+          return NextResponse.json(
+            {
+              error: returnErr.message ?? 'Failed to approve return',
+            },
+            {
+              status: 400,
+            },
+          )
+        }
+        break
+      }
+      case 'receive-return': {
+        // The returned goods have arrived and been inspected: NOW refund.
+        const { returnId, refund_amount: receivedRefundOverride } = body as {
+          returnId?: string
+          refund_amount?: number
+        }
+        if (!returnId) {
+          return NextResponse.json(
+            { error: 'returnId is required' },
+            { status: 400 },
+          )
+        }
+        try {
+          const order = await getOrderForReturn(id, fetcher)
+          const record = (order.metadata?.returns ?? []).find(
+            (r: any) => r.id === returnId,
+          )
+          if (!record) {
+            return NextResponse.json(
+              { error: 'Return not found' },
+              { status: 404 },
+            )
+          }
+          if (record.status === 'refunded') {
+            return NextResponse.json(
+              { error: 'This return has already been refunded' },
+              { status: 400 },
+            )
+          }
+          if (record.status !== 'awaiting_return') {
+            return NextResponse.json(
+              {
+                error:
+                  record.status === 'requested'
+                    ? 'Approve the return first, then mark it received once the item arrives'
+                    : 'This return cannot be received',
+              },
+              { status: 400 },
+            )
+          }
+          // Staff can lower (or otherwise adjust) the refund after
+          // inspecting the condition of the goods.
+          let finalAmount: number = record.refund_amount
+          if (
+            receivedRefundOverride !== undefined &&
+            receivedRefundOverride !== null
+          ) {
+            if (
+              typeof receivedRefundOverride !== 'number' ||
+              !Number.isFinite(receivedRefundOverride) ||
+              receivedRefundOverride <= 0
+            ) {
+              return NextResponse.json(
+                { error: 'Refund amount must be a positive number' },
+                { status: 400 },
+              )
+            }
+            finalAmount = Math.round(receivedRefundOverride * 100) / 100
+          }
+          await refundOrderAmount(order, finalAmount, fetcher)
+          const nowIso = new Date().toISOString()
+          const result = await updateReturnRecord(
+            id,
+            order,
+            returnId,
+            {
+              status: 'refunded',
+              refund_amount: finalAmount,
+              received_at: nowIso,
+              processed_at: nowIso,
+            },
+            fetcher,
+            actor,
+          )
+          data = result.data
           if (order.email) {
             try {
               const { subject, html, text, resendTemplate } =
-                refundConfirmationEmail(
-                  order,
-                  record.refund_amount,
-                  record.items,
-                )
+                refundConfirmationEmail(order, finalAmount, record.items)
               await sendMail({
                 to: order.email,
                 subject,
@@ -1008,7 +1102,7 @@ export async function PATCH(
                 text,
                 resendTemplate,
               })
-              const adminEmail = adminRefundEmail(order, record.refund_amount)
+              const adminEmail = adminRefundEmail(order, finalAmount)
               notifyOwner({
                 subject: adminEmail.subject,
                 html: adminEmail.html,
@@ -1018,19 +1112,15 @@ export async function PATCH(
               }).catch(() => {})
             } catch (refundEmailErr) {
               console.error(
-                `[order approve-return] refund confirmation email failed for ${id}:`,
+                `[order receive-return] refund confirmation email failed for ${id}:`,
                 refundEmailErr,
               )
             }
           }
         } catch (returnErr: any) {
           return NextResponse.json(
-            {
-              error: returnErr.message ?? 'Failed to approve return',
-            },
-            {
-              status: 400,
-            },
+            { error: returnErr.message ?? 'Failed to refund return' },
+            { status: 400 },
           )
         }
         break
@@ -1052,6 +1142,15 @@ export async function PATCH(
         }
         try {
           const order = await getOrderForReturn(id, fetcher)
+          const existing = (order.metadata?.returns ?? []).find(
+            (r: any) => r.id === returnId,
+          )
+          if (existing && existing.status === 'refunded') {
+            return NextResponse.json(
+              { error: 'This return was already refunded' },
+              { status: 400 },
+            )
+          }
           const result = await updateReturnRecord(
             id,
             order,

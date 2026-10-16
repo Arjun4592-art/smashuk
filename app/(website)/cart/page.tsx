@@ -567,10 +567,6 @@ export default function CartPage() {
                     ✓ {couponSuccess}
                   </p>
                 )}
-                <p className='text-[11px] text-gray-400 font-lato mt-2'>
-                  Try: <span className='font-bold'>APEX10</span> or{' '}
-                  <span className='font-bold'>FLAT500</span>
-                </p>
               </div>
 
               <div className='border border-gray-200 rounded-xl p-4'>
