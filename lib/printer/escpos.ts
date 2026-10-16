@@ -345,7 +345,7 @@ export async function buildReceiptEscPos(
   b.hr()
   b.align('center')
   b.line(`${data.dateStr}, ${data.timeStr}`)
-  b.line(`Receipt: ${data.orderId}`)
+  b.line(`Order: ${data.orderId}`)
   b.feed(1)
   b.bold(true)
   b.line(data.footerLine1 ?? 'Thank you for shopping with us!')

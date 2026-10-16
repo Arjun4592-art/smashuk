@@ -13,6 +13,7 @@ import {
   refundOrderAmount,
   appendReturnRecord,
   updateReturnRecord,
+  type ReturnRecord,
 } from '@/lib/api/medusa-returns'
 import { randomUUID } from 'crypto'
 import { isSyntheticEmail } from '@/lib/pos/walkin'
@@ -67,7 +68,7 @@ export async function GET(
   try {
     const FIELDS =
       'id,display_id,email,created_at,updated_at,canceled_at,status,currency_code,metadata,payment_status,' +
-      '*items,items.metadata,*payment_collections.payments,*shipping_methods,*fulfillments,fulfillment_status,' +
+      '*items,items.metadata,items.total,items.discount_total,items.refundable_total,items.refundable_total_per_unit,*payment_collections.payments,*shipping_methods,*fulfillments,fulfillment_status,' +
       'subtotal,total,discount_total,shipping_total,gift_card_total,tax_total,' +
       'customer.id,customer.first_name,customer.last_name,customer.phone,' +
       'shipping_address.first_name,shipping_address.last_name,shipping_address.phone,' +
@@ -690,6 +691,7 @@ export async function PATCH(
           note,
           refund_amount: refundAmountOverride,
           email_label: emailLabel,
+          refund_only: refundOnly,
         } = body as {
           items?: {
             item_id: string
@@ -699,11 +701,28 @@ export async function PATCH(
           note?: string
           refund_amount?: number
           email_label?: boolean
+          refund_only?: boolean
         }
         try {
           const order = await getOrderForReturn(id, fetcher)
+          // Refund-only: money back, no goods returned — needs an explicit
+          // amount and doesn't touch line items / return quantities.
+          if (
+            refundOnly &&
+            !(
+              typeof refundAmountOverride === 'number' &&
+              refundAmountOverride > 0
+            )
+          ) {
+            return NextResponse.json(
+              { error: 'Enter the amount to refund' },
+              { status: 400 },
+            )
+          }
           const { items: builtItems, refund_amount: computedRefundAmount } =
-            buildReturnLines(order, items ?? [])
+            refundOnly
+              ? { items: [] as ReturnRecord['items'], refund_amount: 0 }
+              : buildReturnLines(order, items ?? [])
           let refund_amount = computedRefundAmount
           if (
             refundAmountOverride !== undefined &&

@@ -613,6 +613,7 @@ export async function markPOSOrderReturned(
     quantity: number
   }[],
   refundAmount?: number,
+  refundOnly?: boolean,
 ): Promise<{
   refund_amount: number
 }> {
@@ -627,6 +628,7 @@ export async function markPOSOrderReturned(
         reason,
         items,
         ...(refundAmount !== undefined ? { refundAmount } : {}),
+        ...(refundOnly ? { refundOnly: true } : {}),
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -665,11 +667,7 @@ export interface CouponValidationResult {
   type?: 'percentage' | 'fixed'
   value?: number
   reason?:
-    | 'not_started'
-    | 'expired'
-    | 'min_amount'
-    | 'min_quantity'
-    | 'customer_group'
+    'not_started' | 'expired' | 'min_amount' | 'min_quantity' | 'customer_group'
 }
 export interface CouponValidationContext {
   /** Cart subtotal in pounds (not pence) — matches how POS stores prices. */

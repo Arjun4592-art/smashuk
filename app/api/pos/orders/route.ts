@@ -114,11 +114,20 @@ function toPosOrderRecord(o: any) {
     completedAt: o.created_at,
     isPickup: o.metadata?.fulfillment_type === 'pickup',
     fulfillmentStatus: o.fulfillment_status ?? 'not_fulfilled',
+    // Fully returned = every unit is back. Older partial returns also set
+    // metadata.returned, which wrongly locked the order — when return
+    // records exist we trust the remaining quantities instead.
     returned:
-      Boolean(o.metadata?.returned) ||
-      (Array.isArray(o.items) &&
-        o.items.length > 0 &&
-        Object.values(getRemainingReturnableQty(o)).every((qty) => qty <= 0)),
+      Array.isArray(o.metadata?.returns) && o.metadata.returns.length > 0
+        ? Array.isArray(o.items) &&
+          o.items.length > 0 &&
+          Object.values(getRemainingReturnableQty(o)).every((qty) => qty <= 0)
+        : Boolean(o.metadata?.returned) ||
+          (Array.isArray(o.items) &&
+            o.items.length > 0 &&
+            Object.values(getRemainingReturnableQty(o)).every(
+              (qty) => qty <= 0,
+            )),
   }
 }
 export async function GET(req: NextRequest) {

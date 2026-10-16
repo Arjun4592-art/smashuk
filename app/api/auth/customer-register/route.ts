@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { setSurfaceCookies } from '@/lib/api/auth-cookie'
-import { sendMail, notifyAdmin } from '@/lib/email'
+import { sendMail, notifyOwner } from '@/lib/email'
 import { welcomeEmail, adminWelcomeEmail } from '@/lib/email-templates'
 import { isRateLimited, getClientIp } from '@/lib/api/rate-limit'
 import { isGenuineEmail } from '@/lib/api/email-verify'
@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
         () => {},
       )
       const adminEmail = adminWelcomeEmail(newCustomer)
-      notifyAdmin({
+      notifyOwner({
         subject: adminEmail.subject,
         html: adminEmail.html,
         text: adminEmail.text,

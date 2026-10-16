@@ -8,6 +8,8 @@ import {
   buildReturnLines,
   refundOrderAmount,
   appendReturnRecord,
+  getRemainingReturnableQty,
+  type ReturnRecord,
 } from '@/lib/api/medusa-returns'
 import { sendMail, notifyOwner } from '@/lib/email'
 import {
@@ -141,6 +143,7 @@ export async function PATCH(
       reason,
       items,
       refundAmount: refundAmountOverride,
+      refundOnly,
     } = body as {
       reason?: string
       items?: {
@@ -148,10 +151,24 @@ export async function PATCH(
         quantity: number
       }[]
       refundAmount?: number
+      refundOnly?: boolean
     }
     const order = await getOrderForReturn(id, medusaServiceFetch)
+    // Refund-only: money back with no goods returned (e.g. wrong amount
+    // charged). Needs an explicit amount; line items are left untouched.
+    if (
+      refundOnly &&
+      !(typeof refundAmountOverride === 'number' && refundAmountOverride > 0)
+    ) {
+      return NextResponse.json(
+        { error: 'Enter the amount to refund' },
+        { status: 400 },
+      )
+    }
     const { items: builtItems, refund_amount: computedRefundAmount } =
-      buildReturnLines(order, items ?? [])
+      refundOnly
+        ? { items: [] as ReturnRecord['items'], refund_amount: 0 }
+        : buildReturnLines(order, items ?? [])
     let refund_amount = computedRefundAmount
     if (refundAmountOverride !== undefined && refundAmountOverride !== null) {
       if (
@@ -185,9 +202,18 @@ export async function PATCH(
         processed_at: new Date().toISOString(),
       },
       medusaServiceFetch,
-      {
-        returned: true,
-      },
+      // Only flag the whole order as returned once every unit is back —
+      // a partial return or a refund-only must leave it open for more.
+      (() => {
+        if (refundOnly) return {}
+        const remaining = getRemainingReturnableQty(order)
+        for (const b of builtItems) {
+          remaining[b.item_id] = (remaining[b.item_id] ?? 0) - b.quantity
+        }
+        return Object.values(remaining).every((q) => q <= 0)
+          ? { returned: true }
+          : {}
+      })(),
       actor,
     )
     if (order.email) {

@@ -160,7 +160,7 @@ export function buildThermalReceiptHtml(
   ${note}
   <div class="meta">
     <div>${esc(data.dateStr)}, ${esc(data.timeStr)}</div>
-    <div>Receipt: #${esc(data.orderId)}</div>
+    <div>Order: ${esc(data.orderId)}</div>
     <div style="margin-top:10px">${esc(data.footerLine1 ?? 'Thank you for shopping with us!')}</div>
     ${data.footerLine2 ? `<div class="small">${esc(data.footerLine2)}</div>` : ''}
   </div>

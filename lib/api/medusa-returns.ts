@@ -147,7 +147,7 @@ export async function refundOrderAmount(
   )
   if (amount > totalRefundable + 0.005) {
     throw new Error(
-      `Refund amount exceeds what's left to refund on this order (max ${totalRefundable}).`,
+      `Refund amount exceeds what's left to refund on this order — the customer paid £${(Math.round(totalRefundable * 100) / 100).toFixed(2)} (after any discounts), so the maximum refund is £${(Math.round(totalRefundable * 100) / 100).toFixed(2)}.`,
     )
   }
   let remaining = amount

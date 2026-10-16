@@ -39,7 +39,9 @@ function statusBadge(
     | 'return_requested'
     | 'return_declined'
     | 'return_label'
-    | 'mail_in_label',
+    | 'mail_in_label'
+    | 'message_received'
+    | 'stock_alert',
 ) {
   const map = {
     confirmed: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'ORDER CONFIRMED' },
@@ -72,11 +74,17 @@ function statusBadge(
     return_declined: { bg: '#FDF0ED', fg: CORAL, label: 'RETURN DECLINED' },
     return_label: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'RETURN LABEL' },
     mail_in_label: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'MAIL-IN LABEL' },
+    message_received: {
+      bg: '#EFF6FF',
+      fg: '#1D4ED8',
+      label: 'MESSAGE RECEIVED',
+    },
+    stock_alert: { bg: '#ECFDF5', fg: GREEN, label: 'STOCK ALERT SET' },
   }[kind]
   return pillBadge(map.label, map.bg, map.fg)
 }
 
-function pillBadge(label: string, bg: string, fg: string) {
+export function pillBadge(label: string, bg: string, fg: string) {
   return `
     <span style="display:inline-block;background:${bg};color:${fg};font-size:11px;font-weight:700;letter-spacing:0.5px;padding:6px 12px;border-radius:999px;">
       ${label}
@@ -113,7 +121,7 @@ export function itemsTable(items: any[]) {
   `
 }
 
-function totalRow(label: string, amount: number, accent = false) {
+export function totalRow(label: string, amount: number, accent = false) {
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:${accent ? '4' : '2'}px;">
       <tr>
@@ -140,7 +148,7 @@ function qrBlock(cid: string, caption: string) {
   `
 }
 
-function ctaButton(label: string, href: string) {
+export function ctaButton(label: string, href: string) {
   return `
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:28px;">
       <tr>
@@ -200,6 +208,88 @@ export function sectionHeading(text: string) {
   return `<p style="margin:26px 0 10px;font-size:12px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};border-bottom:1px solid ${BORDER};padding-bottom:8px;">${text}</p>`
 }
 
+// ---------------------------------------------------------------------------
+// Building blocks shared by every customer email.
+//
+// The reference design is mailInLabelEmail() (bottom of this file): a
+// personalised "Hi <name>," intro -> titled sections (numbered steps or a tick
+// list) -> coral-edged info panels -> one clear call to action -> a "reply to
+// this email" help line. New customer emails should be assembled from these
+// pieces so they all look and read the same.
+// ---------------------------------------------------------------------------
+
+// First name for the greeting, falling back to "there" (never an empty "Hi ,").
+export function firstNameOf(order: any) {
+  return (
+    (
+      order?.customer?.first_name ||
+      order?.shipping_address?.first_name ||
+      ''
+    ).trim() || 'there'
+  )
+}
+
+export const strong = (s: string) =>
+  `<strong style="color:${TEXT};">${s}</strong>`
+
+// Opening paragraph (same size/spacing as the mail-in label email).
+export function introText(html: string) {
+  return `<p style="margin:0;font-size:14.5px;line-height:1.65;color:${MUTED};">${html}</p>`
+}
+
+// Secondary paragraph that sits under a section.
+export function bodyText(html: string) {
+  return `<p style="margin:20px 0 0;font-size:13.5px;line-height:1.6;color:${MUTED};">${html}</p>`
+}
+
+// Info panel holding one key fact (tracking number, address, amount ...).
+export function factBox(label: string, value: string) {
+  return infoBox(
+    label,
+    `<p style="margin:0;font-size:14px;line-height:1.5;color:${TEXT};"><strong>${value}</strong></p>`,
+  )
+}
+
+// Info panel holding a short explanatory note.
+export function noteBox(label: string, text: string) {
+  return infoBox(
+    label,
+    `<p style="margin:0;font-size:13.5px;line-height:1.6;color:${MUTED};">${text}</p>`,
+  )
+}
+
+// Tick list — same layout as stepList(), for things that are not sequential
+// (account perks, what a subscription includes ...).
+export function checkList(items: { title: string; body?: string }[]) {
+  const rows = items
+    .map(
+      (s) => `
+        <tr>
+          <td valign="top" style="width:36px;padding:0 0 18px;">
+            <div style="width:26px;height:26px;line-height:26px;border-radius:50%;background:#ECFDF5;color:${GREEN};font-size:13px;font-weight:700;text-align:center;">&#10003;</div>
+          </td>
+          <td valign="top" style="padding:2px 0 18px;">
+            <p style="margin:0;font-size:14px;font-weight:700;line-height:1.4;color:${TEXT};">${s.title}</p>
+            ${s.body ? `<p style="margin:3px 0 0;font-size:13.5px;line-height:1.6;color:${MUTED};">${s.body}</p>` : ''}
+          </td>
+        </tr>`,
+    )
+    .join('')
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
+      ${rows}
+    </table>
+  `
+}
+
+// Ruled total line that sits under an items table.
+export function totalBlock(label: string, amount: number) {
+  return `
+      <div style="margin-top:8px;padding-top:8px;border-top:2px solid ${BORDER};">
+        ${totalRow(label, amount, true)}
+      </div>`
+}
+
 // Shared shell used by EVERY email: white card, logo header with a brand
 // accent bar, body, then a footer with contact details and quick links.
 // Table-based layout on purpose: it's the one thing every email client
@@ -213,7 +303,11 @@ export function sectionHeading(text: string) {
 // that send but still returned so nothing else has to change shape.
 // After changing this shell, re-run scripts/generate-resend-templates.ts and
 // scripts/sync-resend-templates.ts to push the new look to Resend.
-function renderShell(badge: string, title: string, bodyHtml: string): string {
+export function renderShell(
+  badge: string,
+  title: string,
+  bodyHtml: string,
+): string {
   const link = (label: string, href: string) =>
     `<a href="${href}" style="color:${NAVY};text-decoration:none;font-weight:600;">${label}</a>`
   return `
@@ -285,7 +379,7 @@ export function orderConfirmationEmail(order: any) {
   if (isGiftCardOnlyOrder(order)) return giftCardOrderReceiptEmail(order)
   const orderNumber = orderNumberOf(order)
   const isPickup = order.metadata?.fulfillment_type === 'pickup'
-  const greetingName = (order.customer?.first_name || '').trim() || 'there'
+  const greetingName = firstNameOf(order)
   const trackingUrl = `${SITE_URL}/track/${order.id}?t=${signOrderTrackToken(order.id)}`
   const qrCid = 'order-qr'
 
@@ -293,17 +387,39 @@ export function orderConfirmationEmail(order: any) {
     ? `Order confirmed ${orderNumber} — ready for collection soon — ${SITE_NAME}`
     : `Order confirmed ${orderNumber} — ${SITE_NAME}`
 
-  const introHtml = isPickup
-    ? `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Thank you for your order. We have received order <strong style="color:${TEXT};">${orderNumber}</strong> and it is now being prepared for collection in store. We will let you know as soon as it is ready to pick up.
-      </p>
-    `
-    : `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Thank you for your order. We have received order <strong style="color:${TEXT};">${orderNumber}</strong> and it is being prepared for dispatch. You will receive a further email with tracking details once it has shipped.
-      </p>
-    `
+  const intro = isPickup
+    ? `Hi ${greetingName}, thank you for your order. We have received order ${strong(orderNumber)} and it is now being prepared for collection in store. Here is what happens next:`
+    : `Hi ${greetingName}, thank you for your order. We have received order ${strong(orderNumber)} and it is being prepared for dispatch. Here is what happens next:`
+
+  const steps = isPickup
+    ? [
+        {
+          title: 'We prepare your order',
+          body: 'Our team picks and packs your items, ready for collection in store.',
+        },
+        {
+          title: 'We email you when it is ready',
+          body: 'You will get a "ready for collection" email as soon as it is waiting for you.',
+        },
+        {
+          title: `Collect it from ${STORE_DISPLAY_NAME}`,
+          body: `Bring a form of ID or your order confirmation: ${STORE_ADDRESS_LINE1}, ${STORE_ADDRESS_LINE2}.`,
+        },
+      ]
+    : [
+        {
+          title: 'We pack your order',
+          body: 'Our team picks and carefully packs your items.',
+        },
+        {
+          title: 'We ship it and email you',
+          body: 'You will receive another email with your tracking details as soon as it is on its way.',
+        },
+        {
+          title: 'It arrives',
+          body: 'Track it at any time with the button or QR code below.',
+        },
+      ]
 
   const qrCaption = isPickup
     ? 'Scan this code at any time to view your order status and confirm when it is ready for collection.'
@@ -311,20 +427,21 @@ export function orderConfirmationEmail(order: any) {
 
   const html = renderShell(
     statusBadge('confirmed'),
-    `Thank you for your order, ${greetingName}`,
+    'Your order is confirmed',
     `
-      ${introHtml}
+      ${introText(intro)}
+      ${sectionHeading('What happens next')}
+      ${stepList(steps)}
+      ${sectionHeading('Your order')}
       ${itemsTable(order.items ?? [])}
-      <div style="margin-top:8px;padding-top:8px;border-top:2px solid ${BORDER};">
-        ${totalRow('Order total', order.total, true)}
-      </div>
+      ${totalBlock('Order total', order.total)}
       ${qrBlock(qrCid, qrCaption)}
       ${ctaButton('View your order', trackingUrl)}
     `,
   )
   const text = isPickup
-    ? `Order confirmed ${orderNumber} — Total ${fmt(order.total)}. It is being prepared for collection in store; we will notify you once it is ready. Track it any time at ${trackingUrl}`
-    : `Order confirmed ${orderNumber} — Total ${fmt(order.total)}. We will email you again once it has shipped. Track it any time at ${trackingUrl}`
+    ? `Hi ${greetingName}, order confirmed ${orderNumber} — Total ${fmt(order.total)}. It is being prepared for collection in store; we will notify you once it is ready. Track it any time at ${trackingUrl}`
+    : `Hi ${greetingName}, order confirmed ${orderNumber} — Total ${fmt(order.total)}. We will email you again once it has shipped. Track it any time at ${trackingUrl}`
 
   const resendTemplate = {
     name: isPickup ? 'order-confirmation-pickup' : 'order-confirmation',
@@ -351,6 +468,7 @@ export function shippingConfirmationEmail(
   opts: { trackingNumber?: string } = {},
 ) {
   const orderNumber = orderNumberOf(order)
+  const firstName = firstNameOf(order)
   const subject = `Your order ${orderNumber} has shipped — ${SITE_NAME}`
   const address = order.shipping_address
   const addressLine = address
@@ -373,35 +491,36 @@ export function shippingConfirmationEmail(
     statusBadge('shipped'),
     'Your order has shipped',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Order <strong style="color:${TEXT};">${orderNumber}</strong> has left our warehouse and is on its way to you via Royal Mail.
-      </p>
-      ${
-        trackingNumber
-          ? `
-        <div style="margin-top:16px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
-          <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Royal Mail tracking number</p>
-          <p style="margin:0;font-size:14px;font-weight:600;color:${TEXT};">${trackingNumber}</p>
-        </div>`
-          : ''
-      }
+      ${introText(`Hi ${firstName}, good news — order ${strong(orderNumber)} has left our warehouse and is on its way to you via Royal Mail.`)}
+      ${trackingNumber ? factBox('Royal Mail tracking number', trackingNumber) : ''}
+      ${addressLine ? factBox('Shipping to', addressLine) : ''}
+      ${sectionHeading('What happens next')}
+      ${stepList([
+        {
+          title: 'Follow your parcel',
+          body: trackingNumber
+            ? 'Use the tracking number above, or the button below, to follow its journey.'
+            : 'Use the button below to follow its journey.',
+        },
+        {
+          title: 'Out for delivery',
+          body: 'We will email you on the day the courier has it out for delivery.',
+        },
+        {
+          title: 'Delivered',
+          body: 'Once it arrives we will send a final confirmation. If anything is wrong, just reply to this email.',
+        },
+      ])}
+      ${sectionHeading('In this parcel')}
       ${itemsTable(order.items ?? [])}
-      ${
-        addressLine
-          ? `
-        <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
-          <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Shipping to</p>
-          <p style="margin:0;font-size:14px;color:${TEXT};">${addressLine}</p>
-        </div>`
-          : ''
-      }
       ${ctaButton('Track your order', royalMailTrackUrl ?? `${SITE_URL}/orders`)}
     `,
   )
-  const text = `Order ${orderNumber} has shipped.${trackingNumber ? ` Royal Mail tracking number: ${trackingNumber}.` : ''}${addressLine ? ` Shipping to: ${addressLine}` : ''}`
+  const text = `Hi ${firstName}, order ${orderNumber} has shipped.${trackingNumber ? ` Royal Mail tracking number: ${trackingNumber}.` : ''}${addressLine ? ` Shipping to: ${addressLine}` : ''}`
   const resendTemplate = {
     name: 'shipping-confirmation',
     variables: {
+      CUSTOMER_FIRST_NAME: firstName,
       ORDER_DISPLAY_ID: String(order.display_id ?? order.id),
       TRACKING_NUMBER: trackingNumber ?? '',
       ITEMS_HTML: itemsTable(order.items ?? []),
@@ -414,6 +533,7 @@ export function shippingConfirmationEmail(
 // Sent to the customer once the courier has the parcel out for delivery.
 export function outForDeliveryEmail(order: any) {
   const orderNumber = orderNumberOf(order)
+  const firstName = firstNameOf(order)
   const subject = `Out for delivery: order ${orderNumber} — ${SITE_NAME}`
   const address = order.shipping_address
   const addressLine = address
@@ -431,25 +551,27 @@ export function outForDeliveryEmail(order: any) {
     statusBadge('out_for_delivery'),
     'Your order is out for delivery',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Order <strong style="color:${TEXT};">${orderNumber}</strong> is out for delivery and is expected to arrive today.
-      </p>
-      ${
-        addressLine
-          ? `
-        <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
-          <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Delivering to</p>
-          <p style="margin:0;font-size:14px;color:${TEXT};">${addressLine}</p>
-        </div>`
-          : ''
-      }
+      ${introText(`Hi ${firstName}, order ${strong(orderNumber)} is out for delivery and is expected to arrive today.`)}
+      ${addressLine ? factBox('Delivering to', addressLine) : ''}
+      ${sectionHeading('Before it arrives')}
+      ${stepList([
+        {
+          title: 'Keep an eye out for the courier',
+          body: 'If you are not at home, check for a delivery card from the courier with details of what to do next.',
+        },
+        {
+          title: 'Check your parcel',
+          body: 'Make sure everything is there and undamaged. If anything is missing or not as expected, reply to this email and we will help.',
+        },
+      ])}
       ${ctaButton('Track your order', `${SITE_URL}/orders`)}
     `,
   )
-  const text = `Order ${orderNumber} is out for delivery and should arrive today.${addressLine ? ` Delivering to: ${addressLine}` : ''}`
+  const text = `Hi ${firstName}, order ${orderNumber} is out for delivery and should arrive today.${addressLine ? ` Delivering to: ${addressLine}` : ''}`
   const resendTemplate = {
     name: 'out-for-delivery',
     variables: {
+      CUSTOMER_FIRST_NAME: firstName,
       ORDER_DISPLAY_ID: String(order.display_id ?? order.id),
       ADDRESS_LINE: addressLine,
     },
@@ -460,22 +582,24 @@ export function outForDeliveryEmail(order: any) {
 // Sent to the customer once the order is marked delivered.
 export function deliveryConfirmationEmail(order: any) {
   const orderNumber = orderNumberOf(order)
+  const firstName = firstNameOf(order)
   const subject = `Your order ${orderNumber} has been delivered — ${SITE_NAME}`
   const html = renderShell(
     statusBadge('delivered'),
     'Your order has been delivered',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Order <strong style="color:${TEXT};">${orderNumber}</strong> has been delivered. If anything is missing or not as expected, please reply to this email and we will assist.
-      </p>
+      ${introText(`Hi ${firstName}, order ${strong(orderNumber)} has been delivered. We hope you enjoy it!`)}
+      ${sectionHeading('Your order')}
       ${itemsTable(order.items ?? [])}
+      ${noteBox('Something not right?', `If anything is missing or not as expected, just reply to this email and we will sort it out. You can also read our <a href="${SITE_URL}/returns" style="color:${CORAL};font-weight:600;text-decoration:none;">returns information</a>.`)}
       ${ctaButton('View your order', `${SITE_URL}/orders`)}
     `,
   )
-  const text = `Order ${orderNumber} has been delivered. If anything is missing or not as expected, please reply to this email and we will assist.`
+  const text = `Hi ${firstName}, order ${orderNumber} has been delivered. If anything is missing or not as expected, please reply to this email and we will assist.`
   const resendTemplate = {
     name: 'delivery-confirmation',
     variables: {
+      CUSTOMER_FIRST_NAME: firstName,
       ORDER_DISPLAY_ID: String(order.display_id ?? order.id),
       ITEMS_HTML: itemsTable(order.items ?? []),
     },
@@ -486,24 +610,24 @@ export function deliveryConfirmationEmail(order: any) {
 // Sent to the customer when their order is cancelled.
 export function orderCancelledEmail(order: any) {
   const orderNumber = orderNumberOf(order)
+  const firstName = firstNameOf(order)
   const subject = `Order ${orderNumber} has been cancelled — ${SITE_NAME}`
   const html = renderShell(
     statusBadge('cancelled'),
     'Your order has been cancelled',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Order <strong style="color:${TEXT};">${orderNumber}</strong> has been cancelled. If payment had already been taken, the amount will be refunded to your original payment method within a few business days.
-      </p>
+      ${introText(`Hi ${firstName}, order ${strong(orderNumber)} has been cancelled.`)}
+      ${noteBox('Your refund', 'If payment had already been taken, the amount will be refunded to your original payment method within a few business days.')}
+      ${sectionHeading('Cancelled items')}
       ${itemsTable(order.items ?? [])}
-      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
-        If you did not request this cancellation, or have any questions, please reply to this email.
-      </p>
+      ${noteBox('Did not request this?', 'If you did not ask us to cancel, or you have any questions, just reply to this email and we will help.')}
     `,
   )
-  const text = `Order ${orderNumber} has been cancelled. If payment had already been taken, the amount will be refunded to your original payment method within a few business days.`
+  const text = `Hi ${firstName}, order ${orderNumber} has been cancelled. If payment had already been taken, the amount will be refunded to your original payment method within a few business days.`
   const resendTemplate = {
     name: 'order-cancelled',
     variables: {
+      CUSTOMER_FIRST_NAME: firstName,
       ORDER_DISPLAY_ID: String(order.display_id ?? order.id),
       ITEMS_HTML: itemsTable(order.items ?? []),
     },
@@ -517,24 +641,35 @@ export function refundConfirmationEmail(
   items?: any[],
 ) {
   const orderNumber = orderNumberOf(order)
+  const firstName = firstNameOf(order)
   const subject = `Refund processed for order ${orderNumber} — ${SITE_NAME}`
   const html = renderShell(
     statusBadge('refunded'),
     'Your refund has been processed',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        A refund has been processed for order <strong style="color:${TEXT};">${orderNumber}</strong>. Please allow a few business days for it to appear on your original payment method.
-      </p>
+      ${introText(`Hi ${firstName}, a refund has been processed for order ${strong(orderNumber)}.`)}
+      ${sectionHeading('Refunded items')}
       ${itemsTable(items ?? [])}
-      <div style="margin-top:8px;padding-top:8px;border-top:2px solid ${BORDER};">
-        ${totalRow('Refund amount', refundAmount, true)}
-      </div>
+      ${totalBlock('Refund amount', refundAmount)}
+      ${sectionHeading('When will I see it?')}
+      ${stepList([
+        {
+          title: 'Refund issued',
+          body: 'We have sent your refund back to your original payment method.',
+        },
+        {
+          title: 'Your bank processes it',
+          body: 'Please allow a few business days for it to appear on your statement.',
+        },
+      ])}
+      ${bodyText('Questions about your refund? Just reply to this email and we will help.')}
     `,
   )
-  const text = `Refund of ${fmt(refundAmount)} processed for order ${orderNumber}. Please allow a few business days for it to appear on your original payment method.`
+  const text = `Hi ${firstName}, a refund of ${fmt(refundAmount)} has been processed for order ${orderNumber}. Please allow a few business days for it to appear on your original payment method.`
   const resendTemplate = {
     name: 'refund-confirmation',
     variables: {
+      CUSTOMER_FIRST_NAME: firstName,
       ORDER_DISPLAY_ID: String(order.display_id ?? order.id),
       REFUND_AMOUNT: fmt(refundAmount),
       ITEMS_HTML: itemsTable(items ?? []),
@@ -553,20 +688,28 @@ export function welcomeEmail(customer: {
   const subject = `Welcome to ${SITE_NAME}, ${firstName}`
   const html = renderShell(
     statusBadge('welcome'),
-    `Welcome, ${firstName}`,
+    `Welcome to ${SITE_NAME}`,
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Your ${SITE_NAME} account has been created with <strong style="color:${TEXT};">${customer.email}</strong>. You can now check out faster, track your orders and view your full order history from your account.
-      </p>
-      <ul style="margin:20px 0 0;padding:0 0 0 18px;font-size:14px;line-height:1.9;color:${TEXT};">
-        <li>Track your orders in real time</li>
-        <li>Faster checkout on future orders</li>
-        <li>Access your full order history in one place</li>
-      </ul>
+      ${introText(`Hi ${firstName}, your ${SITE_NAME} account has been created with ${strong(customer.email)}. Here is what you can do with it:`)}
+      ${sectionHeading('Your account')}
+      ${checkList([
+        {
+          title: 'Track your orders in real time',
+          body: 'Follow every order from the moment it is confirmed until it arrives.',
+        },
+        {
+          title: 'Check out faster',
+          body: 'Your details are saved, so future orders take seconds.',
+        },
+        {
+          title: 'See your full order history',
+          body: 'Everything you have bought, in one place.',
+        },
+      ])}
       ${ctaButton('Start shopping', `${SITE_URL}/shop`)}
     `,
   )
-  const text = `Welcome to ${SITE_NAME}, ${firstName}. Your account (${customer.email}) has been created. Visit ${SITE_URL}/shop to start shopping.`
+  const text = `Hi ${firstName}, welcome to ${SITE_NAME}. Your account (${customer.email}) has been created. Visit ${SITE_URL}/shop to start shopping.`
   const resendTemplate = {
     name: 'welcome',
     variables: {
@@ -583,19 +726,25 @@ export function contactAutoReplyEmail(opts: { name: string; message: string }) {
   const preview =
     opts.message.length > 200 ? opts.message.slice(0, 200) + '…' : opts.message
   const html = renderShell(
-    statusBadge('admin'),
-    `Thank you for contacting us, ${opts.name}`,
+    statusBadge('message_received'),
+    'We have received your message',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        We have received your message and a member of the ${SITE_NAME} team will respond shortly.
-      </p>
-      <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
-        <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Your message</p>
-        <p style="margin:0;font-size:14px;line-height:1.6;color:${TEXT};">"${preview}"</p>
-      </div>
+      ${introText(`Hi ${opts.name}, thank you for getting in touch with ${SITE_NAME}. Here is what happens next:`)}
+      ${sectionHeading('What happens next')}
+      ${stepList([
+        {
+          title: 'We read your message',
+          body: 'A member of our team will review your enquiry.',
+        },
+        {
+          title: 'You hear back from us',
+          body: `We will reply to this email address shortly. For anything urgent you can also call us on ${CONTACT_PHONE}.`,
+        },
+      ])}
+      ${noteBox('Your message', `"${preview}"`)}
     `,
   )
-  const text = `Thank you for contacting us, ${opts.name}. We have received your message and a member of the ${SITE_NAME} team will respond shortly.`
+  const text = `Hi ${opts.name}, thank you for contacting us. We have received your message and a member of the ${SITE_NAME} team will respond shortly.`
   const resendTemplate = {
     name: 'contact-auto-reply',
     variables: { CUSTOMER_NAME: opts.name, MESSAGE_PREVIEW: preview },
@@ -978,12 +1127,21 @@ export function adminNewOrderEmail(
 export function stockNotifyCustomerEmail(productName: string) {
   const subject = `We'll email you when "${productName}" is back in stock`
   const html = renderShell(
-    statusBadge('welcome'),
+    statusBadge('stock_alert'),
     `You're on the list`,
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        We will email you at this address as soon as <strong style="color:${TEXT};">${productName}</strong> is back in stock.
-      </p>
+      ${introText(`Thanks for your interest. We will email you at this address as soon as ${strong(productName)} is back in stock.`)}
+      ${sectionHeading('What happens next')}
+      ${stepList([
+        {
+          title: 'We keep an eye on the stock',
+          body: 'There is nothing else you need to do.',
+        },
+        {
+          title: 'You get an email the moment it is back',
+          body: 'Stock can sell quickly, so order soon after you hear from us.',
+        },
+      ])}
       ${ctaButton('Keep browsing', `${SITE_URL}/shop`)}
     `,
   )
@@ -1030,9 +1188,22 @@ export function newsletterWelcomeEmail(email: string) {
     statusBadge('subscribed'),
     `You're subscribed`,
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Thank you for signing up with <strong style="color:${TEXT};">${email}</strong>. Keep an eye on your inbox for offers, new arrivals and restock alerts.
-      </p>
+      ${introText(`Thank you for signing up with ${strong(email)}. Here is what to expect in your inbox:`)}
+      ${sectionHeading('What you will get')}
+      ${checkList([
+        {
+          title: 'Offers and promotions',
+          body: 'Deals on rackets, strings and gear.',
+        },
+        {
+          title: 'New arrivals',
+          body: 'First look at what has just landed in store.',
+        },
+        {
+          title: 'Restock alerts',
+          body: 'A heads-up when popular items are back.',
+        },
+      ])}
       ${ctaButton('Start shopping', `${SITE_URL}/shop`)}
     `,
   )
@@ -1090,24 +1261,21 @@ export function invoiceEmail(opts: {
   const subject = `Your invoice ${opts.invoiceNumber} — ${SITE_NAME}`
   const trackingBlock = opts.trackingUrl
     ? `
-      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
-        You can check the status of your order any time.
-      </p>
+      ${bodyText('You can check the status of your order at any time.')}
       ${ctaButton('Track your order', opts.trackingUrl)}
     `
     : ''
   const html = renderShell(
     statusBadge('invoice'),
-    'Thank you for shopping with us',
+    'Your invoice is ready',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Please find attached invoice <strong style="color:${TEXT};">${opts.invoiceNumber}</strong> for order <strong style="color:${TEXT};">${opts.orderNumber}</strong>.
-      </p>
+      ${introText(`Thank you for shopping with us. Your invoice for order ${strong(opts.orderNumber)} is attached to this email as a PDF.`)}
+      ${infoBox(
+        'Invoice details',
+        `<p style="margin:0;font-size:14px;line-height:1.7;color:${TEXT};">Invoice number: <strong>${opts.invoiceNumber}</strong><br />Order: <strong>${opts.orderNumber}</strong></p>`,
+      )}
       ${ctaButton('Download invoice', opts.pdfUrl)}
       ${trackingBlock}
-      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${TEXT};">
-        Thank you for shopping with us.
-      </p>
     `,
   )
   const trackingText = opts.trackingUrl
@@ -1134,19 +1302,30 @@ export function invoiceEmail(opts: {
 // point in the flow.)
 export function readyForPickupEmail(order: any) {
   const orderNumber = orderNumberOf(order)
-  const greetingName = (order.customer?.first_name || '').trim() || 'there'
+  const greetingName = firstNameOf(order)
   const subject = `Order ${orderNumber} is ready for collection — ${SITE_NAME}`
   const html = renderShell(
     statusBadge('ready_for_pickup'),
-    `Good news, ${greetingName} — your order is ready`,
+    'Your order is ready for collection',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Order <strong style="color:${TEXT};">${orderNumber}</strong> is packed and waiting for you at ${STORE_DISPLAY_NAME}, ${STORE_ADDRESS_LINE1}, ${STORE_ADDRESS_LINE2}. Bring a form of ID or your order confirmation when you collect it.
-      </p>
+      ${introText(`Hi ${greetingName}, good news — order ${strong(orderNumber)} is packed and waiting for you in store.`)}
+      ${factBox('Collect from', `${STORE_DISPLAY_NAME}, ${STORE_ADDRESS_LINE1}, ${STORE_ADDRESS_LINE2}`)}
+      ${sectionHeading('When you collect')}
+      ${stepList([
+        {
+          title: 'Bring ID or your order confirmation',
+          body: 'This helps us hand your order to the right person.',
+        },
+        {
+          title: 'Show it to our team',
+          body: 'We will bring out your order and you are done.',
+        },
+      ])}
+      ${sectionHeading('Your order')}
       ${itemsTable(order.items ?? [])}
     `,
   )
-  const text = `Order ${orderNumber} is ready for collection at ${STORE_DISPLAY_NAME}, ${STORE_ADDRESS_LINE1}, ${STORE_ADDRESS_LINE2}. Bring ID or your order confirmation.`
+  const text = `Hi ${greetingName}, order ${orderNumber} is ready for collection at ${STORE_DISPLAY_NAME}, ${STORE_ADDRESS_LINE1}, ${STORE_ADDRESS_LINE2}. Bring ID or your order confirmation.`
   const resendTemplate = {
     name: 'ready-for-pickup',
     variables: {
@@ -1189,21 +1368,34 @@ export function returnRequestedEmail(
   },
 ) {
   const orderNumber = orderNumberOf(order)
+  const firstName = firstNameOf(order)
   const subject = `We've received your return request for ${orderNumber} — ${SITE_NAME}`
   const html = renderShell(
     statusBadge('return_requested'),
     'Your return request has been received',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        We've received your return request for order <strong style="color:${TEXT};">${orderNumber}</strong>${returnRecord.reason ? ` (reason: ${returnRecord.reason})` : ''}. Our team will review it and get back to you shortly — you'll receive another email once it's approved or if we need more information.
-      </p>
+      ${introText(`Hi ${firstName}, we have received your return request for order ${strong(orderNumber)}${returnRecord.reason ? ` (reason: ${returnRecord.reason})` : ''}. Here is what happens next:`)}
+      ${sectionHeading('What happens next')}
+      ${stepList([
+        {
+          title: 'Our team reviews your request',
+          body: 'We check the items and the reason you gave.',
+        },
+        {
+          title: 'You hear from us by email',
+          body: 'We will let you know once it is approved, or if we need more information.',
+        },
+      ])}
+      ${sectionHeading('Items in this return')}
       ${returnItemsTable(returnRecord.items ?? [])}
+      ${bodyText('Need to add something? Just reply to this email and we will help.')}
     `,
   )
-  const text = `We've received your return request for order ${orderNumber}. We'll email you once it has been reviewed.`
+  const text = `Hi ${firstName}, we've received your return request for order ${orderNumber}. We'll email you once it has been reviewed.`
   const resendTemplate = {
     name: 'return-requested',
     variables: {
+      CUSTOMER_FIRST_NAME: firstName,
       ORDER_DISPLAY_ID: String(order.display_id ?? order.id),
       RETURN_REASON: returnRecord.reason || 'Not specified',
       RETURN_ITEMS_HTML: returnItemsTable(returnRecord.items ?? []),
@@ -1265,20 +1457,22 @@ export function returnDeclinedEmail(
   returnRecord: { note?: string },
 ) {
   const orderNumber = orderNumberOf(order)
+  const firstName = firstNameOf(order)
   const subject = `Update on your return request for ${orderNumber} — ${SITE_NAME}`
   const html = renderShell(
     statusBadge('return_declined'),
     "We're unable to process this return",
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        After reviewing your return request for order <strong style="color:${TEXT};">${orderNumber}</strong>, we're not able to process it${returnRecord.note ? `: ${returnRecord.note}` : '.'} If you think this is a mistake or would like to discuss it further, just reply to this email.
-      </p>
+      ${introText(`Hi ${firstName}, thank you for your patience. After reviewing your return request for order ${strong(orderNumber)}, we are not able to process it.`)}
+      ${returnRecord.note ? noteBox('Our reason', returnRecord.note) : ''}
+      ${noteBox('Think this is a mistake?', 'If you would like to discuss it further, just reply to this email and our team will take another look.')}
     `,
   )
-  const text = `Your return request for order ${orderNumber} could not be processed.${returnRecord.note ? ` ${returnRecord.note}` : ''} Reply to this email with any questions.`
+  const text = `Hi ${firstName}, your return request for order ${orderNumber} could not be processed.${returnRecord.note ? ` ${returnRecord.note}` : ''} Reply to this email with any questions.`
   const resendTemplate = {
     name: 'return-declined',
     variables: {
+      CUSTOMER_FIRST_NAME: firstName,
       ORDER_DISPLAY_ID: String(order.display_id ?? order.id),
       DECLINE_NOTE: returnRecord.note || 'No further details were provided',
     },
@@ -1420,12 +1614,10 @@ export function mailInLabelEmail(
 // ---------------------------------------------------------------------------
 
 function giftCodeBlock(code: string) {
-  return `
-    <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;">
-      <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Gift card code</p>
-      <p style="margin:0;font-size:20px;font-weight:800;letter-spacing:1px;color:${TEXT};">${code}</p>
-    </div>
-  `
+  return infoBox(
+    'Gift card code',
+    `<p style="margin:0;font-size:22px;font-weight:800;letter-spacing:1.5px;color:${TEXT};">${code}</p>`,
+  )
 }
 
 const escapeHtml = (s: string) =>
@@ -1446,16 +1638,29 @@ export function giftCardPurchaseEmail(opts: {
   const { code, amount, orderNumber, recipientEmail, sendDate } = opts
   const subject = `Your gift card is ready — ${code}`
   const forwardNote = recipientEmail
-    ? `<p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">We are also emailing this card to <strong style="color:${TEXT};">${escapeHtml(recipientEmail)}</strong>${sendDate ? ` on ${escapeHtml(sendDate)}` : ' now'}.</p>`
+    ? noteBox(
+        'Sent to the recipient',
+        `We are also emailing this card to ${strong(escapeHtml(recipientEmail))}${sendDate ? ` on ${escapeHtml(sendDate)}` : ' now'}.`,
+      )
     : ''
   const html = renderShell(
     pillBadge('GIFT CARD PURCHASED', '#ECFDF5', GREEN),
-    'Thank you for your gift card purchase',
+    'Your gift card is ready',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">Your ${SITE_NAME} gift card for <strong style="color:${TEXT};">${fmt(amount)}</strong> is ready to use (order <strong style="color:${TEXT};">${orderNumber}</strong>).</p>
+      ${introText(`Thank you for your gift card purchase. Your ${SITE_NAME} gift card for ${strong(fmt(amount))} is ready to use (order ${strong(orderNumber)}).`)}
       ${giftCodeBlock(code)}
-      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">Enter this code at checkout online, or show it in store, to redeem it. It does not expire.</p>
       ${forwardNote}
+      ${sectionHeading('How to redeem it')}
+      ${stepList([
+        {
+          title: 'Shop online or in store',
+          body: 'Pick your items as usual.',
+        },
+        {
+          title: 'Use your code at checkout',
+          body: 'Enter the code online, or show it to our team in store. It does not expire.',
+        },
+      ])}
       ${ctaButton('Start shopping', SITE_URL)}
     `,
   )
@@ -1490,9 +1695,20 @@ export function giftCardRecipientEmail(opts: {
     pillBadge("YOU'VE BEEN SENT A GIFT", '#ECFDF5', GREEN),
     "You've received a gift card",
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};"><strong style="color:${TEXT};">${escapeHtml(senderName)}</strong> has sent you a ${SITE_NAME} gift card worth <strong style="color:${TEXT};">${fmt(amount)}</strong>.</p>
-      <div style="margin-top:20px;padding:16px 18px;background:#F9FAFB;border:1px solid ${BORDER};border-radius:8px;"><p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};">Message from ${escapeHtml(senderName)}</p><p style="margin:0;font-size:14px;color:${TEXT};font-style:italic;">"${escapeHtml(note)}"</p></div>
+      ${introText(`${strong(escapeHtml(senderName))} has sent you a ${SITE_NAME} gift card worth ${strong(fmt(amount))}.`)}
+      ${infoBox(`Message from ${escapeHtml(senderName)}`, `<p style="margin:0;font-size:14px;line-height:1.6;color:${TEXT};font-style:italic;">"${escapeHtml(note)}"</p>`)}
       ${giftCodeBlock(code)}
+      ${sectionHeading('How to redeem it')}
+      ${stepList([
+        {
+          title: 'Shop online or in store',
+          body: 'Pick anything you like.',
+        },
+        {
+          title: 'Use your code at checkout',
+          body: 'Enter the code online, or show it to our team in store.',
+        },
+      ])}
       ${ctaButton('Redeem now', SITE_URL)}
     `,
   )
@@ -1519,22 +1735,30 @@ export function giftCardRecipientEmail(opts: {
 // tracking" wording, since nothing is shipped.
 export function giftCardOrderReceiptEmail(order: any) {
   const orderNumber = orderNumberOf(order)
-  const greetingName = (order.customer?.first_name || '').trim() || 'there'
+  const greetingName = firstNameOf(order)
   const subject = `Order confirmed ${orderNumber} — ${SITE_NAME}`
   const html = renderShell(
     statusBadge('confirmed'),
-    `Thank you for your order, ${greetingName}`,
+    'Your order is confirmed',
     `
-      <p style="margin:0;font-size:14px;line-height:1.6;color:${MUTED};">
-        Thank you for your order. We have received order <strong style="color:${TEXT};">${orderNumber}</strong>. Nothing is shipped for a gift card — your gift card number and details are in a separate email, sent to you right after payment.
-      </p>
+      ${introText(`Hi ${greetingName}, thank you for your order. We have received order ${strong(orderNumber)}. Nothing is shipped for a gift card, so there is no tracking to wait for.`)}
+      ${sectionHeading('What happens next')}
+      ${stepList([
+        {
+          title: 'Check your inbox',
+          body: 'Your gift card number and details are in a separate email, sent right after payment.',
+        },
+        {
+          title: 'Use it any time',
+          body: 'Enter the code at checkout online, or show it to our team in store.',
+        },
+      ])}
+      ${sectionHeading('Your order')}
       ${itemsTable(order.items ?? [])}
-      <div style="margin-top:8px;padding-top:8px;border-top:2px solid ${BORDER};">
-        ${totalRow('Order total', order.total, true)}
-      </div>
+      ${totalBlock('Order total', order.total)}
     `,
   )
-  const text = `Order confirmed ${orderNumber} — Total ${fmt(order.total)}. Your gift card number and details are in a separate email.`
+  const text = `Hi ${greetingName}, order confirmed ${orderNumber} — Total ${fmt(order.total)}. Your gift card number and details are in a separate email.`
   return {
     subject,
     html,

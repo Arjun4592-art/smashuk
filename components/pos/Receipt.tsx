@@ -920,7 +920,7 @@ export function ReceiptBody({
           <div>
             {dateStr}, {timeStr}
           </div>
-          <div>Receipt: {orderId}</div>
+          <div>Order: {orderId}</div>
           <div
             style={{
               marginTop: '2mm',

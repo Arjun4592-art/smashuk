@@ -4,6 +4,7 @@ import {
   STORE_PRODUCT_LISTING_FIELDS,
 } from '@/lib/api/store'
 import { safeJson } from '@/lib/api/safe-json'
+import { isHiddenFromStorefront } from '@/lib/storefront-hidden'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
@@ -137,6 +138,16 @@ export async function GET(req: NextRequest) {
       )
     }
     const data = await safeJson(res, 'app/api/store/products/route.ts')
+    // Browse/search must never list service / custom products. Direct
+    // lookups (handle / id) still return them — mail-in booking needs that.
+    if (!handle && !ids && Array.isArray(data.products)) {
+      const before = data.products.length
+      data.products = data.products.filter(
+        (p: any) => !isHiddenFromStorefront(p),
+      )
+      if (typeof data.count === 'number')
+        data.count = Math.max(0, data.count - (before - data.products.length))
+    }
     const totalMs = Date.now() - routeStart
     if (totalMs > 1000) {
       console.warn(

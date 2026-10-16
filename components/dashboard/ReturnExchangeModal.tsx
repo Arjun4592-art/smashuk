@@ -52,6 +52,7 @@ interface Props {
     trackingNumber?: string,
     shippingCarrier?: string,
     refundAmount?: number,
+    refundOnly?: boolean,
   ) => Promise<void>
   onClose: () => void
 }
@@ -95,6 +96,9 @@ export default function ReturnExchangeModal({
   const [shippingCarrier, setShippingCarrier] = useState('')
   const [useCustomAmount, setUseCustomAmount] = useState(false)
   const [customAmount, setCustomAmount] = useState('')
+  // "Refund only": money goes back but no goods are returned (e.g. the
+  // customer was charged the wrong amount). No items, no return shipping.
+  const [refundOnly, setRefundOnly] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -117,20 +121,58 @@ export default function ReturnExchangeModal({
     [qtys, returnableItems],
   )
 
-  const calculatedTotal = selectedItems.reduce(
-    (sum, { quantity, item }) => sum + (item?.unit_price ?? 0) * quantity,
+  // What the customer actually paid and hasn't had back yet. Medusa refuses
+  // to refund more than this, so we cap the estimate / custom amount here
+  // instead of letting the request fail with a server error.
+  const maxRefundable = useMemo(() => {
+    const pays = (order.payments ?? []).filter(
+      (p: any) => p.captured_at && !p.canceled_at && p.status !== 'canceled',
+    )
+    if (pays.length === 0) return null
+    const total = pays.reduce(
+      (s: number, p: any) =>
+        s + ((p.amount ?? 0) - (p.refunded_amount ?? p.amount_refunded ?? 0)),
+      0,
+    )
+    return Math.max(0, Math.round(total * 100) / 100)
+  }, [order.payments])
+
+  // Post-discount amount per unit (same logic the server uses), not the raw
+  // catalog unit_price.
+  const unitRefund = (item: any) => {
+    if (typeof item?.refundable_total_per_unit === 'number')
+      return item.refundable_total_per_unit
+    if (typeof item?.total === 'number' && item.quantity > 0)
+      return item.total / item.quantity
+    return item?.unit_price ?? 0
+  }
+  const rawCalculatedTotal = selectedItems.reduce(
+    (sum, { quantity, item }) => sum + unitRefund(item) * quantity,
     0,
   )
+  const calculatedTotal =
+    maxRefundable === null
+      ? rawCalculatedTotal
+      : Math.min(rawCalculatedTotal, maxRefundable)
   const parsedCustom = parseFloat(customAmount)
   const refundTotal =
     useCustomAmount && !Number.isNaN(parsedCustom)
       ? parsedCustom
       : calculatedTotal
+  const customTooHigh =
+    useCustomAmount &&
+    maxRefundable !== null &&
+    !Number.isNaN(parsedCustom) &&
+    parsedCustom > maxRefundable + 0.005
 
-  const canSubmit = selectedItems.length > 0 && !!reason && refundTotal > 0
+  const canSubmit =
+    (refundOnly || selectedItems.length > 0) &&
+    !!reason &&
+    refundTotal > 0 &&
+    !customTooHigh
 
   const handleSubmit = async () => {
-    if (selectedItems.length === 0) {
+    if (!refundOnly && selectedItems.length === 0) {
       setError('Select at least one item to return')
       return
     }
@@ -142,16 +184,28 @@ export default function ReturnExchangeModal({
       setError('Enter a valid custom refund amount')
       return
     }
+    if (customTooHigh) {
+      setError(
+        `Maximum refund is ${fmt(maxRefundable ?? 0, currency)} — that's what the customer paid.`,
+      )
+      return
+    }
     setError('')
     setSubmitting(true)
     try {
       await onSubmit(
-        selectedItems.map(({ item_id, quantity }) => ({ item_id, quantity })),
+        refundOnly
+          ? []
+          : selectedItems.map(({ item_id, quantity }) => ({
+              item_id,
+              quantity,
+            })),
         reason,
-        shippingOption,
-        trackingNumber || undefined,
-        shippingCarrier || undefined,
+        refundOnly ? 'no_shipping' : shippingOption,
+        refundOnly ? undefined : trackingNumber || undefined,
+        refundOnly ? undefined : shippingCarrier || undefined,
         useCustomAmount ? parsedCustom : undefined,
+        refundOnly || undefined,
       )
     } catch (err: any) {
       setError(err.message ?? 'Failed to process return')
@@ -199,7 +253,29 @@ export default function ReturnExchangeModal({
               {(order.items ?? []).length === 1 ? '' : 's'}
             </p>
 
-            {returnableItems.length === 0 ? (
+            <label className='mt-4 flex items-start gap-2.5 rounded-xl border border-[#E1E3E5] bg-[#FAFAFA] p-3 text-[14px] text-[#202223] cursor-pointer'>
+              <input
+                type='checkbox'
+                checked={refundOnly}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  setRefundOnly(on)
+                  setUseCustomAmount(on)
+                  setCustomAmount('')
+                  setError('')
+                }}
+                className='w-5 h-5 mt-0.5 accent-[#008060] shrink-0'
+              />
+              <span>
+                Refund only — no items are being returned
+                <span className='block text-[12.5px] text-[#6D7175] mt-0.5'>
+                  Use this when the customer was charged the wrong amount or you
+                  are refunding without taking goods back.
+                </span>
+              </span>
+            </label>
+
+            {refundOnly ? null : returnableItems.length === 0 ? (
               <p className='text-[15px] text-[#6D7175] py-8 text-center'>
                 Every item has already been returned.
               </p>
@@ -290,7 +366,7 @@ export default function ReturnExchangeModal({
               </div>
             )}
 
-            {returnableItems.length > 0 && (
+            {(returnableItems.length > 0 || refundOnly) && (
               <div className='relative mt-5'>
                 <label
                   htmlFor='return-reason'
@@ -317,7 +393,7 @@ export default function ReturnExchangeModal({
           </div>
 
           {/* 2 — return shipping */}
-          {returnableItems.length > 0 && (
+          {returnableItems.length > 0 && !refundOnly && (
             <div className='bg-white mt-3 px-4 py-5'>
               <h4 className='text-[17px] font-bold text-[#202223]'>
                 Return shipping options
@@ -405,7 +481,7 @@ export default function ReturnExchangeModal({
           <div className='bg-white mt-3 px-4 py-5'>
             <h4 className='text-[17px] font-bold text-[#202223]'>Summary</h4>
 
-            {selectedItems.length === 0 ? (
+            {selectedItems.length === 0 && !refundOnly ? (
               <p className='text-[15px] text-[#6D7175] mt-2'>
                 No items selected
               </p>
@@ -442,19 +518,21 @@ export default function ReturnExchangeModal({
                   </p>
                 )}
 
-                <label className='flex items-center gap-2.5 pt-2 text-[14px] text-[#202223] cursor-pointer'>
-                  <input
-                    type='checkbox'
-                    checked={useCustomAmount}
-                    onChange={(e) => {
-                      setUseCustomAmount(e.target.checked)
-                      if (e.target.checked && !customAmount)
-                        setCustomAmount(calculatedTotal.toFixed(2))
-                    }}
-                    className='w-5 h-5 accent-[#008060]'
-                  />
-                  Use custom refund amount
-                </label>
+                {!refundOnly && (
+                  <label className='flex items-center gap-2.5 pt-2 text-[14px] text-[#202223] cursor-pointer'>
+                    <input
+                      type='checkbox'
+                      checked={useCustomAmount}
+                      onChange={(e) => {
+                        setUseCustomAmount(e.target.checked)
+                        if (e.target.checked && !customAmount)
+                          setCustomAmount(calculatedTotal.toFixed(2))
+                      }}
+                      className='w-5 h-5 accent-[#008060]'
+                    />
+                    Use custom refund amount
+                  </label>
+                )}
 
                 {useCustomAmount && (
                   <div className='flex items-center gap-2'>
@@ -474,6 +552,18 @@ export default function ReturnExchangeModal({
                       className={cx(fieldCls, 'h-12 px-4 flex-1')}
                     />
                   </div>
+                )}
+                {useCustomAmount && maxRefundable !== null && (
+                  <p
+                    className={cx(
+                      'text-[12.5px]',
+                      customTooHigh ? 'text-[#D82C0D]' : 'text-[#6D7175]',
+                    )}
+                  >
+                    {customTooHigh
+                      ? `Too high — customer paid ${fmt(maxRefundable, currency)} in total (after discounts), so that's the most you can refund.`
+                      : `Maximum refundable: ${fmt(maxRefundable, currency)}`}
+                  </p>
                 )}
               </div>
             )}
@@ -495,7 +585,7 @@ export default function ReturnExchangeModal({
             disabled={!canSubmit}
             onClick={handleSubmit}
           >
-            Create return
+            {refundOnly ? 'Issue refund' : 'Create return'}
           </Btn>
         </div>
       </div>

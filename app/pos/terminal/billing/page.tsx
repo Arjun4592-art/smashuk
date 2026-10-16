@@ -780,7 +780,7 @@ export default function BillingPage() {
     }
     setPaymentMethod(result.method)
     setSplitPayments(result.splits ?? null)
-    const id = `POS-${generateOrderNumber()}`
+    let id = `POS-${generateOrderNumber()}`
     const cashierName = user?.name ?? 'Staff'
     let medusaOrderId: string | undefined
     let trackingToken: string | undefined
@@ -864,6 +864,12 @@ export default function BillingPage() {
           })),
         })
         medusaOrderId = orderResult?.order?.id
+        // Print the real order number (SR-1042) on the receipt so staff can
+        // search it on the POS / dashboard later. The local POS-AS-xxxxxx id
+        // is only a fallback when Medusa didn't return a display_id.
+        if (orderResult?.order?.display_id) {
+          id = `SR-${orderResult.order.display_id}`
+        }
         trackingToken = orderResult?.trackingToken
         const failedCards = (orderResult?.giftCardsIssued ?? []).filter(
           (g) => !g.ok,

@@ -315,6 +315,7 @@ export default function OrderDetailPage({
     trackingNumber?: string,
     shippingCarrier?: string,
     refundAmount?: number,
+    refundOnly?: boolean,
   ) => {
     const note = [
       shippingOption === 'no_shipping' ? 'No shipping required' : null,
@@ -330,8 +331,11 @@ export default function OrderDetailPage({
       note || undefined,
       refundAmount,
       shippingOption === 'email_label',
+      refundOnly,
     )
-    toast.success('Return processed and refund issued')
+    toast.success(
+      refundOnly ? 'Refund issued' : 'Return processed and refund issued',
+    )
     if (shippingOption === 'email_label') {
       if (result?.return_label?.emailed) {
         toast.success('Return label emailed to the customer')

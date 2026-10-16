@@ -11,13 +11,17 @@ function getClient(): Resend | null {
   return resend
 }
 
-// Sends an internal store-notification email to the store's admin inbox
-// (MEDUSA_ADMIN_EMAIL). Callers pass a fully-formed, clean subject and a
+export const DEFAULT_STORE_INBOX = 'sales@smashuk.co'
+export function storeInboxRecipient(): string {
+  return (process.env.STORE_OWNER_EMAIL ?? '').trim() || DEFAULT_STORE_INBOX
+}
+
+// Sends an internal store-notification email to the store inbox
+// (see storeInboxRecipient). Callers pass a fully-formed, clean subject and a
 // dedicated admin-facing template (see lib/email-templates.ts) — no
 // "[Copy — email]" prefixing, so the inbox reads like a real notification
-// system rather than a raw copy of the customer's email. Silently no-ops if
-// MEDUSA_ADMIN_EMAIL isn't set — never throws, so it's safe to call without
-// awaiting.
+// system rather than a raw copy of the customer's email. Never throws, so it's
+// safe to call without awaiting.
 export async function notifyAdmin(opts: {
   subject: string
   html: string
@@ -28,15 +32,8 @@ export async function notifyAdmin(opts: {
   sent: boolean
   error?: string
 }> {
-  const to = process.env.MEDUSA_ADMIN_EMAIL
-  if (!to) {
-    return {
-      sent: false,
-      error: 'MEDUSA_ADMIN_EMAIL not set',
-    }
-  }
   return sendMail({
-    to,
+    to: storeInboxRecipient(),
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
@@ -55,10 +52,9 @@ export function posOrderNotifyRecipient(): string | null {
   return configured || 'info@smashuk.co'
 }
 
-// Like notifyAdmin, but for the store owner's inbox rather than the Medusa
-// admin inbox: prefers STORE_OWNER_EMAIL, falling back to MEDUSA_ADMIN_EMAIL
-// if the owner address isn't set. Used for order/shipping/refund/new-customer
-// notifications. Never throws — safe to call without awaiting.
+// Same inbox as notifyAdmin (STORE_OWNER_EMAIL, default sales@smashuk.co),
+// with an optional per-call `to` override. Used for order/shipping/refund/
+// new-customer notifications. Never throws — safe to call without awaiting.
 export async function notifyOwner(opts: {
   subject: string
   html: string
@@ -71,16 +67,8 @@ export async function notifyOwner(opts: {
   sent: boolean
   error?: string
 }> {
-  const to =
-    opts.to || process.env.STORE_OWNER_EMAIL || process.env.MEDUSA_ADMIN_EMAIL
-  if (!to) {
-    return {
-      sent: false,
-      error: 'STORE_OWNER_EMAIL not set',
-    }
-  }
   return sendMail({
-    to,
+    to: opts.to || storeInboxRecipient(),
     subject: opts.subject,
     html: opts.html,
     text: opts.text,

@@ -280,9 +280,11 @@ export async function processOrderReturn(
   note?: string,
   refundAmount?: number,
   emailLabel?: boolean,
+  refundOnly?: boolean,
 ) {
   return mutate(`/api/admin/orders/${id}`, 'PATCH', {
     action: 'return',
+    refund_only: refundOnly || undefined,
     items,
     reason,
     note,

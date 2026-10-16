@@ -51,6 +51,9 @@ export default function ReturnModal({
   const [error, setError] = useState<string | null>(null)
   const [useCustomAmount, setUseCustomAmount] = useState(false)
   const [customAmount, setCustomAmount] = useState('')
+  // Refund only: money back, no goods returned (e.g. wrong amount charged).
+  const [refundOnly, setRefundOnly] = useState(false)
+  const [refundReason, setRefundReason] = useState('')
   useEffect(() => {
     const scrollEl = document.getElementById('pos-orders-scroll-area')
     const prevBodyOverflow = document.body.style.overflow
@@ -66,7 +69,19 @@ export default function ReturnModal({
     (o) =>
       !o.returned &&
       (!search ||
-        o.id.toLowerCase().includes(search.toLowerCase()) ||
+        o.id.toLowerCase().includes(search.trim().toLowerCase()) ||
+        o.id
+          .toLowerCase()
+          .replace(/^sr-?/, '')
+          .includes(
+            search
+              .trim()
+              .toLowerCase()
+              .replace(/^(sr-?|#)/, ''),
+          ) ||
+        (o.medusaOrderId ?? '')
+          .toLowerCase()
+          .includes(search.trim().toLowerCase()) ||
         o.customer?.name.toLowerCase().includes(search.toLowerCase())),
   )
   const handleSelectOrder = (order: any) => {
@@ -74,6 +89,8 @@ export default function ReturnModal({
     setStep('items')
     setUseCustomAmount(false)
     setCustomAmount('')
+    setRefundOnly(false)
+    setRefundReason('')
   }
   const handleQtyChange = (productId: string, qty: number) => {
     setReturnItems((prev) => ({
@@ -110,18 +127,40 @@ export default function ReturnModal({
           reason: v.reason || 'Other',
         }
       })
-    if (!items.length) return
+    if (!refundOnly && !items.length) return
     const parsedCustomAmount = parseFloat(customAmount)
     if (
-      useCustomAmount &&
+      (useCustomAmount || refundOnly) &&
       (Number.isNaN(parsedCustomAmount) || parsedCustomAmount <= 0)
     ) {
       setError('Enter a valid custom refund amount')
       return
     }
+    if (
+      (useCustomAmount || refundOnly) &&
+      parsedCustomAmount > (selectedOrder.total ?? 0) + 0.005
+    ) {
+      setError(
+        `Refund can't be more than the order total (£${(selectedOrder.total ?? 0).toFixed(2)}).`,
+      )
+      return
+    }
     setError(null)
     setSubmitting(true)
     try {
+      if (refundOnly) {
+        const { refund_amount } = await markPOSOrderReturned(
+          selectedOrder.medusaOrderId ?? selectedOrder.id,
+          refundReason || 'Other',
+          [],
+          parsedCustomAmount,
+          true,
+        )
+        setServerRefundTotal(refund_amount)
+        onReturned(selectedOrder.medusaOrderId ?? selectedOrder.id)
+        setStep('success')
+        return
+      }
       const { refund_amount } = await markPOSOrderReturned(
         selectedOrder.medusaOrderId ?? selectedOrder.id,
         items[0]?.reason || 'Other',
@@ -163,7 +202,7 @@ export default function ReturnModal({
     }, 0)
   const parsedCustomAmount = parseFloat(customAmount)
   const refundTotal =
-    useCustomAmount && !Number.isNaN(parsedCustomAmount)
+    (useCustomAmount || refundOnly) && !Number.isNaN(parsedCustomAmount)
       ? parsedCustomAmount
       : calculatedTotal
   return (
@@ -327,129 +366,195 @@ export default function ReturnModal({
                 maxHeight: 360,
               }}
             >
-              {selectedOrder.items.map((item: any) => {
-                const ri = returnItems[item.product.id]
-                return (
-                  <div
-                    key={item.product.id}
-                    className='p-3 rounded-lg border'
-                    style={{
-                      borderColor: '#E1E3E5',
-                    }}
-                  >
-                    <div className='flex items-center justify-between mb-2'>
-                      <div>
-                        <p
-                          className='text-sm font-medium'
+              <label
+                className='flex items-start gap-2 p-3 rounded-lg border text-sm cursor-pointer'
+                style={{
+                  borderColor: '#E1E3E5',
+                  background: '#FAFAFA',
+                  color: '#202223',
+                }}
+              >
+                <input
+                  type='checkbox'
+                  className='mt-0.5'
+                  checked={refundOnly}
+                  onChange={(e) => {
+                    setRefundOnly(e.target.checked)
+                    setUseCustomAmount(false)
+                    setCustomAmount('')
+                    setError(null)
+                  }}
+                />
+                <span>
+                  Refund only — no items are being returned
+                  <span className='block text-xs' style={{ color: '#6D7175' }}>
+                    For a wrong amount charged, or refunding without taking
+                    goods back.
+                  </span>
+                </span>
+              </label>
+              {!refundOnly &&
+                selectedOrder.items.map((item: any) => {
+                  const ri = returnItems[item.product.id]
+                  return (
+                    <div
+                      key={item.product.id}
+                      className='p-3 rounded-lg border'
+                      style={{
+                        borderColor: '#E1E3E5',
+                      }}
+                    >
+                      <div className='flex items-center justify-between mb-2'>
+                        <div>
+                          <p
+                            className='text-sm font-medium'
+                            style={{
+                              color: '#202223',
+                            }}
+                          >
+                            {item.product.name}
+                          </p>
+                          <p
+                            className='text-xs'
+                            style={{
+                              color: '#8C9196',
+                            }}
+                          >
+                            £{item.product.price.toLocaleString('en-GB')} · Qty:{' '}
+                            {item.quantity}
+                          </p>
+                        </div>
+                        {}
+                        <div
+                          className='flex items-center rounded border overflow-hidden'
                           style={{
-                            color: '#202223',
+                            borderColor: '#E1E3E5',
                           }}
                         >
-                          {item.product.name}
-                        </p>
-                        <p
-                          className='text-xs'
-                          style={{
-                            color: '#8C9196',
-                          }}
-                        >
-                          £{item.product.price.toLocaleString('en-GB')} · Qty:{' '}
-                          {item.quantity}
-                        </p>
+                          <button
+                            onClick={() =>
+                              handleQtyChange(
+                                item.product.id,
+                                Math.max(0, (ri?.qty ?? 0) - 1),
+                              )
+                            }
+                            className='w-7 h-7 flex items-center justify-center hover:bg-[#F6F6F7]'
+                            style={{
+                              color: '#6D7175',
+                            }}
+                          >
+                            <svg
+                              width='10'
+                              height='10'
+                              viewBox='0 0 24 24'
+                              fill='none'
+                              stroke='currentColor'
+                              strokeWidth='2.5'
+                              strokeLinecap='round'
+                            >
+                              <line x1='5' y1='12' x2='19' y2='12' />
+                            </svg>
+                          </button>
+                          <span
+                            className='w-8 h-7 flex items-center justify-center text-xs font-medium'
+                            style={{
+                              borderLeft: '1px solid #E1E3E5',
+                              borderRight: '1px solid #E1E3E5',
+                              color: '#202223',
+                            }}
+                          >
+                            {ri?.qty ?? 0}
+                          </span>
+                          <button
+                            onClick={() =>
+                              handleQtyChange(
+                                item.product.id,
+                                Math.min(item.quantity, (ri?.qty ?? 0) + 1),
+                              )
+                            }
+                            className='w-7 h-7 flex items-center justify-center hover:bg-[#F6F6F7]'
+                            style={{
+                              color: '#6D7175',
+                            }}
+                          >
+                            <svg
+                              width='10'
+                              height='10'
+                              viewBox='0 0 24 24'
+                              fill='none'
+                              stroke='currentColor'
+                              strokeWidth='2.5'
+                              strokeLinecap='round'
+                            >
+                              <line x1='12' y1='5' x2='12' y2='19' />
+                              <line x1='5' y1='12' x2='19' y2='12' />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                       {}
-                      <div
-                        className='flex items-center rounded border overflow-hidden'
-                        style={{
-                          borderColor: '#E1E3E5',
-                        }}
-                      >
-                        <button
-                          onClick={() =>
-                            handleQtyChange(
-                              item.product.id,
-                              Math.max(0, (ri?.qty ?? 0) - 1),
-                            )
+                      {(ri?.qty ?? 0) > 0 && (
+                        <select
+                          value={ri?.reason ?? ''}
+                          onChange={(e) =>
+                            handleReasonChange(item.product.id, e.target.value)
                           }
-                          className='w-7 h-7 flex items-center justify-center hover:bg-[#F6F6F7]'
+                          className='w-full px-2 py-1.5 rounded border text-xs outline-none mt-1'
                           style={{
-                            color: '#6D7175',
-                          }}
-                        >
-                          <svg
-                            width='10'
-                            height='10'
-                            viewBox='0 0 24 24'
-                            fill='none'
-                            stroke='currentColor'
-                            strokeWidth='2.5'
-                            strokeLinecap='round'
-                          >
-                            <line x1='5' y1='12' x2='19' y2='12' />
-                          </svg>
-                        </button>
-                        <span
-                          className='w-8 h-7 flex items-center justify-center text-xs font-medium'
-                          style={{
-                            borderLeft: '1px solid #E1E3E5',
-                            borderRight: '1px solid #E1E3E5',
+                            borderColor: '#E1E3E5',
                             color: '#202223',
                           }}
                         >
-                          {ri?.qty ?? 0}
-                        </span>
-                        <button
-                          onClick={() =>
-                            handleQtyChange(
-                              item.product.id,
-                              Math.min(item.quantity, (ri?.qty ?? 0) + 1),
-                            )
-                          }
-                          className='w-7 h-7 flex items-center justify-center hover:bg-[#F6F6F7]'
-                          style={{
-                            color: '#6D7175',
-                          }}
-                        >
-                          <svg
-                            width='10'
-                            height='10'
-                            viewBox='0 0 24 24'
-                            fill='none'
-                            stroke='currentColor'
-                            strokeWidth='2.5'
-                            strokeLinecap='round'
-                          >
-                            <line x1='12' y1='5' x2='12' y2='19' />
-                            <line x1='5' y1='12' x2='19' y2='12' />
-                          </svg>
-                        </button>
-                      </div>
+                          <option value=''>Select reason...</option>
+                          {RETURN_REASONS.map((r) => (
+                            <option key={r}>{r}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
-                    {}
-                    {(ri?.qty ?? 0) > 0 && (
-                      <select
-                        value={ri?.reason ?? ''}
-                        onChange={(e) =>
-                          handleReasonChange(item.product.id, e.target.value)
-                        }
-                        className='w-full px-2 py-1.5 rounded border text-xs outline-none mt-1'
-                        style={{
-                          borderColor: '#E1E3E5',
-                          color: '#202223',
-                        }}
-                      >
-                        <option value=''>Select reason...</option>
-                        {RETURN_REASONS.map((r) => (
-                          <option key={r}>{r}</option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                )
-              })}
+                  )
+                })}
             </div>
 
-            {calculatedTotal > 0 && (
+            {refundOnly && (
+              <div
+                className='mx-5 mb-4 p-3 rounded-lg space-y-2'
+                style={{ background: '#F2F7F5' }}
+              >
+                <select
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  className='w-full px-2 py-1.5 rounded border text-xs outline-none'
+                  style={{ borderColor: '#E1E3E5', color: '#202223' }}
+                >
+                  <option value=''>Select reason...</option>
+                  {RETURN_REASONS.map((r) => (
+                    <option key={r}>{r}</option>
+                  ))}
+                </select>
+                <div className='flex items-center gap-2'>
+                  <span className='text-sm' style={{ color: '#202223' }}>
+                    £
+                  </span>
+                  <input
+                    type='number'
+                    step='0.01'
+                    min='0'
+                    value={customAmount}
+                    onChange={(e) => setCustomAmount(e.target.value)}
+                    placeholder='Amount to refund'
+                    className='flex-1 px-3 py-1.5 rounded-lg border text-sm outline-none'
+                    style={{ borderColor: '#E1E3E5', color: '#202223' }}
+                  />
+                </div>
+                <p className='text-xs' style={{ color: '#8C9196' }}>
+                  Order total £{(selectedOrder.total ?? 0).toFixed(2)} — the
+                  refund can&apos;t be more than the customer paid.
+                </p>
+              </div>
+            )}
+
+            {!refundOnly && calculatedTotal > 0 && (
               <div
                 className='mx-5 mb-4 p-3 rounded-lg space-y-2'
                 style={{
@@ -565,8 +670,8 @@ export default function ReturnModal({
               <button
                 onClick={handleProcessReturn}
                 disabled={
-                  calculatedTotal === 0 ||
-                  (useCustomAmount &&
+                  (!refundOnly && calculatedTotal === 0) ||
+                  ((useCustomAmount || refundOnly) &&
                     (Number.isNaN(parsedCustomAmount) ||
                       parsedCustomAmount <= 0)) ||
                   submitting
@@ -577,7 +682,11 @@ export default function ReturnModal({
                   color: refundTotal > 0 ? '#FFFFFF' : '#8C9196',
                 }}
               >
-                {submitting ? 'Processing…' : 'Process return'}
+                {submitting
+                  ? 'Processing…'
+                  : refundOnly
+                    ? 'Issue refund'
+                    : 'Process return'}
               </button>
             </div>
           </>
@@ -610,7 +719,7 @@ export default function ReturnModal({
                 color: '#202223',
               }}
             >
-              Return processed
+              {refundOnly ? 'Refund issued' : 'Return processed'}
             </h4>
             <p
               className='text-sm mb-5'

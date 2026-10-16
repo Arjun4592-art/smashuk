@@ -555,6 +555,16 @@ export default function OrdersPage() {
   const matchesSearch = (o: (typeof allOrders)[number]) =>
     !search ||
     o.id.toLowerCase().includes(search.toLowerCase()) ||
+    o.id
+      .toLowerCase()
+      .replace(/^sr-?/, '')
+      .includes(
+        search
+          .trim()
+          .toLowerCase()
+          .replace(/^(sr-?|#)/, ''),
+      ) ||
+    (o.raw.medusaOrderId ?? '').toLowerCase().includes(search.toLowerCase()) ||
     o.customer.toLowerCase().includes(search.toLowerCase()) ||
     o.cashier.toLowerCase().includes(search.toLowerCase()) ||
     o.payment.label.toLowerCase().includes(search.toLowerCase()) ||

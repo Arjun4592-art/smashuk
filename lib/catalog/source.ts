@@ -2,7 +2,7 @@ import 'server-only'
 import type { Product } from '@/types'
 import { STORE_PRODUCT_LISTING_FIELDS, normalizeProduct } from '@/lib/api/store'
 import { safeJson } from '@/lib/api/safe-json'
-import { isStringingServiceProduct } from '@/lib/stringing'
+import { isHiddenFromStorefront } from '@/lib/storefront-hidden'
 
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
@@ -95,7 +95,7 @@ async function rebuild(): Promise<void> {
     }
     // In-store-only stringing services are never listed online.
     state.snapshot = raw
-      .filter((p) => !isStringingServiceProduct(p))
+      .filter((p) => !isHiddenFromStorefront(p))
       .map(normalizeProduct)
     state.snapshotAt = Date.now()
     state.builtGeneration = startedGeneration

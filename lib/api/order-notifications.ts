@@ -1,11 +1,11 @@
-import { sendMail } from '@/lib/email'
+import { sendMail, storeInboxRecipient } from '@/lib/email'
 import {
   orderConfirmationEmail,
   adminNewOrderEmail,
 } from '@/lib/email-templates'
 
 // Emails the store owner/admin (address configured in Dashboard > Settings
-// > Notifications, falling back to STORE_OWNER_EMAIL / MEDUSA_ADMIN_EMAIL)
+// > Notifications, falling back to the store inbox — see storeInboxRecipient())
 // that a new order came in.
 export async function notifyNewOrder(
   order: any,
@@ -29,12 +29,11 @@ export async function notifyNewOrder(
     const emailEnabled =
       notificationSettings?.settings?.new_order?.email ?? true
     if (!emailEnabled) return
-    const to =
-      notificationSettings?.channels?.email ||
-      process.env.STORE_OWNER_EMAIL ||
-      process.env.MEDUSA_ADMIN_EMAIL
-    if (!to) return
-    const { subject, html, text, resendTemplate } = adminNewOrderEmail(order, channel)
+    const to = notificationSettings?.channels?.email || storeInboxRecipient()
+    const { subject, html, text, resendTemplate } = adminNewOrderEmail(
+      order,
+      channel,
+    )
     await sendMail({ to, subject, html, text, resendTemplate })
   } catch (err) {
     console.error('[order-notifications] new-order admin email failed:', err)
@@ -45,8 +44,16 @@ export async function notifyNewOrder(
 export async function sendOrderConfirmationEmail(order: any) {
   try {
     if (!order?.email) return
-    const { subject, html, text, resendTemplate, attachments } = orderConfirmationEmail(order)
-    await sendMail({ to: order.email, subject, html, text, resendTemplate, attachments })
+    const { subject, html, text, resendTemplate, attachments } =
+      orderConfirmationEmail(order)
+    await sendMail({
+      to: order.email,
+      subject,
+      html,
+      text,
+      resendTemplate,
+      attachments,
+    })
   } catch (err) {
     console.error('[order-notifications] order confirmation email failed:', err)
   }

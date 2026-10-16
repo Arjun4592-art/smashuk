@@ -1,21 +1,3 @@
-// Prints receipts on a LABEL PRINTER (Zebra / TSC / Xprinter / Brother /
-// Munbyn etc.) through the OS print dialog + the printer's normal driver.
-//
-// How it works (same idea as the "Smash String Recorder" ticket printer, but
-// hardened):
-//   1. The receipt is turned into a *standalone* HTML document (own CSS, no
-//      Tailwind, no dependency on what is on screen) — so it prints the same
-//      from POS (new sale / old order) and from the dashboard.
-//   2. `@page { size: <W>mm <H>mm }` tells the browser/driver the label size.
-//   3. The document is rendered in a hidden iframe (a popup on iPhone/iPad,
-//      where iframe printing is broken), we wait for the logo/QR to load,
-//      then window.print() opens the OS dialog where the label printer is
-//      picked. A receipt longer than one label simply continues on the next
-//      label, and every label gets a small "Receipt #…" header line.
-//
-// Label height 0 = continuous roll: the page height is measured from the
-// content at print time, so you get exactly one label as long as the receipt.
-
 import qrcodegen from 'qrcode-generator'
 import { usePrinterStore } from '@/store/printerStore'
 import type { ReceiptData } from './escpos'
@@ -166,7 +148,7 @@ export function buildReceiptLabelHtml(
         <div class="small">${esc(data.addressLine2)}</div>
         <div class="small">${esc(data.phone)}</div></div>`
 
-  const meta = `<div class="row small"><span class="b">Receipt #${esc(data.orderId)}</span><span>${esc(data.dateStr)}, ${esc(data.timeStr)}</span></div>`
+  const meta = `<div class="row small"><span class="b">Order ${esc(data.orderId)}</span><span>${esc(data.dateStr)}, ${esc(data.timeStr)}</span></div>`
 
   const items = data.items
     .map(
@@ -230,11 +212,11 @@ export function buildReceiptLabelHtml(
 
   return `<!doctype html>
 <html><head><meta charset="utf-8" />
-<title>Receipt ${esc(data.orderId)}</title>
+<title>Order ${esc(data.orderId)}</title>
 <style>${baseCss(size)}</style></head>
 <body>
 <table class="doc">
-  <thead><tr><td><div class="run">${esc(data.storeName)} · Receipt #${esc(data.orderId)}</div></td></tr></thead>
+  <thead><tr><td><div class="run">${esc(data.storeName)} · Order ${esc(data.orderId)}</div></td></tr></thead>
   <tbody><tr><td>
     ${header}
     <hr />

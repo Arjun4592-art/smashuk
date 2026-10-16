@@ -1,43 +1,3 @@
-// Star PassPRNT transport.
-//
-// WHY THIS EXISTS: the Star TSP100III's Bluetooth models (TSP100IIIBI) pair
-// with Android as classic Bluetooth SPP, not BLE — so bluetooth-transport.ts
-// (Web Bluetooth, BLE-only) can never see it, and Web Serial
-// (serial-transport.ts) isn't implemented on Android Chrome at all. There is
-// no direct browser API path to this printer on an Android tablet. Star's
-// own PassPRNT app is the supported bridge: it holds the paired connection
-// to the printer, and a web page hands it a receipt via a URL scheme instead
-// of talking to the printer directly.
-//
-// HOW PASSPRNT PRINTING WORKS (confirmed against Star's PassPRNT Web SDK /
-// "Data Specifications" manual, Sept 2026):
-//   - PassPRNT accepts print content either as literal HTML in the `html`
-//     query param (URL encoded, embedded directly in the intent) or as a
-//     `url` param it fetches itself. The test page uses `html` since it's
-//     tiny; real receipts use `url` instead — see printViaPassPRNT below
-//     for why (short version: a real receipt's HTML is long enough to
-//     push the Android intent URI past a length where launching PassPRNT
-//     silently fails).
-//   - `back` is the URL PassPRNT returns to after printing (this is what
-//     sends the tablet back to the POS browser tab — plan step 6).
-//   - Path is always v1/print/nopreview (preview screen disabled).
-//   - On Android, Chrome will not navigate a plain `starpassprnt://` link
-//     reliably — it needs the `intent://...#Intent;...;end` wrapper
-//     (see https://developer.chrome.com/docs/android/intents). iOS Safari
-//     and desktop browsers (for bench-testing the HTML) can use the plain
-//     scheme directly.
-//   - Printer selection (which Bluetooth printer, paper width) lives inside
-//     the PassPRNT app itself, configured once during setup — this transport
-//     deliberately does not pass a `size` query override, so it always uses
-//     whatever printer profile the person configured in the app.
-//
-// CAVEAT: unlike the other transports, there is no callback that tells the
-// web page printing actually succeeded or failed — `back` just means
-// PassPRNT handed control back to the browser, not that paper came out. If
-// PassPRNT isn't installed, or no printer is configured inside it, Chrome's
-// "Open with" resolution can silently do nothing. Worth a real test print
-// (see printTestPageViaPassPRNT) before relying on this for live sales.
-
 import type { PaperWidth, ReceiptData } from './escpos'
 
 const PASSPRNT_ANDROID_PACKAGE = 'jp.star_m.passprnt'
@@ -174,7 +134,7 @@ function buildReceiptHtml(data: ReceiptData, width: PaperWidth): string {
   ${orderNoteHtml}
   <hr />
   <div class="center">${escapeHtml(data.dateStr)}, ${escapeHtml(data.timeStr)}</div>
-  <div class="center">Receipt: ${escapeHtml(data.orderId)}</div>
+  <div class="center">Order: ${escapeHtml(data.orderId)}</div>
   <br />
   <div class="center bold">${escapeHtml(data.footerLine1 ?? 'Thank you for shopping with us!')}</div>
   ${data.footerLine2 ? `<div class="center">${escapeHtml(data.footerLine2)}</div>` : ''}
