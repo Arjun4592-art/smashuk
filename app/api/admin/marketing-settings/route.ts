@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuthHeader } from '@/lib/api/admin-auth'
 import { invalidateFacebookCapiCache } from '@/lib/api/facebook-capi'
+import { getMarketingEnv, pick } from '@/lib/api/marketing-env'
 
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
@@ -62,22 +63,29 @@ export async function GET(req: NextRequest) {
       )
     }
     const meta = store.metadata ?? {}
+    const e = getMarketingEnv()
     return NextResponse.json({
       storeId: store.id,
       marketing: {
-        gaMeasurementId: meta.ga_measurement_id ?? '',
-        googleAdsId: meta.google_ads_id ?? '',
-        googleAdsConversionLabel: meta.google_ads_conversion_label ?? '',
-        facebookPixelId: meta.facebook_pixel_id ?? '',
-        facebookAccessToken: meta.facebook_access_token ?? '',
-        gtmId: meta.gtm_id ?? '',
-        tiktokPixelId: meta.tiktok_pixel_id ?? '',
-        pinterestTagId: meta.pinterest_tag_id ?? '',
-        snapchatPixelId: meta.snapchat_pixel_id ?? '',
-        microsoftUetId: meta.microsoft_uet_id ?? '',
-        linkedinPartnerId: meta.linkedin_partner_id ?? '',
-        clarityId: meta.clarity_id ?? '',
-        hotjarId: meta.hotjar_id ?? '',
+        gaMeasurementId: pick(e.gaMeasurementId, meta.ga_measurement_id),
+        googleAdsId: pick(e.googleAdsId, meta.google_ads_id),
+        googleAdsConversionLabel: pick(
+          e.googleAdsConversionLabel,
+          meta.google_ads_conversion_label,
+        ),
+        facebookPixelId: pick(e.facebookPixelId, meta.facebook_pixel_id),
+        facebookAccessToken: pick(
+          e.facebookAccessToken,
+          meta.facebook_access_token,
+        ),
+        gtmId: pick(e.gtmId, meta.gtm_id),
+        tiktokPixelId: pick(e.tiktokPixelId, meta.tiktok_pixel_id),
+        pinterestTagId: pick(e.pinterestTagId, meta.pinterest_tag_id),
+        snapchatPixelId: pick(e.snapchatPixelId, meta.snapchat_pixel_id),
+        microsoftUetId: pick(e.microsoftUetId, meta.microsoft_uet_id),
+        linkedinPartnerId: pick(e.linkedinPartnerId, meta.linkedin_partner_id),
+        clarityId: pick(e.clarityId, meta.clarity_id),
+        hotjarId: pick(e.hotjarId, meta.hotjar_id),
         trackingEnabled: meta.tracking_enabled !== false,
       },
     })

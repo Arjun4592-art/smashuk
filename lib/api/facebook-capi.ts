@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import { medusaServiceFetch } from './medusa-service-token'
+import { getMarketingEnv, pick } from './marketing-env'
 
 const GRAPH_API_VERSION = 'v21.0'
 
@@ -71,8 +72,9 @@ async function getFacebookSettings(): Promise<{
     if (!res.ok) throw new Error(`Medusa stores error: ${res.status}`)
     const { stores } = await res.json()
     const meta = stores?.[0]?.metadata ?? {}
-    const pixelId = meta.facebook_pixel_id?.trim()
-    const accessToken = meta.facebook_access_token?.trim()
+    const e = getMarketingEnv()
+    const pixelId = pick(e.facebookPixelId, meta.facebook_pixel_id)
+    const accessToken = pick(e.facebookAccessToken, meta.facebook_access_token)
     if (!pixelId || !accessToken) {
       cachedFbSettings = null
       return null
