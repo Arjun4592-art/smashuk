@@ -1,7 +1,4 @@
-// Shared (client + server safe) types, defaults and sanitiser for the
-// dashboard-managed website menu. The saved copy lives in Medusa store
-// metadata under `megaMenu`; if nothing is saved, the hardcoded defaults in
-// lib/mega-menu-data.ts are used, so the site never ends up with an empty menu.
+
 import { MEGA_MENUS } from '@/lib/mega-menu-data'
 
 export interface MegaMenuLink {
@@ -48,6 +45,11 @@ export const DEFAULT_NAV_LINKS: NavLinkEntry[] = [
     label: 'Sale 🔥',
     href: '/shop?badge=SALE',
     highlight: true,
+    visible: true,
+  },
+  {
+    label: 'Mail-in Stringing',
+    href: '/local-store/stringing/mail-in',
     visible: true,
   },
   { label: 'Gift Cards', href: '/gift-cards', visible: true },

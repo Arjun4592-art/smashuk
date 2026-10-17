@@ -410,6 +410,10 @@ export const MEGA_MENUS = {
             href: '/local-store/stringing',
           },
           {
+            label: 'Mail-in Stringing',
+            href: '/local-store/stringing/mail-in',
+          },
+          {
             label: 'Racket Trial Service',
             href: '/local-store/racket-demo',
           },
@@ -418,9 +422,9 @@ export const MEGA_MENUS = {
             href: '/local-store',
           },
           {
-            label: "Padel Store",
-            href:"/local-store/padel-store"
-          }
+            label: 'Padel Store',
+            href: '/local-store/padel-store',
+          },
         ],
       },
       {

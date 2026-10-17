@@ -203,9 +203,9 @@ export default async function Footer() {
 
       {}
       <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14'>
-        <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-10'>
+        <div className='grid grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-10 sm:gap-10'>
           {}
-          <div className='lg:col-span-1'>
+          <div className='col-span-2 lg:col-span-1'>
             {}
             <Link
               href='/'
@@ -282,11 +282,11 @@ export default async function Footer() {
           </div>
 
           {}
-          <div>
+          <div className='col-span-2 lg:col-span-1'>
             <h4 className='font-montserrat font-black text-[11px] uppercase tracking-[0.15em] text-white/40 mb-5'>
               Partnership Programmes
             </h4>
-            <ul className='space-y-3'>
+            <ul className='grid grid-cols-2 gap-x-6 gap-y-3 lg:grid-cols-1'>
               {PARTNERSHIP_LINKS.map((link) => (
                 <li key={link.href}>
                   <Link
@@ -302,7 +302,7 @@ export default async function Footer() {
           </div>
 
           {}
-          <div>
+          <div className='col-span-2 lg:col-span-1'>
             <h4 className='font-montserrat font-black text-[11px] uppercase tracking-[0.15em] text-white/40 mb-5'>
               Contact Us
             </h4>
