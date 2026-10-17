@@ -1,5 +1,4 @@
 import Link from 'next/link'
-import { SITE_NAME } from '@/lib/constants'
 import {
   BADMINTON_TENSIONS as TENSIONS,
   BADMINTON_STRING_BRANDS as STRING_BRANDS,
@@ -7,7 +6,7 @@ import {
 import Accordion from '@/components/website/local-store/Accordion'
 import StringingTimeline from '@/components/website/StringingTimeline'
 export const metadata = {
-  title: `Badminton Racket Stringing — Tension Guide & Prices | ${SITE_NAME}`,
+  title: `Badminton Racket Stringing — Tension Guide & Prices`,
   description:
     'Professional badminton racket stringing from £16. Tension advice for beginner to advanced players, popular string types in stock, 24-hour or 40-minute express turnaround.',
   keywords:

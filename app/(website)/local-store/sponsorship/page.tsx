@@ -1,52 +1,98 @@
-import Link from 'next/link';
-import { SITE_NAME } from '@/lib/constants';
+import Link from 'next/link'
 export const metadata = {
-  title: `Sponsorship Programme | ${SITE_NAME}`,
-  description: 'We support promising athletes, coaches and clubs across badminton, tennis, squash and padel with equipment support and discounts.',
-  keywords: 'racket sports sponsorship, athlete sponsorship uk, badminton tennis squash club sponsorship'
-};
-const TIERS = [{
-  icon: '🌱',
-  title: 'Emerging Talent',
-  desc: 'For juniors and up-and-coming players competing regionally — equipment discounts and priority stringing.',
-  items: ['Regional-level juniors', 'Equipment discounts', 'Priority stringing']
-}, {
-  icon: '🥇',
-  title: 'Competitive Athlete',
-  desc: 'For players competing at national level — deeper discounts, demo access, and event support.',
-  items: ['National-level players', 'Deeper equipment discounts', 'Demo access & event support']
-}, {
-  icon: '🏟️',
-  title: 'Club & Team Sponsorship',
-  desc: 'For clubs and teams looking for an equipment partner — kit support, discounts for members, and event sponsorship.',
-  items: ['Clubs & teams', 'Kit support', 'Member discounts & event sponsorship']
-}, {
-  icon: '🎯',
-  title: 'Coach Support',
-  desc: "For coaches running sessions or academies — equipment support for the players you're developing.",
-  items: ['Coaches running sessions or academies', 'Equipment support for your players']
-}];
-function Eyebrow({
-  children
-}: {
-  children: React.ReactNode;
-}) {
-  return <span className='inline-block font-montserrat text-[10px] font-bold tracking-[0.2em] uppercase text-[#E8553A] bg-[#E8553A]/8 px-3 py-1 rounded-full mb-4'>
+  title: `Sponsorship Programme`,
+  description:
+    'We support promising athletes, coaches and clubs across badminton, tennis, squash and padel with equipment support and discounts.',
+  keywords:
+    'racket sports sponsorship, athlete sponsorship uk, badminton tennis squash club sponsorship',
+}
+const TIERS = [
+  {
+    icon: '🌱',
+    title: 'Emerging Talent',
+    desc: 'For juniors and up-and-coming players competing regionally — equipment discounts and priority stringing.',
+    items: [
+      'Regional-level juniors',
+      'Equipment discounts',
+      'Priority stringing',
+    ],
+  },
+  {
+    icon: '🥇',
+    title: 'Competitive Athlete',
+    desc: 'For players competing at national level — deeper discounts, demo access, and event support.',
+    items: [
+      'National-level players',
+      'Deeper equipment discounts',
+      'Demo access & event support',
+    ],
+  },
+  {
+    icon: '🏟️',
+    title: 'Club & Team Sponsorship',
+    desc: 'For clubs and teams looking for an equipment partner — kit support, discounts for members, and event sponsorship.',
+    items: [
+      'Clubs & teams',
+      'Kit support',
+      'Member discounts & event sponsorship',
+    ],
+  },
+  {
+    icon: '🎯',
+    title: 'Coach Support',
+    desc: "For coaches running sessions or academies — equipment support for the players you're developing.",
+    items: [
+      'Coaches running sessions or academies',
+      'Equipment support for your players',
+    ],
+  },
+]
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span className='inline-block font-montserrat text-[10px] font-bold tracking-[0.2em] uppercase text-[#E8553A] bg-[#E8553A]/8 px-3 py-1 rounded-full mb-4'>
       {children}
-    </span>;
+    </span>
+  )
 }
 function GridTexture() {
-  return <svg className='absolute inset-0 w-full h-full opacity-[0.06]' preserveAspectRatio='none' xmlns='http://www.w3.org/2000/svg'>
+  return (
+    <svg
+      className='absolute inset-0 w-full h-full opacity-[0.06]'
+      preserveAspectRatio='none'
+      xmlns='http://www.w3.org/2000/svg'
+    >
       {Array.from({
-      length: 20
-    }).map((_, i) => <line key={'v' + i} x1={`${i * 5.5}%`} y1='0' x2={`${i * 5.5 + 3}%`} y2='100%' stroke='white' strokeWidth='1' />)}
+        length: 20,
+      }).map((_, i) => (
+        <line
+          key={'v' + i}
+          x1={`${i * 5.5}%`}
+          y1='0'
+          x2={`${i * 5.5 + 3}%`}
+          y2='100%'
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
       {Array.from({
-      length: 12
-    }).map((_, i) => <line key={'h' + i} x1='0' y1={`${i * 9}%`} x2='100%' y2={`${i * 9 + 2}%`} stroke='white' strokeWidth='1' />)}
-    </svg>;
+        length: 12,
+      }).map((_, i) => (
+        <line
+          key={'h' + i}
+          x1='0'
+          y1={`${i * 9}%`}
+          x2='100%'
+          y2={`${i * 9 + 2}%`}
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
+    </svg>
+  )
 }
 export default function SponsorshipPage() {
-  return <div className='bg-[#F5F3EF] min-h-screen'>
+  return (
+    <div className='bg-[#F5F3EF] min-h-screen'>
       {}
       <section className='reveal relative bg-[#0A1F44] overflow-hidden'>
         <GridTexture />
@@ -75,7 +121,11 @@ export default function SponsorshipPage() {
           Who We Support
         </h2>
         <div className='grid md:grid-cols-2 gap-6'>
-          {TIERS.map(t => <div key={t.title} className='bg-white border border-[#0A1F44]/8 rounded-2xl p-8'>
+          {TIERS.map((t) => (
+            <div
+              key={t.title}
+              className='bg-white border border-[#0A1F44]/8 rounded-2xl p-8'
+            >
               <span className='text-3xl block mb-3'>{t.icon}</span>
               <h3 className='font-montserrat font-black text-[#0A1F44] text-xl mb-2'>
                 {t.title}
@@ -84,12 +134,15 @@ export default function SponsorshipPage() {
                 {t.desc}
               </p>
               <ul className='space-y-1.5'>
-                {t.items.map(item => <li key={item} className='text-gray-500 text-xs flex gap-2'>
+                {t.items.map((item) => (
+                  <li key={item} className='text-gray-500 text-xs flex gap-2'>
                     <span className='text-[#E8553A]'>•</span>
                     {item}
-                  </li>)}
+                  </li>
+                ))}
               </ul>
-            </div>)}
+            </div>
+          ))}
         </div>
       </section>
 
@@ -103,10 +156,14 @@ export default function SponsorshipPage() {
             Tell us about yourself or your club — playing level, competitions
             entered, and what kind of support you&apos;re looking for.
           </p>
-          <Link href='/contact' className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'>
+          <Link
+            href='/contact'
+            className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-7 py-3.5 rounded-full text-sm transition-colors'
+          >
             Get In Touch
           </Link>
         </div>
       </section>
-    </div>;
+    </div>
+  )
 }

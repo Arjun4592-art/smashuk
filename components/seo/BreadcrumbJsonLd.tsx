@@ -1,5 +1,10 @@
-export default function Page() {
-  return <div className="min-h-screen bg-[#F6F6F7] flex items-center justify-center">
-      <p className="text-[#6D7175] text-sm">Coming soon...</p>
-    </div>;
+import JsonLd from '@/components/seo/JsonLd'
+import { generateBreadcrumbSchema } from '@/lib/seo'
+
+export default function BreadcrumbJsonLd({
+  items,
+}: {
+  items: Array<{ name: string; path: string }>
+}) {
+  return <JsonLd data={generateBreadcrumbSchema(items)} />
 }

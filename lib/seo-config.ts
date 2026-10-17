@@ -1,11 +1,10 @@
 import 'server-only'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
-import { SITE_URL } from '@/lib/constants'
+import { SITE_URL, FREE_SHIPPING_THRESHOLD } from '@/lib/constants'
 export const DEFAULT_SEO: Record<string, any> = {
   home: {
     metaTitle: 'Smash Racket Pro — Premium Sports Equipment UK',
-    metaDescription:
-      'Shop premium sports equipment for badminton, squash, tennis, padel and more. Free UK delivery over £50.',
+    metaDescription: `Shop premium sports equipment for badminton, squash, tennis, padel and more. Free UK delivery over £${FREE_SHIPPING_THRESHOLD}.`,
     metaKeywords:
       'sports equipment uk, badminton rackets, squash rackets, sports shop uk, smash racket pro',
     ogImage: '',
@@ -14,8 +13,7 @@ export const DEFAULT_SEO: Record<string, any> = {
   },
   shop: {
     metaTitle: 'Buy Sports Equipment Online — Smash Racket Pro UK',
-    metaDescription:
-      'Browse premium sports products across all categories. Best prices with free delivery over £50.',
+    metaDescription: `Browse premium racket sports products across all categories. Free UK delivery over £${FREE_SHIPPING_THRESHOLD}.`,
     metaKeywords:
       'buy sports online uk, sports equipment shop, smash racket pro',
     ogImage: '',

@@ -1,5 +1,4 @@
 import Link from 'next/link'
-import { SITE_NAME } from '@/lib/constants'
 import Accordion from '@/components/website/local-store/Accordion'
 import MailInReviewsCarousel from '@/components/website/local-store/MailInReviewsCarousel'
 import {
@@ -9,7 +8,7 @@ import {
 } from '@/lib/mail-in'
 
 export const metadata = {
-  title: `Mail-In Racket Stringing — Badminton & Tennis, UK-wide | ${SITE_NAME}`,
+  title: `Mail-In Racket Stringing — Badminton & Tennis, UK-wide`,
   description:
     'Post your badminton, tennis or squash rackets to Smash Racket Pro. Professional stringing, tracked delivery, about 2 working days turnaround and a flat round-trip shipping fee per box.',
   keywords:

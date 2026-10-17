@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { SITE_NAME } from '@/lib/constants'
 
 export const metadata: Metadata = {
-  title: `We'll be right back | ${SITE_NAME}`,
+  title: `We'll be right back`,
   robots: { index: false, follow: false },
 }
 

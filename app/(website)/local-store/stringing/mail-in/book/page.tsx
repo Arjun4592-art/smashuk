@@ -1,11 +1,10 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { SITE_NAME } from '@/lib/constants'
 import { loadMailInBookingData } from '@/lib/mail-in-server'
 import MailInBookingClient from './MailInBookingClient'
 
 export const metadata: Metadata = {
-  title: `Book Mail-In Stringing | ${SITE_NAME}`,
+  title: `Book Mail-In Stringing`,
   description:
     'Book mail-in badminton, tennis or squash racket stringing. Choose your string and tension, see the delivery price instantly and post your rackets to Smash Racket Pro.',
 }

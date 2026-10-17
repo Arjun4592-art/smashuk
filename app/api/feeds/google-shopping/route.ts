@@ -14,14 +14,6 @@ const STORE_HEADERS = {
 const PAGE_SIZE = 100
 const MAX_PAGES = 50 // safety cap: 5,000 products, matches app/sitemap.ts
 
-// Same field-projection gotcha as STORE_PRODUCT_FIELDS in lib/api/store.ts:
-// Medusa's inventory-availability resolver needs `manage_inventory` present
-// in the projection (even though nothing here reads it directly) for
-// `inventory_quantity` to resolve at all, and `*variants.calculated_price`
-// must be the FIRST field when combined with inventory fields in the same
-// list. Without `+variants.inventory_quantity,+variants.manage_inventory`
-// here, every variant's inventory_quantity comes back null/0 — which is
-// exactly why this feed showed EVERY product as "out of stock".
 const FEED_FIELDS =
   '*variants.calculated_price,id,title,description,handle,thumbnail,*images,*variants,*variants.prices,+variants.inventory_quantity,+variants.manage_inventory,+metadata,*categories'
 
@@ -84,6 +76,23 @@ async function fetchAllProducts(): Promise<any[]> {
   return products.filter((p) => !isHiddenFromStorefront(p))
 }
 
+// A GTIN with a bad check digit gets the whole offer disapproved in Merchant
+// Center. Only send it when it is structurally valid (GTIN-8/12/13/14).
+function validGtin(raw: unknown): string | undefined {
+  const digits = String(raw ?? '').replace(/[\s-]/g, '')
+  if (!/^\d+$/.test(digits) || ![8, 12, 13, 14].includes(digits.length)) {
+    return undefined
+  }
+  const body = digits.slice(0, -1)
+  const check = Number(digits.slice(-1))
+  let sum = 0
+  for (let i = 0; i < body.length; i++) {
+    const d = Number(body[body.length - 1 - i])
+    sum += i % 2 === 0 ? d * 3 : d
+  }
+  return (10 - (sum % 10)) % 10 === check ? digits : undefined
+}
+
 // Products NOT sold in the physical store must opt out of the local marketing
 // methods, otherwise Merchant Center reports them as "Missing local inventory
 // data". `storeProductIds` is null when the Store channel couldn't be read; in
@@ -117,10 +126,25 @@ function buildItemXml(
     variant.manage_inventory === false || (variant.inventory_quantity ?? 0) > 0
       ? 'in stock'
       : 'out of stock'
-  const image = product.images?.[0]?.url ?? product.thumbnail ?? ''
+  const imageUrls: string[] = (product.images ?? [])
+    .map((i: any) => i?.url)
+    .filter(Boolean)
+  const image = imageUrls[0] ?? product.thumbnail ?? ''
+  const extraImages = imageUrls.slice(1, 11)
+  // Variants of one product must share item_group_id, otherwise Google treats
+  // every size/colour as a separate product. Keeps the legacy Shopify group
+  // id where it was backfilled (same scheme as googleOfferId).
+  const shopifyProductId = variant.metadata?.shopify_product_id
+  const itemGroupId = shopifyProductId
+    ? `shopify_GB_${shopifyProductId}`
+    : product.id
+  // Optional per-product override. Must be an exact Google taxonomy value
+  // (id or full path), e.g. set metadata.google_product_category in Medusa.
+  const googleCategory = product.metadata?.google_product_category
   const link = `${SITE_URL}/shop/${product.handle}`
   const brand = product.metadata?.brand || SITE_NAME
-  const gtin = variant.ean || variant.barcode || undefined
+  const gtin = validGtin(variant.ean) ?? validGtin(variant.barcode)
+  const mpn = variant.sku || undefined
   const title =
     variant.title && variant.title !== 'Default'
       ? `${product.title} - ${variant.title}`
@@ -132,7 +156,14 @@ function buildItemXml(
     `<title>${xmlEscape(title)}</title>`,
     `<description>${xmlEscape(decodeHtmlEntities((product.description ?? '').replace(/<[^>]*>/g, '')).slice(0, 5000))}</description>`,
     `<link>${xmlEscape(link)}</link>`,
-    `<g:image_link>${xmlEscape(image)}</g:image_link>`,
+    image ? `<g:image_link>${xmlEscape(image)}</g:image_link>` : '',
+    ...extraImages.map(
+      (u) => `<g:additional_image_link>${xmlEscape(u)}</g:additional_image_link>`,
+    ),
+    `<g:item_group_id>${xmlEscape(String(itemGroupId))}</g:item_group_id>`,
+    googleCategory
+      ? `<g:google_product_category>${xmlEscape(String(googleCategory))}</g:google_product_category>`
+      : '',
     `<g:availability>${availability}</g:availability>`,
     `<g:price>${regularAmount.toFixed(2)} ${currency}</g:price>`,
     isOnSale
@@ -140,10 +171,11 @@ function buildItemXml(
       : '',
     `<g:brand>${xmlEscape(brand)}</g:brand>`,
     `<g:condition>new</g:condition>`,
-    gtin
-      ? `<g:gtin>${xmlEscape(gtin)}</g:gtin>`
-      : `<g:identifier_exists>no</g:identifier_exists>`,
-    variant.sku ? `<g:mpn>${xmlEscape(variant.sku)}</g:mpn>` : '',
+    gtin ? `<g:gtin>${xmlEscape(gtin)}</g:gtin>` : '',
+    mpn ? `<g:mpn>${xmlEscape(mpn)}</g:mpn>` : '',
+    // Only declare "no identifiers" when there really is neither a GTIN nor an
+    // MPN; it used to be sent together with an MPN, which contradicts itself.
+    !gtin && !mpn ? `<g:identifier_exists>no</g:identifier_exists>` : '',
     storeProductIds && !storeProductIds.has(product.id)
       ? '<g:excluded_destination>free_local_listings</g:excluded_destination>\n<g:excluded_destination>local_inventory_ads</g:excluded_destination>'
       : '',

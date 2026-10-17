@@ -1,6 +1,11 @@
 import Link from 'next/link'
 import { SITE_NAME } from '@/lib/constants'
-import { generateStaticMetadata } from '@/lib/seo'
+import {
+  generateStaticMetadata,
+  generateLocalBusinessSchema,
+  generateBreadcrumbSchema,
+  safeJsonLd,
+} from '@/lib/seo'
 import { getPublicStoreContact } from '@/lib/store-contact'
 import { getBlogPosts } from '@/lib/blog-posts'
 import BrandsBar from '@/components/website/BrandsBar'
@@ -149,7 +154,32 @@ export default async function LocalStorePage() {
   const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${contact.name}, ${fullAddress}`)}`
   return (
     <div className='bg-[#F5F3EF] min-h-screen'>
-      {}
+      <script
+        type='application/ld+json'
+        dangerouslySetInnerHTML={{
+          __html: safeJsonLd(
+            generateLocalBusinessSchema({
+              phone: contact.phone,
+              email: contact.email,
+              line1: contact.address.line1,
+              city: contact.address.city,
+              region: contact.address.state,
+              postcode: contact.address.pincode,
+            }),
+          ),
+        }}
+      />
+      <script
+        type='application/ld+json'
+        dangerouslySetInnerHTML={{
+          __html: safeJsonLd(
+            generateBreadcrumbSchema([
+              { name: 'Home', path: '/' },
+              { name: 'Local Store', path: '/local-store' },
+            ]),
+          ),
+        }}
+      />
       <section className='reveal relative bg-[#0A1F44] overflow-hidden'>
         <GridTexture />
         <div className='relative max-w-5xl mx-auto px-4 md:px-6 pt-16 pb-20'>

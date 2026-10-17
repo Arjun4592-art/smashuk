@@ -3,8 +3,16 @@ import Link from 'next/link'
 import sanitizeHtml from 'sanitize-html'
 import { getBlogPost, getBlogPosts } from '@/lib/blog-posts'
 import { SPORTS } from '@/lib/blog-sports'
-import { SITE_NAME, SITE_URL } from '@/lib/constants'
-import { generateBlogPostSchema, safeJsonLd } from '@/lib/seo'
+import { SITE_NAME, SITE_URL, SITE_LOCALE } from '@/lib/constants'
+import type { Metadata } from 'next'
+import {
+  generateBlogPostSchema,
+  generateBreadcrumbSchema,
+  safeJsonLd,
+  brandedTitle,
+  metaDescriptionFrom,
+  pickOgImage,
+} from '@/lib/seo'
 import NewsletterForm from '@/components/website/NewsletterForm'
 import ShareRow from '@/components/website/blog/ShareRow'
 import BlogProductEmbedHydrator from '@/components/website/blog/BlogProductEmbedHydrator'
@@ -81,16 +89,40 @@ export async function generateMetadata({
   params: Promise<{
     slug: string
   }>
-}) {
+}): Promise<Metadata> {
   const { slug } = await params
   const post = await getBlogPost(slug)
   if (!post)
     return {
-      title: SITE_NAME,
+      title: 'Post not found',
+      robots: { index: false, follow: false },
     }
+  const title = brandedTitle(post.seoTitle || post.title)
+  const description = post.seoDescription || metaDescriptionFrom(post.excerpt)
+  const url = `${SITE_URL}/blog/${post.slug}`
+  const image = pickOgImage(post.coverImage)
   return {
-    title: post.seoTitle || `${post.title} | ${SITE_NAME}`,
-    description: post.seoDescription || post.excerpt,
+    title: { absolute: title },
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      type: 'article',
+      title,
+      description,
+      url,
+      siteName: SITE_NAME,
+      locale: SITE_LOCALE,
+      publishedTime: post.publishedAt,
+      section: post.category,
+      authors: post.author ? [post.author] : undefined,
+      images: [{ url: image, alt: post.title }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [image],
+    },
   }
 }
 export default async function BlogPostPage({
@@ -123,6 +155,18 @@ export default async function BlogPostPage({
         type='application/ld+json'
         dangerouslySetInnerHTML={{
           __html: safeJsonLd(generateBlogPostSchema(post)),
+        }}
+      />
+      <script
+        type='application/ld+json'
+        dangerouslySetInnerHTML={{
+          __html: safeJsonLd(
+            generateBreadcrumbSchema([
+              { name: 'Home', path: '/' },
+              { name: 'Blog', path: '/blog' },
+              { name: post.title, path: `/blog/${post.slug}` },
+            ]),
+          ),
         }}
       />
 

@@ -90,7 +90,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const override = PATH_OVERRIDES[p.path]
     return {
       url: p.path === '/' ? SITE_URL : `${SITE_URL}${p.path}`,
-      lastModified: new Date(),
       changeFrequency: override?.changeFrequency ?? DEFAULT_FREQUENCY,
       priority: override?.priority ?? DEFAULT_PRIORITY,
     }
@@ -99,7 +98,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const collectionPages: MetadataRoute.Sitemap = getAllCollectionHandles().map(
     (handle) => ({
       url: `${SITE_URL}/collections/${handle}`,
-      lastModified: new Date(),
       changeFrequency: 'daily',
       priority: 0.75,
     }),

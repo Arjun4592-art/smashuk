@@ -7,9 +7,15 @@ import {
 } from '@/lib/api/store'
 import ProductDetailClient from './ProductDetailClient'
 import type { Metadata } from 'next'
-import { SITE_NAME, SITE_URL } from '@/lib/constants'
-import { generateProductSchema, safeJsonLd } from '@/lib/seo'
-import { stripHtml } from '@/lib/utils'
+import { SITE_NAME, SITE_URL, SITE_LOCALE } from '@/lib/constants'
+import {
+  generateProductSchema,
+  generateBreadcrumbSchema,
+  safeJsonLd,
+  brandedTitle,
+  metaDescriptionFrom,
+  pickOgImage,
+} from '@/lib/seo'
 export const revalidate = 3600
 interface Props {
   params: Promise<{
@@ -22,24 +28,29 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!raw)
     return {
       title: 'Product Not Found',
+      robots: { index: false, follow: false },
     }
   const product = normalizeProduct(raw)
-  const plainDescription = stripHtml(product.description ?? '')
   // Admin-set overrides from the dashboard's SEO tab (raw.metadata, not the
   // normalized product — normalizeProduct doesn't carry these fields).
   const seo = raw.metadata ?? {}
-  const title = seo.metaTitle || `${product.name} | ${SITE_NAME}`
-  const description = seo.metaDescription || plainDescription
-  const ogImage = seo.ogImage || product.images[0]
+  const title = brandedTitle(seo.metaTitle || product.name)
+  // Meta descriptions are plain text, ~155 chars. The product description can
+  // be thousands of characters of HTML, so never use it raw.
+  const description = seo.metaDescription
+    ? metaDescriptionFrom(seo.metaDescription, 300)
+    : metaDescriptionFrom(product.description)
+  const url = `${SITE_URL}/shop/${product.slug}`
+  const canonical = seo.canonical || url
+  // product.images falls back to '/placeholder.png' (a file that doesn't
+  // exist) when a product has no photos — pickOgImage skips it and falls
+  // back to the site-wide brand card instead of emitting a broken og:image.
+  const image = pickOgImage(seo.ogImage, ...product.images)
   return {
-    title,
+    title: { absolute: title },
     description,
     keywords: seo.metaKeywords || undefined,
-    alternates: seo.canonical
-      ? {
-          canonical: seo.canonical,
-        }
-      : undefined,
+    alternates: { canonical },
     robots: seo.noIndex
       ? {
           index: false,
@@ -47,16 +58,19 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         }
       : undefined,
     openGraph: {
-      title: seo.metaTitle || product.name,
+      type: 'website',
+      title,
       description,
-      images: [
-        {
-          url: ogImage,
-          width: 800,
-          height: 800,
-        },
-      ],
-      url: `${SITE_URL}/shop/${product.slug}`,
+      siteName: SITE_NAME,
+      locale: SITE_LOCALE,
+      images: [{ url: image, alt: product.name }],
+      url: canonical,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [image],
     },
   }
 }
@@ -97,6 +111,18 @@ export default async function ProductPage({ params }: Props) {
         type='application/ld+json'
         dangerouslySetInnerHTML={{
           __html: safeJsonLd(generateProductSchema(product)),
+        }}
+      />
+      <script
+        type='application/ld+json'
+        dangerouslySetInnerHTML={{
+          __html: safeJsonLd(
+            generateBreadcrumbSchema([
+              { name: 'Home', path: '/' },
+              { name: 'Shop', path: '/shop' },
+              { name: product.name, path: `/shop/${product.slug}` },
+            ]),
+          ),
         }}
       />
       <ProductDetailClient

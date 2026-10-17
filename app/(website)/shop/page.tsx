@@ -1,8 +1,16 @@
 import { Suspense } from 'react'
-import { generateStaticMetadata } from '@/lib/seo'
+import { generateShopMetadata } from '@/lib/seo'
 import ShopClient from '@/app/(website)/shop/ShopClient'
 import ShopHeader from '@/app/(website)/shop/ShopHeader'
-export const generateMetadata = () => generateStaticMetadata('shop')
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    [key: string]: string | string[] | undefined
+  }>
+}) {
+  return generateShopMetadata(await searchParams)
+}
 export const revalidate = 3600
 export default async function ShopPage({
   searchParams,

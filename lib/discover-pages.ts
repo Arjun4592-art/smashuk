@@ -2,20 +2,6 @@ import 'server-only'
 import fs from 'fs'
 import path from 'path'
 
-/**
- * Auto-discovers every static route under app/(website) so it can be
- * managed from the SEO dashboard without any manual registration step.
- *
- * Add a new page anywhere under app/(website)/**\/page.tsx and it will
- * show up in the SEO dashboard's "Pages" tab on the next load — no need
- * to touch this file, lib/seo-config.ts, or the dashboard page.
- *
- * Excluded automatically:
- *  - dynamic segments, e.g. [slug], [handle], [id], [...rest]
- *    (those are per-item pages — products, blog posts, collections —
- *    and are already handled by their own dedicated tabs)
- *  - functional/account routes that don't need SEO (cart, checkout, etc.)
- */
 
 export interface DiscoveredPage {
   /** Stable key used to store/read this page's SEO data. */
@@ -35,10 +21,9 @@ const EXCLUDED_TOP_LEVEL = new Set([
   'orders',
   'profile',
   'wishlist',
+  'track',
 ])
 
-// Legacy keys that must stay exactly as-is for backwards compatibility with
-// SEO data already saved against them (before auto-discovery existed).
 const LEGACY_KEYS: Record<string, string> = {
   '': 'home',
   shop: 'shop',
@@ -87,8 +72,7 @@ function walk(dir: string, segments: string[], out: DiscoveredPage[]) {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const name = entry.name
-    // Skip dynamic segments ([slug], [handle], [...rest]) and private/group
-    // folders that aren't part of the URL (route groups like "(shop)").
+    
     if (name.startsWith('[')) continue
     if (segments.length === 0 && EXCLUDED_TOP_LEVEL.has(name)) continue
     const nextSegments = name.startsWith('(')

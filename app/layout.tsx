@@ -9,6 +9,7 @@ import {
   SITE_NAME,
   SITE_URL,
   SITE_OG_IMAGE,
+  SITE_LOCALE,
 } from '@/lib/constants'
 const inter = Inter({
   subsets: ['latin'],
@@ -42,7 +43,7 @@ export const metadata: Metadata = {
   creator: SITE_NAME,
   openGraph: {
     type: 'website',
-    locale: 'en_IN',
+    locale: SITE_LOCALE,
     url: SITE_URL,
     siteName: SITE_NAME,
     title: DEFAULT_SEO.title,
@@ -73,8 +74,17 @@ export const metadata: Metadata = {
       'max-snippet': -1,
     },
   },
-  verification: {
-    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION ?? '',
+  // Only emit the tag when a code is configured; '' produced an empty
+  // <meta name="google-site-verification" content="">.
+  verification: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION }
+    : undefined,
+  icons: {
+    icon: [
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: '/icons/icon-180.png',
   },
 }
 export default function RootLayout({
@@ -84,7 +94,7 @@ export default function RootLayout({
 }) {
   return (
     <html
-      lang='en'
+      lang='en-GB'
       className={`${inter.variable} ${poppins.variable} ${sora.variable}`}
       suppressHydrationWarning
     >

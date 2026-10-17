@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { SITE_NAME } from '@/lib/constants'
 
 export const metadata = {
-  title: `Manchester Padel Store | ${SITE_NAME}`,
+  title: `Manchester Padel Store`,
   description:
     "Manchester's premier padel tennis store offering a wide range of equipment, apparel, and accessories from top brands like Babolat, Head, Tecnifibre, and Adidas. Elevate your game with us!",
   keywords:

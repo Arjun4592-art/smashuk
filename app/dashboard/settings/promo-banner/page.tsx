@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { isValidHref } from '@/lib/hero-slides-shared'
+import { FREE_SHIPPING_THRESHOLD } from '@/lib/constants'
 import {
   Button,
   Field,
@@ -332,7 +333,8 @@ export default function PromoBannerSettingsPage() {
               <div className='space-y-3 rounded-lg border border-[#F1F2F3] bg-[#FAFAFA] p-3'>
                 <div className='rounded-lg bg-[#0A1F44] px-3.5 py-2.5'>
                   <p className='m-0 text-[11.5px] leading-snug text-white'>
-                    Free shipping on orders above £50 &nbsp;·&nbsp; Use code{' '}
+                    Free shipping on orders above £{FREE_SHIPPING_THRESHOLD}{' '}
+                    &nbsp;·&nbsp; Use code{' '}
                     <span className='font-bold text-[#E8553A]'>
                       {banner.code || 'SMASH10'}
                     </span>{' '}

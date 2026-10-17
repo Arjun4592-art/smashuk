@@ -1,3 +1,9 @@
+export const metadata = {
+  title: 'Racket Stringing Service — Badminton, Tennis & Squash',
+  description:
+    'Professional racket stringing in Manchester: badminton, tennis and squash, with 24-hour or 40-minute express turnaround, plus UK-wide mail-in stringing. Pick your sport for tension advice and prices.',
+  alternates: { canonical: '/local-store/stringing' },
+}
 const BOOKING_URL = 'https://smashuk-manchester.co.uk/CustomerStatus'
 const PRICING = [
   {

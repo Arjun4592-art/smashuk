@@ -5,7 +5,7 @@ import {
   SITE_NAME,
 } from '@/lib/constants'
 export const metadata = {
-  title: `Delivery Information | ${SITE_NAME}`,
+  title: `Delivery Information`,
 }
 export default function DeliveryPage() {
   return (

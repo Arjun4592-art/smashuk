@@ -1,51 +1,82 @@
-import Link from 'next/link';
-import { redirect } from 'next/navigation';
-import { getBlogPosts, getBlogCategories } from '@/lib/blog-posts';
-import { SPORTS } from '@/lib/blog-sports';
-import { SITE_NAME } from '@/lib/constants';
+import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import { getBlogPosts, getBlogCategories } from '@/lib/blog-posts'
+import { SPORTS } from '@/lib/blog-sports'
+import { SITE_NAME } from '@/lib/constants'
 export const metadata = {
-  title: `Blog | ${SITE_NAME}`
-};
-export const revalidate = 120;
-const PAGE_SIZE = 6;
-type Post = Awaited<ReturnType<typeof getBlogPosts>>[number];
-function Eyebrow({
-  children
-}: {
-  children: React.ReactNode;
-}) {
-  return <span className='inline-block font-montserrat text-[10px] font-bold tracking-[0.2em] uppercase text-[#E8553A] bg-[#E8553A]/8 px-3 py-1 rounded-full mb-4'>
+  title: 'Blog',
+  description:
+    'Racket sports guides, buying advice and stringing tips from the Smash Racket Pro team — badminton, tennis and padel.',
+  alternates: { canonical: '/blog' },
+}
+export const revalidate = 120
+const PAGE_SIZE = 6
+type Post = Awaited<ReturnType<typeof getBlogPosts>>[number]
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span className='inline-block font-montserrat text-[10px] font-bold tracking-[0.2em] uppercase text-[#E8553A] bg-[#E8553A]/8 px-3 py-1 rounded-full mb-4'>
       {children}
-    </span>;
+    </span>
+  )
 }
 function GridTexture() {
-  return <svg className='absolute inset-0 w-full h-full opacity-[0.06]' preserveAspectRatio='none' xmlns='http://www.w3.org/2000/svg'>
+  return (
+    <svg
+      className='absolute inset-0 w-full h-full opacity-[0.06]'
+      preserveAspectRatio='none'
+      xmlns='http://www.w3.org/2000/svg'
+    >
       {Array.from({
-      length: 20
-    }).map((_, i) => <line key={'v' + i} x1={`${i * 5.5}%`} y1='0' x2={`${i * 5.5 + 3}%`} y2='100%' stroke='white' strokeWidth='1' />)}
+        length: 20,
+      }).map((_, i) => (
+        <line
+          key={'v' + i}
+          x1={`${i * 5.5}%`}
+          y1='0'
+          x2={`${i * 5.5 + 3}%`}
+          y2='100%'
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
       {Array.from({
-      length: 12
-    }).map((_, i) => <line key={'h' + i} x1='0' y1={`${i * 9}%`} x2='100%' y2={`${i * 9 + 2}%`} stroke='white' strokeWidth='1' />)}
-    </svg>;
+        length: 12,
+      }).map((_, i) => (
+        <line
+          key={'h' + i}
+          x1='0'
+          y1={`${i * 9}%`}
+          x2='100%'
+          y2={`${i * 9 + 2}%`}
+          stroke='white'
+          strokeWidth='1'
+        />
+      ))}
+    </svg>
+  )
 }
 function formatDate(d: string) {
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '';
+  const date = new Date(d)
+  if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'short',
-    year: 'numeric'
-  });
+    year: 'numeric',
+  })
 }
-function FeaturedPost({
-  post
-}: {
-  post: Post;
-}) {
-  return <Link href={`/blog/${post.slug}`} className='ls-card group grid sm:grid-cols-2 gap-0 bg-white rounded-2xl border border-[#0A1F44]/8 overflow-hidden'>
+function FeaturedPost({ post }: { post: Post }) {
+  return (
+    <Link
+      href={`/blog/${post.slug}`}
+      className='ls-card group grid sm:grid-cols-2 gap-0 bg-white rounded-2xl border border-[#0A1F44]/8 overflow-hidden'
+    >
       <div className='ls-card-img-wrap aspect-[16/10] sm:aspect-auto bg-gray-100'>
         {}
-        <img src={post.coverImage} alt={post.title} className='w-full h-full object-cover' />
+        <img
+          src={post.coverImage}
+          alt={post.title}
+          className='w-full h-full object-cover'
+        />
       </div>
       <div className='p-6 sm:p-8 flex flex-col justify-center'>
         <p className='text-[10px] text-[#E8553A] font-bold font-montserrat uppercase tracking-wider mb-3'>
@@ -61,17 +92,22 @@ function FeaturedPost({
           Read The Full Guide →
         </span>
       </div>
-    </Link>;
+    </Link>
+  )
 }
-function PostCard({
-  post
-}: {
-  post: Post;
-}) {
-  return <Link href={`/blog/${post.slug}`} className='ls-card group block bg-white rounded-2xl border border-[#0A1F44]/8 overflow-hidden'>
+function PostCard({ post }: { post: Post }) {
+  return (
+    <Link
+      href={`/blog/${post.slug}`}
+      className='ls-card group block bg-white rounded-2xl border border-[#0A1F44]/8 overflow-hidden'
+    >
       <div className='ls-card-img-wrap aspect-[4/3] bg-gray-100'>
         {}
-        <img src={post.coverImage} alt={post.title} className='w-full h-full object-cover' />
+        <img
+          src={post.coverImage}
+          alt={post.title}
+          className='w-full h-full object-cover'
+        />
       </div>
       <div className='p-5'>
         <p className='text-[10px] text-[#E8553A] font-bold font-montserrat uppercase tracking-wider mb-2'>
@@ -87,43 +123,54 @@ function PostCard({
           Read Guide →
         </span>
       </div>
-    </Link>;
+    </Link>
+  )
 }
 export default async function BlogListPage({
-  searchParams
+  searchParams,
 }: {
   searchParams: Promise<{
-    category?: string;
-    page?: string;
-  }>;
+    category?: string
+    page?: string
+  }>
 }) {
-  const {
-    category,
-    page: pageParam
-  } = await searchParams;
-  const matchedSport = category ? SPORTS.find(s => s.name === category) : undefined;
-  if (matchedSport) redirect(`/blog/${matchedSport.slug}`);
-  const [categories, allPostsRaw] = await Promise.all([getBlogCategories(), getBlogPosts()]);
-  const allPosts = [...allPostsRaw].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
-  const active = category && categories.includes(category) ? category : 'All';
-  const isFiltered = active !== 'All';
-  const filteredPosts = isFiltered ? allPosts.filter(p => p.category === active) : allPosts;
-  const showFeatured = !isFiltered;
-  const featured = showFeatured ? filteredPosts[0] : undefined;
-  const gridSource = showFeatured ? filteredPosts.slice(1) : filteredPosts;
-  const totalPages = Math.max(1, Math.ceil(gridSource.length / PAGE_SIZE));
-  const page = Math.min(Math.max(1, Number(pageParam) || 1), totalPages);
-  const pagePosts = gridSource.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const otherCategories = categories.filter(c => c !== 'All' && !SPORTS.some(s => s.name === c));
+  const { category, page: pageParam } = await searchParams
+  const matchedSport = category
+    ? SPORTS.find((s) => s.name === category)
+    : undefined
+  if (matchedSport) redirect(`/blog/${matchedSport.slug}`)
+  const [categories, allPostsRaw] = await Promise.all([
+    getBlogCategories(),
+    getBlogPosts(),
+  ])
+  const allPosts = [...allPostsRaw].sort(
+    (a, b) =>
+      new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
+  )
+  const active = category && categories.includes(category) ? category : 'All'
+  const isFiltered = active !== 'All'
+  const filteredPosts = isFiltered
+    ? allPosts.filter((p) => p.category === active)
+    : allPosts
+  const showFeatured = !isFiltered
+  const featured = showFeatured ? filteredPosts[0] : undefined
+  const gridSource = showFeatured ? filteredPosts.slice(1) : filteredPosts
+  const totalPages = Math.max(1, Math.ceil(gridSource.length / PAGE_SIZE))
+  const page = Math.min(Math.max(1, Number(pageParam) || 1), totalPages)
+  const pagePosts = gridSource.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const otherCategories = categories.filter(
+    (c) => c !== 'All' && !SPORTS.some((s) => s.name === c),
+  )
   function pageHref(n: number) {
-    const params = new URLSearchParams();
-    if (isFiltered) params.set('category', active);
-    if (n > 1) params.set('page', String(n));
-    const qs = params.toString();
-    return qs ? `/blog?${qs}` : '/blog';
+    const params = new URLSearchParams()
+    if (isFiltered) params.set('category', active)
+    if (n > 1) params.set('page', String(n))
+    const qs = params.toString()
+    return qs ? `/blog?${qs}` : '/blog'
   }
-  const popular = allPosts.slice(0, 4);
-  return <div className='bg-[#F5F3EF] min-h-screen'>
+  const popular = allPosts.slice(0, 4)
+  return (
+    <div className='bg-[#F5F3EF] min-h-screen'>
       {}
       <section className='relative bg-[#0A1F44] overflow-hidden'>
         <GridTexture />
@@ -152,16 +199,31 @@ export default async function BlogListPage({
       {}
       <section className='bg-white border-b border-[#0A1F44]/8 sticky top-0 z-10'>
         <div className='max-w-6xl mx-auto px-4 md:px-6 py-4 flex flex-wrap gap-2 overflow-x-auto'>
-          <Link href='/blog' className={`px-4 py-1.5 rounded-full text-xs font-montserrat font-bold transition-colors whitespace-nowrap ${active === 'All' ? 'bg-[#E8553A] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+          <Link
+            href='/blog'
+            className={`px-4 py-1.5 rounded-full text-xs font-montserrat font-bold transition-colors whitespace-nowrap ${active === 'All' ? 'bg-[#E8553A] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+          >
             All
           </Link>
-          {SPORTS.map(s => <Link key={s.slug} href={`/blog/${s.slug}`} className='px-4 py-1.5 rounded-full text-xs font-montserrat font-bold transition-colors whitespace-nowrap bg-gray-100 text-gray-500 hover:bg-gray-200'>
+          {SPORTS.map((s) => (
+            <Link
+              key={s.slug}
+              href={`/blog/${s.slug}`}
+              className='px-4 py-1.5 rounded-full text-xs font-montserrat font-bold transition-colors whitespace-nowrap bg-gray-100 text-gray-500 hover:bg-gray-200'
+            >
               <span className='mr-1'>{s.icon}</span>
               {s.name}
-            </Link>)}
-          {otherCategories.map(cat => <Link key={cat} href={`/blog?category=${encodeURIComponent(cat)}`} className={`px-4 py-1.5 rounded-full text-xs font-montserrat font-bold transition-colors whitespace-nowrap ${active === cat ? 'bg-[#E8553A] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+            </Link>
+          ))}
+          {otherCategories.map((cat) => (
+            <Link
+              key={cat}
+              href={`/blog?category=${encodeURIComponent(cat)}`}
+              className={`px-4 py-1.5 rounded-full text-xs font-montserrat font-bold transition-colors whitespace-nowrap ${active === cat ? 'bg-[#E8553A] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+            >
               {cat}
-            </Link>)}
+            </Link>
+          ))}
         </div>
       </section>
 
@@ -174,38 +236,67 @@ export default async function BlogListPage({
               <h2 className='font-montserrat font-black text-[#0A1F44] text-2xl'>
                 {isFiltered ? `${active} Guides` : 'Latest Posts'}
               </h2>
-              {isFiltered && <Link href='/blog' className='bg-[#0A1F44]/5 hover:bg-[#0A1F44]/10 text-[#0A1F44] font-montserrat font-bold px-4 py-2 rounded-full text-xs transition-colors whitespace-nowrap'>
+              {isFiltered && (
+                <Link
+                  href='/blog'
+                  className='bg-[#0A1F44]/5 hover:bg-[#0A1F44]/10 text-[#0A1F44] font-montserrat font-bold px-4 py-2 rounded-full text-xs transition-colors whitespace-nowrap'
+                >
                   ← All Posts
-                </Link>}
+                </Link>
+              )}
             </div>
 
-            {filteredPosts.length === 0 ? <p className='text-gray-500 text-sm'>
+            {filteredPosts.length === 0 ? (
+              <p className='text-gray-500 text-sm'>
                 No {active.toLowerCase()} guides yet — check back soon.
-              </p> : <div className='flex flex-col gap-8'>
+              </p>
+            ) : (
+              <div className='flex flex-col gap-8'>
                 {featured && <FeaturedPost post={featured} />}
 
-                {pagePosts.length > 0 && <div className='grid sm:grid-cols-2 gap-6'>
-                    {pagePosts.map(post => <PostCard key={post.slug} post={post} />)}
-                  </div>}
-              </div>}
+                {pagePosts.length > 0 && (
+                  <div className='grid sm:grid-cols-2 gap-6'>
+                    {pagePosts.map((post) => (
+                      <PostCard key={post.slug} post={post} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {}
-            {totalPages > 1 && <div className='flex items-center justify-center gap-2 mt-10'>
-                <Link href={pageHref(Math.max(1, page - 1))} aria-disabled={page === 1} className={`px-4 py-2 rounded-full text-xs font-montserrat font-bold transition-colors ${page === 1 ? 'pointer-events-none opacity-30 bg-gray-100 text-gray-400' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+            {totalPages > 1 && (
+              <div className='flex items-center justify-center gap-2 mt-10'>
+                <Link
+                  href={pageHref(Math.max(1, page - 1))}
+                  aria-disabled={page === 1}
+                  className={`px-4 py-2 rounded-full text-xs font-montserrat font-bold transition-colors ${page === 1 ? 'pointer-events-none opacity-30 bg-gray-100 text-gray-400' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                >
                   ← Previous
                 </Link>
                 {Array.from({
-              length: totalPages
-            }).map((_, i) => {
-              const n = i + 1;
-              return <Link key={n} href={pageHref(n)} className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-montserrat font-bold transition-colors ${page === n ? 'bg-[#E8553A] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                  length: totalPages,
+                }).map((_, i) => {
+                  const n = i + 1
+                  return (
+                    <Link
+                      key={n}
+                      href={pageHref(n)}
+                      className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-montserrat font-bold transition-colors ${page === n ? 'bg-[#E8553A] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                    >
                       {n}
-                    </Link>;
-            })}
-                <Link href={pageHref(Math.min(totalPages, page + 1))} aria-disabled={page === totalPages} className={`px-4 py-2 rounded-full text-xs font-montserrat font-bold transition-colors ${page === totalPages ? 'pointer-events-none opacity-30 bg-gray-100 text-gray-400' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                    </Link>
+                  )
+                })}
+                <Link
+                  href={pageHref(Math.min(totalPages, page + 1))}
+                  aria-disabled={page === totalPages}
+                  className={`px-4 py-2 rounded-full text-xs font-montserrat font-bold transition-colors ${page === totalPages ? 'pointer-events-none opacity-30 bg-gray-100 text-gray-400' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                >
                   Next →
                 </Link>
-              </div>}
+              </div>
+            )}
           </div>
 
           {}
@@ -216,13 +307,22 @@ export default async function BlogListPage({
                 Popular Posts
               </h3>
               <div className='flex flex-col gap-4'>
-                {popular.map((post, i) => <Link key={post.slug} href={`/blog/${post.slug}`} className='group flex gap-3 items-center'>
+                {popular.map((post, i) => (
+                  <Link
+                    key={post.slug}
+                    href={`/blog/${post.slug}`}
+                    className='group flex gap-3 items-center'
+                  >
                     <span className='flex-shrink-0 w-5 h-5 rounded-full bg-[#E8553A] text-white text-[11px] font-montserrat font-black flex items-center justify-center'>
                       {i + 1}
                     </span>
                     <div className='flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden bg-gray-100'>
                       {}
-                      <img src={post.coverImage} alt={post.title} className='w-full h-full object-cover' />
+                      <img
+                        src={post.coverImage}
+                        alt={post.title}
+                        className='w-full h-full object-cover'
+                      />
                     </div>
                     <span>
                       <span className='block text-sm font-montserrat font-bold text-[#0A1F44] leading-snug group-hover:text-[#E8553A] transition-colors'>
@@ -232,7 +332,8 @@ export default async function BlogListPage({
                         {post.category} · {formatDate(post.publishedAt)}
                       </span>
                     </span>
-                  </Link>)}
+                  </Link>
+                ))}
               </div>
             </div>
 
@@ -242,13 +343,19 @@ export default async function BlogListPage({
                 Browse By Sport
               </h3>
               <div className='flex flex-col gap-2'>
-                {SPORTS.map(s => <Link key={s.slug} href={`/blog/${s.slug}`} className='flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-montserrat font-semibold bg-[#F5F3EF] text-[#0A1F44] hover:bg-[#0A1F44]/5 transition-colors'>
+                {SPORTS.map((s) => (
+                  <Link
+                    key={s.slug}
+                    href={`/blog/${s.slug}`}
+                    className='flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-montserrat font-semibold bg-[#F5F3EF] text-[#0A1F44] hover:bg-[#0A1F44]/5 transition-colors'
+                  >
                     <span>
                       <span className='mr-2'>{s.icon}</span>
                       {s.name}
                     </span>
                     <span>→</span>
-                  </Link>)}
+                  </Link>
+                ))}
               </div>
             </div>
 
@@ -263,12 +370,16 @@ export default async function BlogListPage({
                 share what we&rsquo;ve learned on court so you can pick
                 equipment that actually suits your game.
               </p>
-              <Link href='/contact' className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-5 py-2.5 rounded-full text-xs transition-colors'>
+              <Link
+                href='/contact'
+                className='inline-block bg-[#E8553A] hover:bg-[#D4441F] text-white font-montserrat font-bold px-5 py-2.5 rounded-full text-xs transition-colors'
+              >
                 Ask Us A Question
               </Link>
             </div>
           </aside>
         </div>
       </section>
-    </div>;
+    </div>
+  )
 }

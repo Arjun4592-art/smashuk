@@ -1,9 +1,11 @@
 export const SITE_NAME = 'Smash Racket Pro'
 export const SITE_DESCRIPTION =
-  'Premium sports equipment for every athlete. Shop football, cricket, basketball, tennis gear and more.'
+  'Premium racket sports equipment for every player. Shop badminton, tennis, padel and squash rackets, shoes, bags and accessories with fast UK delivery.'
+export const SITE_LOCALE = 'en_GB'
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://smashuk.co'
 export const SITE_LOGO = '/icons/logo.png'
 export const SITE_ICON = '/icons/icon-192.png'
+
 export const SITE_OG_IMAGE = '/icons/og-image.jpg'
 export const CONTACT_EMAIL = 'Sales@smashuk.co'
 export const CONTACT_PHONE = '0161 536 3594'
@@ -237,17 +239,16 @@ export const DASHBOARD_NAV = [
   },
 ] as const
 export const DEFAULT_SEO = {
-  title: `${SITE_NAME} — Premium Sports Equipment`,
+  title: `${SITE_NAME} — Premium Racket Sports Equipment UK`,
   description: SITE_DESCRIPTION,
   keywords: [
-    'sports equipment',
-    'football gear',
-    'cricket bat',
-    'basketball',
-    'tennis racket',
-    'running shoes',
+    'racket sports equipment uk',
+    'badminton rackets',
+    'tennis rackets',
+    'padel rackets',
+    'squash rackets',
+    'racket stringing manchester',
     'sports shop uk',
-    'racket sports store uk',
     'smash racket pro',
   ],
   ogImage: SITE_OG_IMAGE,

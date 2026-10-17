@@ -1,29 +1,11 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
-import {
-  SITE_NAME,
-  SITE_URL,
-  CONTACT_EMAIL,
-  CONTACT_PHONE,
-} from '@/lib/constants'
+import { CONTACT_EMAIL, CONTACT_PHONE } from '@/lib/constants'
+import { generateStaticMetadata } from '@/lib/seo'
 import { getAllCollections } from '@/lib/collections-data'
 
-export function generateMetadata(): Metadata {
-  const title = `Shop All Collections — ${SITE_NAME}`
-  const description =
-    'Browse every badminton, tennis, padel and clothing collection at Smash Racket Pro — rackets, shoes, bags, balls and accessories by brand, sport and category.'
-  return {
-    title,
-    description,
-    alternates: { canonical: `${SITE_URL}/collections` },
-    openGraph: {
-      title,
-      description,
-      url: `${SITE_URL}/collections`,
-      siteName: SITE_NAME,
-      type: 'website',
-    },
-  }
+export async function generateMetadata(): Promise<Metadata> {
+  return generateStaticMetadata('collections')
 }
 
 const GROUP_META: Record<string, { label: string; icon: string }> = {

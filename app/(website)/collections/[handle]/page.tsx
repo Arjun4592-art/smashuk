@@ -1,7 +1,11 @@
 import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
-import { generateCollectionMetadata, safeJsonLd } from '@/lib/seo'
+import {
+  generateCollectionMetadata,
+  generateBreadcrumbSchema,
+  safeJsonLd,
+} from '@/lib/seo'
 import {
   getAllCollectionHandles,
   getCollectionConfig,
@@ -70,6 +74,21 @@ export default async function CollectionPage({
         type='application/ld+json'
         dangerouslySetInnerHTML={{
           __html: safeJsonLd(generateCollectionSchema(handle)),
+        }}
+      />
+      <script
+        type='application/ld+json'
+        dangerouslySetInnerHTML={{
+          __html: safeJsonLd(
+            generateBreadcrumbSchema([
+              { name: 'Home', path: '/' },
+              { name: 'Collections', path: '/collections' },
+              {
+                name: collection.breadcrumb || collection.h1,
+                path: `/collections/${handle}`,
+              },
+            ]),
+          ),
         }}
       />
       <CollectionHero collection={collection} />

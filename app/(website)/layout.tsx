@@ -6,6 +6,11 @@ import ChatWidget from '@/components/website/ChatWidget'
 import RevealInit from '@/components/website/local-store/RevealInit'
 import { GoogleReviewBadge } from '@/components/website/GoogleCustomerReviews'
 import { getPromoBanner } from '@/lib/promo-banner'
+import {
+  generateOrganizationSchema,
+  generateWebsiteSchema,
+  safeJsonLd,
+} from '@/lib/seo'
 import { getMegaMenuConfig } from '@/lib/mega-menu'
 import { toStorefrontMenus, toStorefrontNavLinks } from '@/lib/mega-menu-config'
 export default async function WebsiteLayout({
@@ -19,6 +24,15 @@ export default async function WebsiteLayout({
   ])
   return (
     <AuthProvider surface='website'>
+      <script
+        type='application/ld+json'
+        dangerouslySetInnerHTML={{
+          __html: safeJsonLd([
+            generateOrganizationSchema(),
+            generateWebsiteSchema(),
+          ]),
+        }}
+      />
       <Navbar
         promoCode={promoBanner.code}
         promoDiscountLabel={promoBanner.discountLabel}
