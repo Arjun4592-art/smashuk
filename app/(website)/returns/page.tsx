@@ -14,15 +14,31 @@ export default function ReturnsPage() {
       <h2>Return conditions</h2>
       <ul className='list-disc pl-5 space-y-1'>
         <li>
-          Item must be unused, in original condition, with tags/packaging intact
+          Item must be{' '}
+          <strong className='text-red-600'>unused, in original condition</strong>
+          , with tags/packaging intact
         </li>
         <li>Proof of purchase (order number or receipt) required</li>
         <li>
-          Rackets that had a <strong>String Upgrade</strong> applied are
-          excluded from returns once strung, since stringing can't be undone —
-          this is called out at checkout before you confirm
+          Rackets with a <strong>String Upgrade</strong> can be returned, but a{' '}
+          <strong>£30 restocking fee</strong> applies — see below
         </li>
       </ul>
+
+      <h2>Rackets with a String Upgrade</h2>
+      <p>
+        Rackets that have a string upgrade can be returned, but a{' '}
+        <strong>restocking fee of £30</strong> will apply. However, the{' '}
+        <strong className='text-red-600'>
+          manufacturer&rsquo;s plastic covering on the handle MUST be intact
+        </strong>
+        .
+      </p>
+      <p>
+        Once the manufacturer&rsquo;s plastic covering has been removed,{' '}
+        <strong className='text-red-600'>returns won&rsquo;t be accepted</strong>
+        .
+      </p>
 
       <h2>How to start a return</h2>
       <p>
