@@ -1352,12 +1352,16 @@ export async function POST(request: NextRequest) {
         )
       }
     })
-    const isCashPickup =
-      fulfillmentType === 'pickup' && payment_method === 'cash'
+    // "Take now" sale: the customer walks out with the goods and the payment
+    // has already been taken/captured above (cash, card, card terminal or
+    // split), so the order is fulfilled AND marked delivered straight away
+    // instead of sitting in "Ready for pickup". Previously only cash sales
+    // were marked delivered.
+    const isTakeNow = fulfillmentType === 'pickup'
     let fulfilled = false
-    if (fulfillmentType === 'pickup') {
+    if (isTakeNow) {
       try {
-        await fulfillOrder(order.id, medusaServiceFetch, isCashPickup)
+        await fulfillOrder(order.id, medusaServiceFetch, true)
         fulfilled = true
       } catch (fulfillErr) {
         console.warn('[POS orders] auto-fulfill failed:', fulfillErr)
