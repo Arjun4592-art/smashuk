@@ -4,6 +4,7 @@ import { SURFACE_COOKIES } from '@/lib/api/auth-cookie'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { getChannelIds } from '@/lib/api/sales-channels'
 import { getRemainingReturnableQty } from '@/lib/api/medusa-returns'
+import { getFlowActions, getOrderFlow } from '@/lib/order-flow'
 import { fulfillOrder } from '@/lib/api/medusa-fulfillment'
 import { getPublicFreeShippingThreshold } from '@/lib/shipping-settings'
 import { requireStripe } from '@/lib/stripe-server'
@@ -114,6 +115,37 @@ function toPosOrderRecord(o: any) {
     completedAt: o.created_at,
     isPickup: o.metadata?.fulfillment_type === 'pickup',
     fulfillmentStatus: o.fulfillment_status ?? 'not_fulfilled',
+    // Order flow (NEW -> PROCESSING -> ...): same rules as the dashboard.
+    flowStage: getOrderFlow(o).stage,
+    flowLabel: getOrderFlow(o).label,
+    flowActions: getFlowActions(o, {
+      hasMailIn: (o.items ?? []).some(
+        (i: any) =>
+          i?.metadata?.mail_in === true || i?.metadata?.mail_in === 'true',
+      ),
+    }).map((a) => ({
+      action: a.action as string,
+      label: a.label,
+      variant: a.variant,
+      confirm: a.confirm.title,
+    })),
+    refundRequest: o.metadata?.refund_request ?? null,
+    returnRecords: (Array.isArray(o.metadata?.returns)
+      ? o.metadata.returns
+      : []
+    ).map((r: any) => ({
+      id: r.id,
+      status: r.status,
+      reason: r.reason ?? '',
+      refund_amount: r.refund_amount ?? 0,
+      label_requested: r.label_requested === true,
+      label_fee: r.label_fee ?? null,
+      label_sent: !!r.label,
+      items: (r.items ?? []).map((i: any) => ({
+        title: i.title,
+        quantity: i.quantity,
+      })),
+    })),
     // Fully returned = every unit is back. Older partial returns also set
     // metadata.returned, which wrongly locked the order — when return
     // records exist we trust the remaining quantities instead.

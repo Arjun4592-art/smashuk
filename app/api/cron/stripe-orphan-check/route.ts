@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireStripe } from '@/lib/stripe-server'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { notifyOwner } from '@/lib/email'
+import { renderShell, pillBadge, factBox, noteBox } from '@/lib/email-templates'
 
 const MIN_AGE_MIN = 10
 const MAX_AGE_MIN = 25
@@ -64,9 +65,17 @@ export async function GET(req: NextRequest) {
       await notifyOwner({
         subject: `ACTION NEEDED: payment ${amount} received but no order (${email})`,
         text: `Payment ${amount} from ${name} ${email} (${pi.id}) was taken but no order exists. Create the order manually. Payment status: ${pi.status}.`,
-        html: `<p><b>A payment was taken but no order was created.</b></p>
-<p>Amount: ${amount}<br>Customer: ${name} ${email}<br>Payment Intent: ${pi.id}<br>Stripe status: ${pi.status}</p>
-<p>Create the order manually in the admin (Drafts), or refund the customer in Stripe.</p>`,
+        html: renderShell(
+          pillBadge('ACTION NEEDED', '#FDECEA', '#B42318'),
+          'Payment taken but no order was created',
+          `
+            ${factBox('Amount', amount)}
+            ${factBox('Customer', `${name} ${email}`.trim())}
+            ${factBox('Payment Intent', pi.id)}
+            ${factBox('Stripe status', pi.status)}
+            ${noteBox('What to do', 'Create the order manually in the admin (Drafts), or refund the customer in Stripe.')}
+          `,
+        ),
       })
     }
 

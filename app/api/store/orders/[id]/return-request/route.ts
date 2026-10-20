@@ -9,6 +9,8 @@ import {
   appendReturnRecord,
 } from '@/lib/api/medusa-returns'
 import { sendMail, notifyOwner } from '@/lib/email'
+import { getFlowOrder } from '@/lib/api/order-flow-server'
+import { canRequestReturn, RETURN_LABEL_FEE } from '@/lib/order-flow'
 import {
   returnRequestedEmail,
   adminReturnRequestEmail,
@@ -60,7 +62,7 @@ export async function POST(
     )
   }
   try {
-    const { items, reason, note } = await req.json()
+    const { items, reason, note, want_label } = await req.json()
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json(
         {
@@ -81,6 +83,18 @@ export async function POST(
         },
       )
     }
+    // Returns are only for orders that have been despatched / picked up.
+    // Before that the customer asks for a refund instead.
+    const flowOrder = await getFlowOrder(id, medusaServiceFetch)
+    if (!canRequestReturn(flowOrder)) {
+      return NextResponse.json(
+        {
+          error:
+            'A return can only be requested once your order has been despatched or picked up, and only one return can be open at a time.',
+        },
+        { status: 400 },
+      )
+    }
     const order = await getOrderForReturn(id, medusaServiceFetch)
     const { items: builtItems, refund_amount } = buildReturnLines(order, items)
     const returnRecord = {
@@ -92,6 +106,10 @@ export async function POST(
       status: 'requested' as const,
       source: 'customer' as const,
       requested_at: new Date().toISOString(),
+      // The prepaid label (£5.95) is bought when staff start processing the
+      // return, and the fee is taken off the refund.
+      label_requested: want_label === true,
+      ...(want_label === true ? { label_fee: RETURN_LABEL_FEE } : {}),
     }
     const data = await appendReturnRecord(
       id,

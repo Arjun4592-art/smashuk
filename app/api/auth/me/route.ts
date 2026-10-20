@@ -9,6 +9,39 @@ const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
 type Surface = 'website' | 'dashboard' | 'pos'
+async function fallbackCustomerName(token: string): Promise<string> {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'x-publishable-api-key': PUBLISHABLE_KEY,
+  }
+  const nameOf = (a: any) =>
+    `${a?.first_name ?? ''} ${a?.last_name ?? ''}`.trim()
+  try {
+    const res = await fetch(`${MEDUSA_URL}/store/customers/me/addresses`, {
+      headers,
+      cache: 'no-store',
+    })
+    if (res.ok) {
+      const { addresses = [] } = await res.json()
+      const best =
+        addresses.find((a: any) => a.is_default_shipping && nameOf(a)) ??
+        addresses.find((a: any) => nameOf(a))
+      if (best) return nameOf(best)
+    }
+  } catch {}
+  try {
+    const res = await fetch(
+      `${MEDUSA_URL}/store/orders?limit=1&order=-created_at&fields=id,shipping_address.first_name,shipping_address.last_name`,
+      { headers, cache: 'no-store' },
+    )
+    if (res.ok) {
+      const { orders = [] } = await res.json()
+      const n = nameOf(orders[0]?.shipping_address)
+      if (n) return n
+    }
+  } catch {}
+  return ''
+}
 async function getCustomerUser(token: string) {
   const res = await fetch(`${MEDUSA_URL}/store/customers/me`, {
     headers: {
@@ -24,11 +57,14 @@ async function getCustomerUser(token: string) {
     return null
   }
   const { customer } = await res.json()
+  let name = `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim()
+  // Accounts created at checkout / by guest-to-account conversion often have
+  // no first/last name on the customer record itself, only on their saved
+  // address or their orders. Use that before falling back to the email.
+  if (!name) name = await fallbackCustomerName(token)
   return {
     id: customer.id,
-    name:
-      `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() ||
-      customer.email,
+    name: name || customer.email,
     email: customer.email ?? '',
     role: 'customer' as const,
     createdAt: customer.created_at,

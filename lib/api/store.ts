@@ -614,6 +614,7 @@ export async function requestReturn(
   }[],
   reason: string,
   note?: string,
+  wantLabel = false,
 ) {
   const res = await fetch(`/api/store/orders/${orderId}/return-request`, {
     method: 'POST',
@@ -625,12 +626,34 @@ export async function requestReturn(
       items,
       reason,
       note,
+      want_label: wantLabel,
     }),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok)
     throw new Error(
       data.message ?? data.error ?? 'Failed to submit return request',
+    )
+  return data
+}
+// Refund request for an order that has not been despatched / picked up yet.
+export async function requestRefund(
+  orderId: string,
+  reason: string,
+  note?: string,
+) {
+  const res = await fetch(`/api/store/orders/${orderId}/refund-request`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ reason, note }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok)
+    throw new Error(
+      data.message ?? data.error ?? 'Failed to submit refund request',
     )
   return data
 }

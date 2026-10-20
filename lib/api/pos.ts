@@ -516,6 +516,30 @@ export interface PosOrderRecord {
   returned: boolean
   isPickup: boolean
   fulfillmentStatus: string
+  /** Order flow stage, e.g. 'new', 'processing', 'ready_for_pickup' */
+  flowStage: string
+  flowLabel: string
+  flowActions: {
+    action: string
+    label: string
+    variant: 'primary' | 'secondary' | 'danger'
+    confirm: string
+  }[]
+  refundRequest: {
+    status: string
+    reason?: string
+    note?: string
+  } | null
+  returnRecords: {
+    id: string
+    status: 'requested' | 'awaiting_return' | 'refunded' | 'rejected'
+    reason: string
+    refund_amount: number
+    label_requested: boolean
+    label_fee: number | null
+    label_sent: boolean
+    items: { title?: string; quantity: number }[]
+  }[]
   // Same signed token a brand-new sale gets back from createPOSOrder — lets
   // a reprinted receipt's QR / tracking link work like the original.
   trackingToken: string

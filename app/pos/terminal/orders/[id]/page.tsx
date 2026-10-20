@@ -14,21 +14,23 @@ import {
 } from '@/lib/api/dashboard'
 import { fetchPOSOrder } from '@/lib/api/pos'
 import { getDisplayOrderStatus } from '@/lib/order-status'
+import {
+  FLOW_LABEL,
+  FLOW_PILL_CLASS,
+  getFlowActions,
+  getOrderFlow,
+  isPastDespatch,
+  returnLabelFee,
+  returnNetRefund,
+  type FlowStage,
+} from '@/lib/order-flow'
 import OrderTimeline from '@/components/dashboard/OrderTimeline'
 import ReturnExchangeModal from '@/components/dashboard/ReturnExchangeModal'
 import LabelSizeDialog from '@/components/printing/LabelSizeDialog'
 import { printReceiptOnLabel } from '@/lib/printer/label-print'
 import { printShippingLabel } from '@/lib/printer/print-shipping-label'
 import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
-const ORDER_STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-[#FFC453]/20 text-[#916A00]',
-  confirmed: 'bg-[#2C6ECB]/10 text-[#2C6ECB]',
-  processing: 'bg-[#2C6ECB]/10 text-[#2C6ECB]',
-  shipped: 'bg-purple-100 text-purple-700',
-  delivered: 'bg-[#008060]/10 text-[#008060]',
-  cancelled: 'bg-[#D82C0D]/10 text-[#D82C0D]',
-  refunded: 'bg-[#6D7175]/10 text-[#6D7175]',
-}
+const ORDER_STATUS_STYLES: Record<string, string> = FLOW_PILL_CLASS
 const PAYMENT_STATUS_STYLES: Record<string, string> = {
   pending: 'bg-[#FFC453]/20 text-[#916A00]',
   paid: 'bg-[#008060]/10 text-[#008060]',
@@ -260,71 +262,55 @@ function CardHeader({
     </div>
   )
 }
+const FLOW_BUTTON_COLOR: Record<string, string> = {
+  primary: 'bg-[#008060] text-white',
+  secondary: 'bg-[#2C6ECB] text-white',
+  danger: 'border border-[#D82C0D] text-[#D82C0D]',
+}
 function getOrderActions(order: any): {
   label: string
   action: string
   color: string
+  confirm: string
 }[] {
-  const displayStatus = getDisplayOrderStatus(order)
-  if (['cancelled', 'delivered', 'refunded'].includes(displayStatus)) return []
-  const isPickup = order.metadata?.fulfillment_type === 'pickup'
-  const isReadyToDispatch =
-    order.fulfillment_status === 'fulfilled' ||
-    order.fulfillment_status === 'partially_fulfilled'
-  const isShipped =
-    order.fulfillment_status === 'shipped' ||
-    order.fulfillment_status === 'partially_shipped'
-  const actions: {
-    label: string
-    action: string
-    color: string
-  }[] = []
-  if (order.status === 'pending') {
-    actions.push({
-      label: 'Confirm Order',
-      action: 'confirm',
-      color: 'bg-[#008060] text-white',
-    })
-  }
+  const hasMailIn = (order.items ?? []).some(
+    (i: any) =>
+      i?.metadata?.mail_in === true || i?.metadata?.mail_in === 'true',
+  )
+  const flow = getOrderFlow(order)
+  const actions = getFlowActions(order, { hasMailIn }).map((a) => ({
+    label: a.label,
+    action: a.action as string,
+    color: FLOW_BUTTON_COLOR[a.variant],
+    confirm: a.confirm.title,
+  }))
   if (
-    !order.fulfillment_status ||
-    order.fulfillment_status === 'not_fulfilled' ||
-    order.fulfillment_status === 'partially_fulfilled'
+    ['new', 'processing', 'ready_for_pickup'].includes(flow.stage) &&
+    flow.track === 'order'
   ) {
     actions.push({
-      label: 'Mark as Fulfilled',
-      action: 'fulfill',
-      color: 'bg-[#2C6ECB] text-white',
+      label: 'Cancel',
+      action: 'cancel',
+      color: FLOW_BUTTON_COLOR.danger,
+      confirm: 'Cancel this order and refund the customer?',
     })
   }
-  if (!isPickup && isReadyToDispatch) {
-    actions.push({
-      label: 'Dispatch Order',
-      action: 'ship',
-      color: 'bg-purple-600 text-white',
-    })
-  }
-  if ((isPickup && isReadyToDispatch) || isShipped) {
-    actions.push({
-      label: isPickup ? 'Mark Picked Up' : 'Mark Delivered',
-      action: 'deliver',
-      color: 'bg-[#008060] text-white',
-    })
-  }
-  actions.push({
-    label: 'Cancel',
-    action: 'cancel',
-    color: 'border border-[#D82C0D] text-[#D82C0D]',
-  })
   return actions
 }
-const TIMELINE_STEPS = [
-  'pending',
-  'confirmed',
-  'processing',
-  'shipped',
-  'delivered',
-]
+// Steps shown in the progress bar, by order type.
+function getTimelineSteps(isPickup: boolean): FlowStage[] {
+  return isPickup
+    ? ['new', 'processing', 'ready_for_pickup', 'completed']
+    : ['new', 'processing', 'despatched', 'delivered']
+}
+function getTimelineIdx(order: any, steps: FlowStage[]): number {
+  const stage = getOrderFlow(order)
+  const direct = steps.indexOf(stage.stage)
+  if (direct >= 0) return direct
+  // Refund / return stages: show how far the order itself got.
+  if (stage.pastDespatch) return steps.length - 1
+  return stage.accepted ? 1 : 0
+}
 export default function OrderDetailPage({
   params,
 }: {
@@ -394,10 +380,22 @@ export default function OrderDetailPage({
     const data = await fetchPOSOrder(id)
     setOrder(data)
   }
-  const handleAction = async (action: string) => {
+  const handleAction = async (action: string, confirmText?: string) => {
+    if (confirmText && !window.confirm(confirmText)) return
     setActionLoading(true)
     try {
       const result: any = await updateOrderStatus(id, action)
+      if (action === 'despatch' && result?.warning) {
+        toast.warning(result.warning, { duration: 12000 })
+      } else if (action === 'accept') {
+        toast.success('Order accepted — PROCESSING')
+      } else if (action === 'accept-refund') {
+        toast.success(
+          result?.manual
+            ? `Refund accepted — hand £${Number(result.refundAmount).toFixed(2)} back to the customer`
+            : `Refund accepted — £${Number(result?.refundAmount ?? 0).toFixed(2)} refunded`,
+        )
+      }
       if (action === 'cancel') {
         if (result?.warning) {
           // Refund call to Stripe failed — order is still cancelled, but a
@@ -490,12 +488,12 @@ export default function OrderDetailPage({
 
   const handleReceiveReturn = async (r: any) => {
     const input = window.prompt(
-      'Item received and checked? Confirm the amount to refund (£):',
-      Number(r.refund_amount ?? 0).toFixed(2),
+      `Item received and checked? Confirm the amount to refund (£).${returnLabelFee(r) > 0 ? ` The £${returnLabelFee(r).toFixed(2)} prepaid label fee is already taken off.` : ''}`,
+      returnNetRefund(r).toFixed(2),
     )
     if (input === null) return
     const amount = parseFloat(input)
-    if (Number.isNaN(amount) || amount <= 0) {
+    if (Number.isNaN(amount) || amount < 0) {
       alert('Enter a valid refund amount')
       return
     }
@@ -504,9 +502,7 @@ export default function OrderDetailPage({
       await receiveOrderReturn(
         id,
         r.id,
-        Math.abs(amount - Number(r.refund_amount ?? 0)) > 0.005
-          ? amount
-          : undefined,
+        Math.abs(amount - returnNetRefund(r)) > 0.005 ? amount : undefined,
       )
       await reloadOrder()
     } catch (err: any) {
@@ -519,7 +515,14 @@ export default function OrderDetailPage({
   const handleRejectReturn = async (returnId: string) => {
     setReturnActionLoading(returnId)
     try {
-      await rejectOrderReturn(id, returnId)
+      const note = window.prompt(
+        'Why is the refund being rejected? This is emailed to the customer (optional).',
+      )
+      if (note === null) {
+        setReturnActionLoading('')
+        return
+      }
+      await rejectOrderReturn(id, returnId, note.trim() || undefined)
       await reloadOrder()
     } catch (err: any) {
       alert(err.message ?? 'Failed to reject return')
@@ -589,7 +592,10 @@ export default function OrderDetailPage({
   const payStyle =
     PAYMENT_STATUS_STYLES[order.payment_status] ?? 'bg-gray-100 text-gray-600'
   const actions = getOrderActions(order)
-  const timelineIdx = TIMELINE_STEPS.indexOf(displayStatus)
+  const TIMELINE_STEPS = getTimelineSteps(
+    order.metadata?.fulfillment_type === 'pickup',
+  )
+  const timelineIdx = getTimelineIdx(order, TIMELINE_STEPS)
   const displayId = order.display_id ? `AS-${order.display_id}` : id.slice(0, 8)
   return (
     <div className='max-w-6xl mx-auto space-y-5'>
@@ -626,7 +632,7 @@ export default function OrderDetailPage({
           <span
             className={`px-3 py-1.5 rounded-full text-[12px] font-semibold capitalize ${statusStyle}`}
           >
-            {displayStatus}
+            {FLOW_LABEL[displayStatus]}
           </span>
           {isPickup && (
             <span className='px-3 py-1.5 rounded-full text-[12px] font-semibold bg-[#FFF4E4] text-[#946200]'>
@@ -678,7 +684,7 @@ export default function OrderDetailPage({
           {actions.map((act) => (
             <button
               key={act.action}
-              onClick={() => handleAction(act.action)}
+              onClick={() => handleAction(act.action, act.confirm)}
               disabled={actionLoading}
               className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all cursor-pointer border-none disabled:opacity-50 ${act.color}`}
             >
@@ -687,6 +693,7 @@ export default function OrderDetailPage({
             </button>
           ))}
           {order.payment_status !== 'not_paid' &&
+            isPastDespatch(order) &&
             Object.values(remainingReturnQty).some((qty) => qty > 0) && (
               <button
                 onClick={() => setShowReturnModal(true)}
@@ -716,7 +723,7 @@ export default function OrderDetailPage({
                   <span
                     className={`text-[10.5px] font-medium capitalize whitespace-nowrap ${done && !cancelled ? 'text-[#008060]' : 'text-[#C4C8CC]'}`}
                   >
-                    {step}
+                    {FLOW_LABEL[step]}
                   </span>
                 </div>
                 {idx < TIMELINE_STEPS.length - 1 && (
@@ -1130,11 +1137,15 @@ export default function OrderDetailPage({
                   >
                     <div className='flex items-center justify-between mb-1'>
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold capitalize ${r.status === 'refunded' ? 'bg-[#008060]/10 text-[#008060]' : r.status === 'rejected' ? 'bg-[#D82C0D]/10 text-[#D82C0D]' : r.status === 'awaiting_return' ? 'bg-[#2C6ECB]/10 text-[#2C6ECB]' : 'bg-[#FFC453]/20 text-[#916A00]'}`}
+                        className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${r.status === 'refunded' ? 'bg-[#008060]/10 text-[#008060]' : r.status === 'rejected' ? 'bg-[#D82C0D]/10 text-[#D82C0D]' : r.status === 'awaiting_return' ? 'bg-[#2C6ECB]/10 text-[#2C6ECB]' : 'bg-[#FFC453]/20 text-[#916A00]'}`}
                       >
-                        {r.status === 'awaiting_return'
-                          ? 'awaiting item'
-                          : r.status}
+                        {r.status === 'requested'
+                          ? FLOW_LABEL.return_request_received
+                          : r.status === 'awaiting_return'
+                            ? FLOW_LABEL.processing
+                            : r.status === 'refunded'
+                              ? FLOW_LABEL.refunded
+                              : FLOW_LABEL.refund_rejected}
                       </span>
                       <span className='text-[11px] text-[#8C9196] capitalize'>
                         {r.source}
@@ -1146,8 +1157,19 @@ export default function OrderDetailPage({
                         .join(', ')}
                     </p>
                     <p className='text-[11.5px] text-[#8C9196]'>
-                      {r.reason} · £{(r.refund_amount / 100).toFixed(2)}
+                      {r.reason} · £{Number(r.refund_amount ?? 0).toFixed(2)}
                     </p>
+                    {(r.status === 'requested' ||
+                      r.status === 'awaiting_return') && (
+                      <p className='text-[11.5px] font-medium text-[#202223]'>
+                        Prepaid label requested:{' '}
+                        {r.label_requested
+                          ? `YES (£${returnLabelFee(r).toFixed(2)} taken off the refund)`
+                          : r.label
+                            ? 'label already sent'
+                            : 'NO'}
+                      </p>
+                    )}
                     {r.status === 'awaiting_return' && (
                       <div className='flex gap-2 mt-2'>
                         <button
@@ -1157,14 +1179,14 @@ export default function OrderDetailPage({
                         >
                           {returnActionLoading === r.id
                             ? 'Refunding…'
-                            : 'Received & Refund'}
+                            : 'Items received — refund'}
                         </button>
                         <button
                           onClick={() => handleRejectReturn(r.id)}
                           disabled={!!returnActionLoading}
                           className='px-3 py-1.5 border border-[#D82C0D] text-[#D82C0D] hover:bg-[#FFF4F4] text-[12px] font-medium rounded-lg transition-colors disabled:opacity-50'
                         >
-                          Cancel return
+                          Reject refund
                         </button>
                       </div>
                     )}
@@ -1177,14 +1199,16 @@ export default function OrderDetailPage({
                         >
                           {returnActionLoading === r.id
                             ? 'Approving…'
-                            : 'Approve & Send Label'}
+                            : r.label_requested
+                              ? 'Process & send label'
+                              : 'Start processing'}
                         </button>
                         <button
                           onClick={() => handleRejectReturn(r.id)}
                           disabled={!!returnActionLoading}
                           className='px-3 py-1.5 border border-[#D82C0D] text-[#D82C0D] hover:bg-[#FFF4F4] text-[12px] font-medium rounded-lg transition-colors disabled:opacity-50'
                         >
-                          Reject
+                          Reject refund
                         </button>
                       </div>
                     )}

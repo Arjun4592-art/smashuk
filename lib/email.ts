@@ -123,9 +123,17 @@ export async function sendMail(opts: {
     }
   }
   const from = process.env.EMAIL_FROM || 'onboarding@resend.dev'
-  const templateId = opts.resendTemplate
-    ? RESEND_TEMPLATE_IDS[opts.resendTemplate.name]
-    : undefined
+  // Resend Templates are opt-in (RESEND_USE_TEMPLATES=true). By default every
+  // email is sent from the HTML built in lib/email-templates.ts, so each one
+  // always matches the current design. Previously a template + a plain `text`
+  // were sent together and the customer received only the plain text, and a
+  // template stored in Resend can also be an older version of the design.
+  const templatesEnabled =
+    (process.env.RESEND_USE_TEMPLATES ?? '').trim().toLowerCase() === 'true'
+  const templateId =
+    templatesEnabled && opts.resendTemplate
+      ? RESEND_TEMPLATE_IDS[opts.resendTemplate.name]
+      : undefined
   try {
     const attachments = opts.attachments?.length
       ? await Promise.all(
@@ -141,18 +149,18 @@ export async function sendMail(opts: {
       from,
       to: opts.to,
       subject: opts.subject,
-      text: opts.text,
       ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
       ...(opts.scheduledAt ? { scheduledAt: opts.scheduledAt } : {}),
       ...(attachments?.length ? { attachments } : {}),
       ...(useTemplate
         ? {
+            // Template mode: no `text`, otherwise only the plain text arrives.
             template: {
               id: templateId as string,
               variables: opts.resendTemplate!.variables,
             },
           }
-        : { html: opts.html }),
+        : { html: opts.html, text: opts.text }),
     } as Parameters<typeof client.emails.send>[0])
     if (error) {
       console.error('[email] send failed:', error.name ?? '', error.message)

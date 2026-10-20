@@ -961,7 +961,7 @@ export default function Sidebar() {
       .then((data) => {
         if (cancelled || !data?.orders) return
         const pendingCount = data.orders.filter(
-          (o: any) => getDisplayOrderStatus(o) === 'pending',
+          (o: any) => getDisplayOrderStatus(o) === 'new',
         ).length
         setOrderCount(pendingCount)
       })

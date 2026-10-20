@@ -36,6 +36,8 @@ function statusBadge(
     | 'payment_failed'
     | 'dispute'
     | 'ready_for_pickup'
+    | 'processing'
+    | 'refund_requested'
     | 'return_requested'
     | 'return_declined'
     | 'return_label'
@@ -65,6 +67,12 @@ function statusBadge(
       bg: '#ECFDF5',
       fg: GREEN,
       label: 'READY FOR COLLECTION',
+    },
+    processing: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'ORDER PROCESSING' },
+    refund_requested: {
+      bg: '#FFF7ED',
+      fg: '#C2410C',
+      label: 'REFUND REQUESTED',
     },
     return_requested: {
       bg: '#FFF7ED',
@@ -1365,6 +1373,8 @@ export function returnRequestedEmail(
   returnRecord: {
     items?: { title?: string; quantity: number }[]
     reason?: string
+    label_requested?: boolean
+    label_fee?: number
   },
 ) {
   const orderNumber = orderNumberOf(order)
@@ -1383,7 +1393,15 @@ export function returnRequestedEmail(
         },
         {
           title: 'You hear from us by email',
-          body: 'We will let you know once it is approved, or if we need more information.',
+          body: returnRecord.label_requested
+            ? 'Once we start processing your return we will email you the prepaid return label.'
+            : 'We will let you know once it is being processed, or if we need more information.',
+        },
+        {
+          title: 'We inspect your items and refund you',
+          body: returnRecord.label_requested
+            ? `Once your return arrives and has been checked we refund you. The ${fmt(returnRecord.label_fee ?? 5.95)} prepaid label cost is taken off your refund.`
+            : 'Once your return arrives and has been checked we refund you. If there is a problem we will contact you by email.',
         },
       ])}
       ${sectionHeading('Items in this return')}
@@ -1769,4 +1787,79 @@ export function giftCardOrderReceiptEmail(order: any) {
     attachments: undefined as
       ReturnType<typeof qrInlineAttachment>[] | undefined,
   }
+}
+
+// ─── Order flow: PROCESSING + refund requests ───────────────────────────
+
+// Sent when staff accept a new order (NEW -> PROCESSING).
+export function orderProcessingEmail(order: any) {
+  const orderNumber = orderNumberOf(order)
+  const firstName = firstNameOf(order)
+  const isPickup = order?.metadata?.fulfillment_type === 'pickup'
+  const subject = `We're preparing your order ${orderNumber} — ${SITE_NAME}`
+  const html = renderShell(
+    statusBadge('processing'),
+    'We have accepted your order',
+    `
+      ${introText(`Hi ${firstName}, we have reviewed and accepted order ${strong(orderNumber)} and we are getting it ready now.`)}
+      ${sectionHeading('What happens next')}
+      ${stepList(
+        isPickup
+          ? [
+              {
+                title: 'We prepare your order',
+                body: 'Our team picks and packs your items.',
+              },
+              {
+                title: 'We email you when it is ready',
+                body: 'You will get another email as soon as your order is ready to collect in store.',
+              },
+            ]
+          : [
+              {
+                title: 'We pack your order',
+                body: 'Our team picks and packs your items.',
+              },
+              {
+                title: 'We despatch it',
+                body: 'You will get your tracking details by email as soon as it is on its way.',
+              },
+            ],
+      )}
+      ${sectionHeading('Your order')}
+      ${itemsTable(order.items ?? [])}
+    `,
+  )
+  const text = `Hi ${firstName}, we've accepted order ${orderNumber} and are getting it ready. We'll email you again when it is ${isPickup ? 'ready to collect' : 'despatched'}.`
+  return { subject, html, text }
+}
+
+// Sent to the store owner when a customer asks for a refund before their
+// order has been despatched / picked up.
+export function adminRefundRequestEmail(
+  order: any,
+  request: { reason?: string; note?: string },
+) {
+  const orderNumber = orderNumberOf(order)
+  const customerName =
+    (order.customer
+      ? `${order.customer.first_name ?? ''} ${order.customer.last_name ?? ''}`.trim()
+      : '') || 'Guest'
+  const subject = `Refund request for order ${orderNumber}`
+  const html = renderShell(
+    statusBadge('admin'),
+    `Refund request — ${orderNumber}`,
+    `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:4px;">
+        ${infoRow('Customer', `${customerName} (${order.email ?? 'no email'})`)}
+        ${request.reason ? infoRow('Reason', request.reason) : ''}
+        ${request.note ? infoRow('Note', request.note) : ''}
+      </table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${MUTED};">
+        This order has not left the shop yet. Open it in the dashboard (or the POS) to accept the refund.
+      </p>
+    `,
+  )
+  const text = `Refund request for order ${orderNumber} from ${customerName} (${order.email ?? 'no email'}).${request.reason ? ` Reason: ${request.reason}.` : ''} Accept it from the dashboard or POS.`
+  return { subject, html, text }
 }

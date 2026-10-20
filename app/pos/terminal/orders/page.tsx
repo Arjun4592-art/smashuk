@@ -10,6 +10,7 @@ import OrderDetailModal, {
 import { POSOrderRowSkeleton } from '@/components/ui/Skeleton'
 import DateRangeFilter, { toLocalYMD } from '@/components/ui/DateRangeFilter'
 import { fetchPOSOrderPage, type PosOrderRecord } from '@/lib/api/pos'
+import { FLOW_LABEL, type FlowStage } from '@/lib/order-flow'
 const STATUS_STYLE: Record<
   string,
   {
@@ -34,9 +35,20 @@ const STATUS_STYLE: Record<
     color: '#B95000',
   },
 }
-const STATUS_LABEL: Record<string, string> = {
-  returned: 'Returned',
-  awaiting_pickup: 'Awaiting Pickup',
+const STATUS_LABEL: Record<string, string> = FLOW_LABEL
+// Pill colours per flow stage (inline styles, like the rest of this list)
+const FLOW_STYLE: Record<FlowStage, { bg: string; color: string }> = {
+  new: { bg: '#FFF3CD', color: '#B7791F' },
+  processing: { bg: '#E8F0FD', color: '#2C6ECB' },
+  ready_for_pickup: { bg: '#FDF1E7', color: '#B95000' },
+  despatched: { bg: '#F1EBFA', color: '#5B3FA8' },
+  delivered: { bg: '#E3F1EB', color: '#008060' },
+  completed: { bg: '#E3F1EB', color: '#008060' },
+  refund_request_received: { bg: '#FDF1E7', color: '#B95000' },
+  return_request_received: { bg: '#FDF1E7', color: '#B95000' },
+  refunded: { bg: '#F6F6F7', color: '#6D7175' },
+  refund_rejected: { bg: '#FBEAE5', color: '#D82C0D' },
+  cancelled: { bg: '#F6F6F7', color: '#6D7175' },
 }
 function toOrderDetail(o: PosOrderRecord): OrderDetailData {
   return {
@@ -72,6 +84,12 @@ function toOrderDetail(o: PosOrderRecord): OrderDetailData {
     returned: o.returned,
     isPickup: o.isPickup,
     fulfillmentStatus: o.fulfillmentStatus,
+    source: o.source,
+    flowStage: o.flowStage,
+    flowLabel: o.flowLabel,
+    flowActions: o.flowActions,
+    refundRequest: o.refundRequest,
+    returnRecords: o.returnRecords,
     trackingToken: o.trackingToken,
     shippingAddress: o.shippingAddress,
     splitPayments: o.splitPayments,
@@ -494,11 +512,10 @@ export default function OrdersPage() {
   const ordersGridCols = isAdmin
     ? '0.6fr 1.3fr 0.9fr 0.7fr 0.95fr 0.85fr 0.45fr 0.75fr 0.8fr'
     : '0.6fr 1.5fr 0.7fr 0.95fr 0.85fr 0.45fr 0.75fr 0.8fr'
+  // Pick-ups not yet collected stay visible to every cashier
   const isPendingPickup = (o: PosOrderRecord) =>
     o.isPickup &&
-    !['fulfilled', 'delivered', 'partially_delivered'].includes(
-      o.fulfillmentStatus,
-    )
+    !['delivered', 'partially_delivered'].includes(o.fulfillmentStatus)
   const shipOrderStatus = (
     o: PosOrderRecord,
   ): 'completed' | 'shipped' | 'processing' => {
@@ -531,13 +548,7 @@ export default function OrdersPage() {
         }),
       items: o.items.length,
       total: o.total,
-      status: isPendingPickup(o)
-        ? 'awaiting_pickup'
-        : o.returned
-          ? 'returned'
-          : o.isPickup
-            ? 'completed'
-            : shipOrderStatus(o),
+      status: o.flowStage as FlowStage,
       isPickup: o.isPickup,
       source: (o.source ?? 'website') as SourceKey,
       payment: getPayment(o),
@@ -618,7 +629,7 @@ export default function OrdersPage() {
   // Sum of what's currently shown (returned orders left out) — handy for
   // matching the card machine / till totals at end of day.
   const shownTotal = filtered
-    .filter((o) => o.status !== 'returned')
+    .filter((o) => o.status !== 'refunded' && o.status !== 'cancelled')
     .reduce((sum, o) => sum + (Number(o.total) || 0), 0)
   const handleRowClick = (o: (typeof allOrders)[number]) => {
     if (o.live && o.raw) setSelectedOrder(o.raw)
@@ -845,13 +856,7 @@ export default function OrdersPage() {
             </div>
           ) : (
             filtered.map((o, i) => {
-              const style =
-                o.status === 'returned'
-                  ? {
-                      bg: '#F6F6F7',
-                      color: '#6D7175',
-                    }
-                  : (STATUS_STYLE[o.status] ?? STATUS_STYLE.completed)
+              const style = FLOW_STYLE[o.status] ?? STATUS_STYLE.completed
               const clickable = o.live
               return (
                 <div key={o.id}>

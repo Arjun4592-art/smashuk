@@ -8,6 +8,12 @@ import { toast } from 'sonner'
 import DateRangeFilter from '@/components/ui/DateRangeFilter'
 import { useAllOrders, useAbandonedCheckouts } from '@/hooks/useDashboard'
 import { updateOrderStatus, getOrder } from '@/lib/api/dashboard'
+import {
+  FLOW_LABEL,
+  FLOW_PILL_CLASS,
+  FLOW_STAGE_ORDER,
+  type FlowStage,
+} from '@/lib/order-flow'
 import { printReceiptOnLabel } from '@/lib/printer/label-print'
 import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
 import {
@@ -90,15 +96,7 @@ function AbandonedCartItems({ cartId }: { cartId: string }) {
     </ul>
   )
 }
-const ORDER_STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-[#FFC453]/20 text-[#916A00]',
-  confirmed: 'bg-[#2C6ECB]/10 text-[#2C6ECB]',
-  processing: 'bg-[#2C6ECB]/10 text-[#2C6ECB]',
-  shipped: 'bg-purple-100 text-purple-700',
-  delivered: 'bg-[#008060]/10 text-[#008060]',
-  cancelled: 'bg-[#D82C0D]/10 text-[#D82C0D]',
-  refunded: 'bg-[#6D7175]/10 text-[#6D7175]',
-}
+const ORDER_STATUS_STYLES: Record<string, string> = FLOW_PILL_CLASS
 const PAYMENT_STATUS_STYLES: Record<string, string> = {
   pending: 'bg-[#FFC453]/20 text-[#916A00]',
   paid: 'bg-[#008060]/10 text-[#008060]',
@@ -122,16 +120,14 @@ const paymentDisplay = (o: { source?: string; paymentMethod?: string }) =>
   o.source === 'website'
     ? `From Website (${o.paymentMethod || 'Online'})`
     : o.paymentMethod || '—'
-const ALL_STATUSES = [
-  'All',
-  'Pending',
-  'Confirmed',
-  'Processing',
-  'Shipped',
-  'Delivered',
-  'Cancelled',
-  'Refunded',
-]
+// Filter tabs follow the order flow: NEW, PROCESSING, READY FOR PICKUP, ...
+const STATUS_KEY_BY_TAB: Record<string, FlowStage | ''> = { All: '' }
+for (const stage of FLOW_STAGE_ORDER) {
+  STATUS_KEY_BY_TAB[FLOW_LABEL[stage]] = stage
+}
+const ALL_STATUSES = ['All', ...FLOW_STAGE_ORDER.map((s) => FLOW_LABEL[s])]
+const statusMatchesTab = (status: string, tab: string) =>
+  tab === 'All' || status === STATUS_KEY_BY_TAB[tab]
 function formatCurrency(n: number) {
   return new Intl.NumberFormat('en-GB', {
     style: 'currency',
@@ -319,8 +315,7 @@ function OrdersPageContent() {
     const matchSearch =
       o.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
       o.customer.toLowerCase().includes(search.toLowerCase())
-    const matchStatus =
-      statusFilter === 'All' || o.status === statusFilter.toLowerCase()
+    const matchStatus = statusMatchesTab(o.status, statusFilter)
     const matchSource = !sourceFilter || o.source === sourceFilter
     const matchPay = !payFilter || o.paymentMethod === payFilter
     return (
@@ -332,8 +327,7 @@ function OrdersPageContent() {
   const matchSearchStr = (o: any) =>
     o.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
     o.customer.toLowerCase().includes(search.toLowerCase())
-  const matchStatusTab = (o: any) =>
-    statusFilter === 'All' || o.status === statusFilter.toLowerCase()
+  const matchStatusTab = (o: any) => statusMatchesTab(o.status, statusFilter)
   const forSourceCounts = orders.filter(
     (o: any) =>
       matchesDate(o) &&
@@ -471,7 +465,7 @@ function OrdersPageContent() {
     0,
   )
   const pendingCount = scopedOrders.filter(
-    (o: any) => o.status === 'pending',
+    (o: any) => o.status === 'new',
   ).length
   function setTab(tab: string) {
     setSearch('')
@@ -513,7 +507,7 @@ function OrdersPageContent() {
       icon: <OrdersStatIcon />,
     },
     {
-      label: 'Pending Orders',
+      label: 'New Orders',
       value: pendingCount,
       color: 'text-[#916A00]',
       bg: 'bg-[#FFC453]/20',
@@ -691,8 +685,8 @@ function OrdersPageContent() {
                   <span className='ml-1 text-[10.5px] text-[#8C9196]'>
                     {s === 'All'
                       ? forStatusCounts.length
-                      : forStatusCounts.filter(
-                          (o: any) => o.status === s.toLowerCase(),
+                      : forStatusCounts.filter((o: any) =>
+                          statusMatchesTab(o.status, s),
                         ).length}
                   </span>
                 </button>
@@ -870,7 +864,8 @@ function OrdersPageContent() {
                           <span
                             className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold capitalize ${ORDER_STATUS_STYLES[order.status] ?? 'bg-gray-100 text-gray-600'}`}
                           >
-                            {order.status}
+                            {FLOW_LABEL[order.status as FlowStage] ??
+                              order.status}
                           </span>
                         </td>
                         <td className='px-4 py-3'>

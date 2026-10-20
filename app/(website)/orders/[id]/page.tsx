@@ -5,19 +5,19 @@ import { toast } from 'sonner'
 import { useOrder } from '@/hooks/useOrders'
 import { formatCurrency } from '@/lib/utils'
 import { getDisplayOrderStatus } from '@/lib/order-status'
+import {
+  FLOW_LABEL,
+  FLOW_PILL_CLASS,
+  canRequestRefund,
+  canRequestReturn,
+  getRefundRequest,
+} from '@/lib/order-flow'
 import { ChevronRightIcon, PackageIcon, StarIcon } from '@/components/ui/Icons'
 import OrderTracking from '@/components/website/OrderTracking'
 import RequestReturnModal from '@/components/website/RequestReturnModal'
+import RequestRefundModal from '@/components/website/RequestRefundModal'
 import WriteReviewModal from '@/components/website/WriteReviewModal'
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-[#FFC453]/15 text-[#916A00]',
-  confirmed: 'bg-[#2C6ECB]/15 text-[#2C6ECB]',
-  processing: 'bg-[#2C6ECB]/15 text-[#2C6ECB]',
-  shipped: 'bg-purple-100 text-purple-700',
-  delivered: 'bg-[#008060]/15 text-[#008060]',
-  cancelled: 'bg-[#D82C0D]/15 text-[#D82C0D]',
-  refunded: 'bg-gray-100 text-gray-600',
-}
+const STATUS_COLORS: Record<string, string> = FLOW_PILL_CLASS
 interface ReviewItem {
   productId: string
   productTitle: string
@@ -35,14 +35,16 @@ export default function OrderDetailPage({
   const { data: order, isLoading, error, refetch } = useOrder(id)
   const [showTracking, setShowTracking] = useState(false)
   const [showReturn, setShowReturn] = useState(false)
+  const [showRefund, setShowRefund] = useState(false)
   const [reviewItem, setReviewItem] = useState<ReviewItem | null>(null)
   const [reviewedItems, setReviewedItems] = useState<Set<string>>(new Set())
   const isPickup = order?.metadata?.fulfillment_type === 'pickup'
-  const displayStatus = order ? getDisplayOrderStatus(order) : 'pending'
+  const displayStatus = order ? getDisplayOrderStatus(order) : 'new'
   const isDelivered =
     order?.status === 'completed' ||
     order?.fulfillment_status === 'fulfilled' ||
-    displayStatus === 'delivered'
+    displayStatus === 'delivered' ||
+    displayStatus === 'completed'
   if (isLoading) {
     return (
       <div className='min-h-screen bg-[#F2F4F7] flex items-center justify-center'>
@@ -77,10 +79,11 @@ export default function OrderDetailPage({
         (remainingReturnQty[line.item_id] ?? 0) - line.quantity
     }
   }
-  const canReturn =
-    order.payment_status === 'captured' &&
-    order.status !== 'canceled' &&
-    Object.values(remainingReturnQty).some((qty) => qty > 0)
+  // Before despatch / pick-up the customer asks for a refund; afterwards
+  // they request a return (optionally with a prepaid label).
+  const canReturn = canRequestReturn(order)
+  const canRefund = canRequestRefund(order)
+  const refundRequest = getRefundRequest(order)
   return (
     <>
       <div className='min-h-screen bg-[#F2F4F7]'>
@@ -106,7 +109,7 @@ export default function OrderDetailPage({
               <span
                 className={`px-3 py-1.5 rounded-full text-xs font-bold font-montserrat capitalize ${STATUS_COLORS[displayStatus] ?? 'bg-gray-100 text-gray-600'}`}
               >
-                {displayStatus}
+                {FLOW_LABEL[displayStatus]}
               </span>
               {isPickup && (
                 <span className='px-3 py-1.5 rounded-full text-xs font-bold font-montserrat bg-white/10 text-white'>
@@ -301,6 +304,26 @@ export default function OrderDetailPage({
               </span>
             </a>
 
+            {canRefund && (
+              <button
+                onClick={() => setShowRefund(true)}
+                className='w-full bg-white rounded-2xl border border-gray-100 p-5 text-left hover:shadow-md transition-shadow'
+              >
+                <span className='font-montserrat font-bold text-[#0A1F44]'>
+                  💷 Request Refund
+                </span>
+              </button>
+            )}
+            {refundRequest?.status === 'requested' && (
+              <div className='w-full bg-white rounded-2xl border border-gray-100 p-5'>
+                <span className='font-montserrat font-bold text-[#0A1F44]'>
+                  Refund request received
+                </span>
+                <p className='text-sm text-gray-400 font-lato mt-1'>
+                  We&apos;ll email you as soon as it&apos;s been reviewed.
+                </p>
+              </div>
+            )}
             {canReturn && (
               <button
                 onClick={() => setShowReturn(true)}
@@ -319,6 +342,20 @@ export default function OrderDetailPage({
         <OrderTracking
           orderId={order.id}
           onClose={() => setShowTracking(false)}
+        />
+      )}
+
+      {showRefund && (
+        <RequestRefundModal
+          order={order}
+          onClose={() => setShowRefund(false)}
+          onSubmitted={() => {
+            setShowRefund(false)
+            toast.success(
+              "Refund requested — we'll email you once it's reviewed.",
+            )
+            refetch()
+          }}
         />
       )}
 

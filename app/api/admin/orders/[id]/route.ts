@@ -19,6 +19,23 @@ import { randomUUID } from 'crypto'
 import { isSyntheticEmail } from '@/lib/pos/walkin'
 import { sendMail, notifyOwner } from '@/lib/email'
 import {
+  getOrderFlow,
+  canRequestRefund,
+  getRefundRequest,
+  returnNetRefund,
+  returnLabelFee,
+} from '@/lib/order-flow'
+import {
+  getFlowOrder,
+  hasMailInLines,
+  saveOrderMetadata,
+  captureOfflinePayments,
+  refundWholeOrder,
+  cancelRefundedOrder,
+} from '@/lib/api/order-flow-server'
+import {
+  orderProcessingEmail,
+  adminRefundRequestEmail,
   shippingConfirmationEmail,
   outForDeliveryEmail,
   deliveryConfirmationEmail,
@@ -42,6 +59,50 @@ import {
   type BookedLabel,
 } from '@/lib/api/order-labels'
 import { signOrderTrackToken } from '@/lib/api/order-track-token'
+
+type RouteFetcher = (path: string, init?: RequestInit) => Promise<Response>
+
+// Emails the customer their despatch / tracking details and tells the owner.
+// Never throws: the order is already despatched when this runs.
+async function sendDespatchEmails(
+  id: string,
+  fetcher: RouteFetcher,
+  trackingNumber?: string,
+) {
+  try {
+    const orderRes = await fetcher(
+      `/admin/orders/${id}?fields=id,display_id,email,*items,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
+    )
+    const orderData = await orderRes.json().catch(() => ({}))
+    const fullOrder = orderData?.order
+    if (fullOrder?.email && !isSyntheticEmail(fullOrder.email)) {
+      const { subject, html, text, resendTemplate } = shippingConfirmationEmail(
+        fullOrder,
+        { trackingNumber },
+      )
+      await sendMail({
+        to: fullOrder.email,
+        subject,
+        html,
+        text,
+        resendTemplate,
+      })
+      const adminEmail = adminShippingEmail(fullOrder)
+      notifyOwner({
+        subject: adminEmail.subject,
+        html: adminEmail.html,
+        text: adminEmail.text,
+        resendTemplate: adminEmail.resendTemplate,
+        customerEmail: fullOrder.email,
+      }).catch(() => {})
+    }
+  } catch (shipEmailErr) {
+    console.error(
+      `[order ship] shipping confirmation email failed for ${id}:`,
+      shipEmailErr,
+    )
+  }
+}
 export async function GET(
   req: NextRequest,
   {
@@ -200,6 +261,309 @@ export async function PATCH(
     const { action } = body
     let data: any
     switch (action) {
+      // ── Order flow: NEW -> PROCESSING ─────────────────────────────────
+      case 'accept': {
+        let order: any
+        try {
+          order = await getFlowOrder(id, fetcher)
+        } catch (loadErr: any) {
+          return NextResponse.json(
+            { error: loadErr.message ?? 'Order not found' },
+            { status: 404 },
+          )
+        }
+        const flow = getOrderFlow(order)
+        if (flow.stage !== 'new') {
+          return NextResponse.json(
+            { error: `This order is already ${flow.label}.` },
+            { status: 400 },
+          )
+        }
+        try {
+          await saveOrderMetadata(
+            id,
+            order,
+            {
+              order_accepted_at: new Date().toISOString(),
+              ...(actor?.staffId ? { order_accepted_by: actor.staffId } : {}),
+            },
+            fetcher,
+          )
+        } catch (saveErr: any) {
+          return NextResponse.json(
+            { error: saveErr.message ?? 'Could not accept the order' },
+            { status: 400 },
+          )
+        }
+        let emailed = false
+        if (order.email && !isSyntheticEmail(order.email)) {
+          try {
+            const { subject, html, text } = orderProcessingEmail(order)
+            const sent = await sendMail({
+              to: order.email,
+              subject,
+              html,
+              text,
+            })
+            emailed = sent.sent
+          } catch (processingEmailErr) {
+            console.error(
+              `[order accept] processing email failed for ${id}:`,
+              processingEmailErr,
+            )
+          }
+        }
+        data = { accepted: true, emailed }
+        break
+      }
+      // ── Delivery orders: buy the label and despatch in one step ───────
+      case 'despatch': {
+        let order: any
+        try {
+          order = await getFlowOrder(id, fetcher)
+        } catch (loadErr: any) {
+          return NextResponse.json(
+            { error: loadErr.message ?? 'Order not found' },
+            { status: 404 },
+          )
+        }
+        const flow = getOrderFlow(order)
+        if (hasMailInLines(order)) {
+          return NextResponse.json(
+            {
+              error:
+                'Mail-in orders are despatched with the Ship box / label buttons.',
+            },
+            { status: 400 },
+          )
+        }
+        if (flow.isPickup) {
+          return NextResponse.json(
+            {
+              error:
+                'Pick-up orders are marked ready for pickup, not despatched.',
+            },
+            { status: 400 },
+          )
+        }
+        if (!flow.accepted) {
+          return NextResponse.json(
+            { error: 'Accept the order first.' },
+            { status: 400 },
+          )
+        }
+        if (flow.track !== 'order' || flow.stage !== 'processing') {
+          return NextResponse.json(
+            {
+              error: `This order can't be despatched while it is ${flow.label}.`,
+            },
+            { status: 400 },
+          )
+        }
+        try {
+          // Creating the fulfilment is what buys the shipping label.
+          await fulfillOrder(id, fetcher)
+        } catch (fulfillErr: any) {
+          return NextResponse.json(
+            { error: fulfillErr.message ?? 'Could not buy the shipping label' },
+            { status: 400 },
+          )
+        }
+        await captureOfflinePayments(id, fetcher)
+        let warning: string | undefined
+        try {
+          const shipped = await shipOrder(id, fetcher)
+          if (!shipped.alreadyShipped) {
+            await sendDespatchEmails(
+              id,
+              fetcher,
+              shipped.parcel2goTrackingNumber,
+            )
+          }
+        } catch (shipErr: any) {
+          warning = `The shipping label was bought and the order now shows DESPATCHED, but confirming the shipment failed: ${shipErr?.message ?? 'unknown error'}. Use "Confirm handed to courier" to try again.`
+        }
+        data = { despatched: true, ...(warning ? { warning } : {}) }
+        break
+      }
+      // ── Refund BEFORE the order is despatched / picked up ─────────────
+      case 'request-refund': {
+        const { reason, note, source } = body as {
+          reason?: string
+          note?: string
+          source?: string
+        }
+        let order: any
+        try {
+          order = await getFlowOrder(id, fetcher)
+        } catch (loadErr: any) {
+          return NextResponse.json(
+            { error: loadErr.message ?? 'Order not found' },
+            { status: 404 },
+          )
+        }
+        if (!canRequestRefund(order)) {
+          return NextResponse.json(
+            {
+              error:
+                'A refund request can only be logged once, for a paid order that has not been despatched or picked up yet. After that, use a return.',
+            },
+            { status: 400 },
+          )
+        }
+        try {
+          await saveOrderMetadata(
+            id,
+            order,
+            {
+              refund_request: {
+                status: 'requested',
+                requested_at: new Date().toISOString(),
+                source: source === 'pos' ? 'pos' : 'dashboard',
+                reason: reason || 'Other',
+                ...(note ? { note } : {}),
+              },
+            },
+            fetcher,
+          )
+        } catch (saveErr: any) {
+          return NextResponse.json(
+            { error: saveErr.message ?? 'Could not log the refund request' },
+            { status: 400 },
+          )
+        }
+        data = { requested: true }
+        break
+      }
+      case 'accept-refund': {
+        let order: any
+        try {
+          order = await getFlowOrder(id, fetcher)
+        } catch (loadErr: any) {
+          return NextResponse.json(
+            { error: loadErr.message ?? 'Order not found' },
+            { status: 404 },
+          )
+        }
+        const request = getRefundRequest(order)
+        if (request?.status !== 'requested') {
+          return NextResponse.json(
+            { error: 'There is no open refund request on this order.' },
+            { status: 400 },
+          )
+        }
+        let refund: { amount: number; manual: boolean }
+        try {
+          refund = await refundWholeOrder(order, fetcher)
+        } catch (refundErr: any) {
+          return NextResponse.json(
+            {
+              error: `Refund failed, nothing was changed: ${refundErr?.message ?? 'unknown error'}`,
+            },
+            { status: 502 },
+          )
+        }
+        try {
+          await saveOrderMetadata(
+            id,
+            order,
+            {
+              refund_request: {
+                ...request,
+                status: 'refunded',
+                processed_at: new Date().toISOString(),
+                amount: refund.amount,
+                ...(refund.manual ? { refunded_manually: true } : {}),
+              },
+            },
+            fetcher,
+          )
+        } catch (saveErr: any) {
+          return NextResponse.json(
+            {
+              error: `The customer WAS refunded £${refund.amount.toFixed(2)}, but the order could not be updated: ${saveErr?.message ?? 'unknown error'}. Do not refund again.`,
+            },
+            { status: 500 },
+          )
+        }
+        // Release the stock of an order that never left the shop.
+        await cancelRefundedOrder(id, fetcher)
+        if (
+          order.email &&
+          !isSyntheticEmail(order.email) &&
+          refund.amount > 0
+        ) {
+          try {
+            const { subject, html, text, resendTemplate } =
+              refundConfirmationEmail(order, refund.amount, order.items ?? [])
+            await sendMail({
+              to: order.email,
+              subject,
+              html,
+              text,
+              resendTemplate,
+            })
+            const adminEmail = adminRefundEmail(order, refund.amount)
+            notifyOwner({
+              subject: adminEmail.subject,
+              html: adminEmail.html,
+              text: adminEmail.text,
+              resendTemplate: adminEmail.resendTemplate,
+              customerEmail: order.email,
+            }).catch(() => {})
+          } catch (refundEmailErr) {
+            console.error(
+              `[order accept-refund] refund email failed for ${id}:`,
+              refundEmailErr,
+            )
+          }
+        }
+        data = {
+          refunded: true,
+          refundAmount: refund.amount,
+          manual: refund.manual,
+        }
+        break
+      }
+      case 'decline-refund': {
+        let order: any
+        try {
+          order = await getFlowOrder(id, fetcher)
+        } catch (loadErr: any) {
+          return NextResponse.json(
+            { error: loadErr.message ?? 'Order not found' },
+            { status: 404 },
+          )
+        }
+        const request = getRefundRequest(order)
+        if (request?.status !== 'requested') {
+          return NextResponse.json(
+            { error: 'There is no open refund request on this order.' },
+            { status: 400 },
+          )
+        }
+        try {
+          await saveOrderMetadata(
+            id,
+            order,
+            {
+              refund_request: {
+                ...request,
+                status: 'declined',
+                processed_at: new Date().toISOString(),
+              },
+            },
+            fetcher,
+          )
+        } catch (saveErr: any) {
+          return NextResponse.json(
+            { error: saveErr.message ?? 'Could not update the order' },
+            { status: 400 },
+          )
+        }
+        data = { declined: true }
+        break
+      }
       case 'confirm': {
         const res = await fetcher(`/admin/orders/${id}/complete`, {
           method: 'POST',
@@ -356,6 +720,17 @@ export async function PATCH(
       }
       case 'fulfill': {
         try {
+          const pre = await getFlowOrder(id, fetcher)
+          if (!hasMailInLines(pre) && !getOrderFlow(pre).accepted) {
+            return NextResponse.json(
+              { error: 'Accept the order first.' },
+              { status: 400 },
+            )
+          }
+        } catch (preErr) {
+          console.error(`[order fulfill] pre-check failed for ${id}:`, preErr)
+        }
+        try {
           data = await fulfillOrder(id, fetcher)
         } catch (fulfillErr: any) {
           return NextResponse.json(
@@ -487,39 +862,7 @@ export async function PATCH(
           )
         }
         if (!data?.alreadyShipped) {
-          try {
-            const orderRes = await fetcher(
-              `/admin/orders/${id}?fields=id,display_id,email,*items,shipping_address.address_1,shipping_address.address_2,shipping_address.city,shipping_address.postal_code,shipping_address.country_code`,
-            )
-            const orderData = await orderRes.json().catch(() => ({}))
-            const fullOrder = orderData?.order
-            if (fullOrder?.email) {
-              const { subject, html, text, resendTemplate } =
-                shippingConfirmationEmail(fullOrder, {
-                  trackingNumber: data?.parcel2goTrackingNumber,
-                })
-              await sendMail({
-                to: fullOrder.email,
-                subject,
-                html,
-                text,
-                resendTemplate,
-              })
-              const adminEmail = adminShippingEmail(fullOrder)
-              notifyOwner({
-                subject: adminEmail.subject,
-                html: adminEmail.html,
-                text: adminEmail.text,
-                resendTemplate: adminEmail.resendTemplate,
-                customerEmail: fullOrder.email,
-              }).catch(() => {})
-            }
-          } catch (shipEmailErr) {
-            console.error(
-              `[order ship] shipping confirmation email failed for ${id}:`,
-              shipEmailErr,
-            )
-          }
+          await sendDespatchEmails(id, fetcher, data?.parcel2goTrackingNumber)
         }
         break
       }
@@ -604,11 +947,15 @@ export async function PATCH(
         if (!data?.alreadyDelivered) {
           try {
             const orderRes = await fetcher(
-              `/admin/orders/${id}?fields=id,display_id,email,*items`,
+              `/admin/orders/${id}?fields=id,display_id,email,metadata,*items`,
             )
             const orderData = await orderRes.json().catch(() => ({}))
             const fullOrder = orderData?.order
-            if (fullOrder?.email) {
+            // A pick-up that has been collected (COMPLETED) sends no email.
+            if (
+              fullOrder?.email &&
+              fullOrder.metadata?.fulfillment_type !== 'pickup'
+            ) {
               const { subject, html, text, resendTemplate } =
                 deliveryConfirmationEmail(fullOrder)
               await sendMail({
@@ -914,9 +1261,8 @@ export async function PATCH(
         break
       }
       case 'approve-return': {
-        const { returnId, skip_label: skipLabel } = body as {
+        const { returnId } = body as {
           returnId?: string
-          skip_label?: boolean
         }
         if (!returnId) {
           return NextResponse.json(
@@ -953,12 +1299,24 @@ export async function PATCH(
               },
             )
           }
-          // Approving a return emails the customer a prepaid label. Book it
-          // FIRST so a booking problem (no address, low Prepay balance...)
-          // stops the approval before anything is refunded. Pass
-          // skip_label: true to approve without a label.
+          // The return moves to PROCESSING. A prepaid label is only bought
+          // (and emailed automatically) when the customer asked for one
+          // while requesting the return. Book it FIRST so a booking problem
+          // (no address, low Prepay balance...) stops the move before the
+          // status changes. NOTHING is refunded here: the refund happens
+          // in "receive-return" once the goods are back and inspected.
           let approvedLabel: BookedLabel | null = null
-          if (!skipLabel && hasEmailableAddress(order.email)) {
+          const wantsLabel = record.label_requested === true
+          if (wantsLabel && !hasEmailableAddress(order.email)) {
+            return NextResponse.json(
+              {
+                error:
+                  'The customer asked for a prepaid return label, but this order has no email address to send it to.',
+              },
+              { status: 400 },
+            )
+          }
+          if (wantsLabel) {
             approvedLabel = await bookCustomerLabel(
               id,
               (record.items ?? []).map((i: any) => ({
@@ -1058,7 +1416,10 @@ export async function PATCH(
           }
           // Staff can lower (or otherwise adjust) the refund after
           // inspecting the condition of the goods.
-          let finalAmount: number = record.refund_amount
+          // Default = the items' value minus the prepaid label fee (when the
+          // customer asked for a label).
+          const labelFeeTaken = returnLabelFee(record)
+          let finalAmount: number = returnNetRefund(record)
           if (
             receivedRefundOverride !== undefined &&
             receivedRefundOverride !== null
@@ -1086,12 +1447,15 @@ export async function PATCH(
               refund_amount: finalAmount,
               received_at: nowIso,
               processed_at: nowIso,
+              ...(labelFeeTaken > 0
+                ? { label_fee_deducted: labelFeeTaken }
+                : {}),
             },
             fetcher,
             actor,
           )
           data = result.data
-          if (order.email) {
+          if (order.email && finalAmount > 0) {
             try {
               const { subject, html, text, resendTemplate } =
                 refundConfirmationEmail(order, finalAmount, record.items)
@@ -1148,6 +1512,12 @@ export async function PATCH(
           if (existing && existing.status === 'refunded') {
             return NextResponse.json(
               { error: 'This return was already refunded' },
+              { status: 400 },
+            )
+          }
+          if (existing && existing.status === 'rejected') {
+            return NextResponse.json(
+              { error: 'This return was already rejected' },
               { status: 400 },
             )
           }

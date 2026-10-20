@@ -218,9 +218,14 @@ export async function getOrder(id: string) {
   const data = await api<any>(`/api/admin/orders/${id}`)
   return data.order
 }
-export async function updateOrderStatus(id: string, action: string) {
+export async function updateOrderStatus(
+  id: string,
+  action: string,
+  extra?: Record<string, unknown>,
+) {
   return mutate(`/api/admin/orders/${id}`, 'PATCH', {
     action,
+    ...(extra ?? {}),
   })
 }
 export async function swapOrderItem(

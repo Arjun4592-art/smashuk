@@ -24,6 +24,18 @@ import { printShippingLabel } from '@/lib/printer/print-shipping-label'
 import { medusaOrderToReceiptData } from '@/lib/printer/order-to-receipt'
 import OrderTimeline from '@/components/dashboard/OrderTimeline'
 import {
+  FLOW_LABEL,
+  RETURN_LABEL_FEE,
+  getFlowActions,
+  getOrderFlow,
+  getRefundRequest,
+  isPastDespatch,
+  returnLabelFee,
+  returnNetRefund,
+  canRequestRefund,
+  type FlowStage,
+} from '@/lib/order-flow'
+import {
   Badge,
   Btn,
   ConfirmSheet,
@@ -70,7 +82,19 @@ function courierDateTime(iso?: string | null) {
       })
 }
 
-const ITEM_METADATA_SKIP = new Set(['source', 'isGift'])
+const ITEM_METADATA_SKIP = new Set([
+  'source',
+  'isGift',
+  // Internal keys that tie a stringing service to its racket. The storefront
+  // needs them, staff do not, so they are not shown as chips.
+  'linked_config',
+  'linked_product_id',
+  'linked_variant_id',
+])
+
+function itemMetaLabel(key: string) {
+  return key === 'linked_product' ? 'For racket' : prettify(key)
+}
 const ORDER_METADATA_SKIP = new Set([
   'returns',
   'staff_comments',
@@ -87,6 +111,11 @@ type Action =
   | 'ship'
   | 'deliver'
   | 'ship-box'
+  | 'accept'
+  | 'despatch'
+  | 'accept-refund'
+  | 'decline-refund'
+  | 'request-refund'
 
 const ACTION_VERB: Record<Action, string> = {
   confirm: 'complete',
@@ -97,6 +126,11 @@ const ACTION_VERB: Record<Action, string> = {
   ship: 'dispatch',
   deliver: 'mark as delivered',
   'ship-box': 'ship the box for',
+  accept: 'accept',
+  despatch: 'despatch',
+  'accept-refund': 'refund',
+  'decline-refund': 'dismiss the refund request for',
+  'request-refund': 'log a refund request for',
 }
 
 function fmt(amount: number, currency = 'GBP') {
@@ -273,10 +307,31 @@ export default function OrderDetailPage({
         } else {
           toast.success('Box shipped — label emailed to the customer')
         }
+      } else if (action === 'accept') {
+        toast.success(
+          result?.emailed === false
+            ? 'Order accepted — PROCESSING (no email was sent)'
+            : 'Order accepted — PROCESSING, customer emailed',
+        )
+      } else if (action === 'despatch') {
+        if (result?.warning) toast.warning(result.warning, { duration: 12000 })
+        else toast.success('Label bought — order DESPATCHED')
+      } else if (action === 'accept-refund') {
+        toast.success(
+          result?.manual
+            ? `Refund accepted — hand £${Number(result.refundAmount).toFixed(2)} back to the customer (cash order)`
+            : `Refund accepted — £${Number(result?.refundAmount ?? 0).toFixed(2)} refunded`,
+        )
+      } else if (action === 'decline-refund') {
+        toast.success('Refund request dismissed')
+      } else if (action === 'request-refund') {
+        toast.success('Refund request logged')
       } else {
         toast.success(
           action === 'fulfill'
-            ? 'Order marked as fulfilled'
+            ? order?.metadata?.fulfillment_type === 'pickup'
+              ? 'Order is READY FOR PICKUP — customer emailed'
+              : 'Order marked as fulfilled'
             : action === 'capture'
               ? 'Payment captured'
               : action === 'ship'
@@ -310,6 +365,7 @@ export default function OrderDetailPage({
   const canReturn =
     !!order &&
     order.payment_status !== 'not_paid' &&
+    isPastDespatch(order) &&
     Object.values(remainingReturnQty).some((q) => q > 0)
 
   const handleProcessReturn = async (
@@ -363,9 +419,13 @@ export default function OrderDetailPage({
         toast.warning(
           `Return approved, but the label email did not go out: ${result.return_label.error ?? 'unknown error'}`,
         )
+      } else if (result?.return_label) {
+        toast.success(
+          'Return is PROCESSING — prepaid label bought and emailed. No refund yet.',
+        )
       } else {
         toast.success(
-          'Return approved — label sent. Refund after the item is received.',
+          'Return is PROCESSING — no label requested. No refund yet.',
         )
       }
       await fetchOrder(true)
@@ -378,12 +438,12 @@ export default function OrderDetailPage({
 
   const startReceive = (r: any) => {
     setReceivingReturnId(r.id)
-    setReceiveAmount(Number(r.refund_amount ?? 0).toFixed(2))
+    setReceiveAmount(returnNetRefund(r).toFixed(2))
   }
 
   const handleReceiveReturn = async (r: any) => {
     const amount = parseFloat(receiveAmount)
-    if (Number.isNaN(amount) || amount <= 0) {
+    if (Number.isNaN(amount) || amount < 0) {
       toast.error('Enter a valid refund amount')
       return
     }
@@ -392,9 +452,7 @@ export default function OrderDetailPage({
       await receiveOrderReturn(
         id,
         r.id,
-        Math.abs(amount - Number(r.refund_amount ?? 0)) > 0.005
-          ? amount
-          : undefined,
+        Math.abs(amount - returnNetRefund(r)) > 0.005 ? amount : undefined,
       )
       toast.success(
         `Return received — ${fmt(amount, order?.currency_code ?? 'gbp')} refunded`,
@@ -411,8 +469,15 @@ export default function OrderDetailPage({
   const handleRejectReturn = async (returnId: string) => {
     setReturnActionLoading(returnId)
     try {
-      await rejectOrderReturn(id, returnId)
-      toast.success('Return request rejected')
+      const note = window.prompt(
+        'Why is the refund being rejected? This is emailed to the customer (optional).',
+      )
+      if (note === null) {
+        setReturnActionLoading('')
+        return
+      }
+      await rejectOrderReturn(id, returnId, note.trim() || undefined)
+      toast.success('REFUND REJECTED — customer emailed')
       await fetchOrder(true)
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to reject return')
@@ -562,6 +627,27 @@ export default function OrderDetailPage({
     fBadge = { tone: 'yellow', glyph: 'partial', text: 'Partially fulfilled' }
   else fBadge = { tone: 'yellow', glyph: 'empty', text: 'Unfulfilled' }
 
+  // Order flow: NEW -> PROCESSING -> READY FOR PICKUP / DESPATCHED -> ...
+  // Mail-in stringing bookings keep their own box / label pipeline.
+  const hasMailInLines = (order.items ?? []).some(
+    (i: any) =>
+      i?.metadata?.mail_in === true || i?.metadata?.mail_in === 'true',
+  )
+  const useFlow = !hasMailInLines
+  const flow = getOrderFlow(order)
+  if (useFlow) {
+    fBadge = {
+      tone: flow.tone,
+      glyph:
+        flow.stage === 'new'
+          ? 'empty'
+          : flow.stage === 'processing'
+            ? 'partial'
+            : 'full',
+      text: flow.label,
+    }
+  }
+
   const ps: string = order.payment_status ?? ''
   const pBadge: {
     tone: Tone
@@ -654,6 +740,21 @@ export default function OrderDetailPage({
     }
   }
 
+  if (useFlow) {
+    const flowActions = getFlowActions(order)
+    const toBtn = (a: (typeof flowActions)[number]) => ({
+      label: a.label,
+      onClick: () => setConfirmAction(a.action),
+      loading: actionLoading === a.action,
+    })
+    btns = {}
+    if (flowActions[0]) btns.primary = toBtn(flowActions[0])
+    if (flowActions[1]) btns.secondary = toBtn(flowActions[1])
+    else if (flow.stage === 'despatched' && canShowLabel) {
+      btns.secondary = labelBtn
+    }
+  }
+
   // ── Sale breakdown (VAT-inclusive, same as the POS order screen) ───────
   // Medusa's order.subtotal is ex-VAT and order.total is net of any gift
   // card, so rebuild: what was sold, how much a gift card covered, what was
@@ -712,9 +813,34 @@ export default function OrderDetailPage({
       title: 'Archive order?',
       body: "Are you sure you want to archive this order? This action can't be undone from here.",
     },
-    fulfill: {
-      title: 'Fulfill order?',
-      body: 'This marks all items on this order as fulfilled.',
+    fulfill: isPickup
+      ? {
+          title: 'Order ready for pick-up?',
+          body: 'The order moves to READY FOR PICKUP and the customer is emailed.',
+        }
+      : {
+          title: 'Fulfill order?',
+          body: 'This marks all items on this order as fulfilled.',
+        },
+    accept: {
+      title: 'Accept this order?',
+      body: 'The order moves to PROCESSING and the customer is emailed.',
+    },
+    despatch: {
+      title: 'Buy the shipping label and despatch?',
+      body: 'This buys the shipping label and marks the order DESPATCHED. The customer is emailed their tracking details.',
+    },
+    'accept-refund': {
+      title: 'Accept this refund request?',
+      body: 'The customer is refunded in full and the order is marked REFUNDED. This can’t be undone from here.',
+    },
+    'decline-refund': {
+      title: 'Dismiss the refund request?',
+      body: 'No money moves. The order goes back to its previous status.',
+    },
+    'request-refund': {
+      title: 'Log a refund request?',
+      body: 'Use this when a customer asks for a refund before their order has left the shop. The order shows REFUND REQUEST RECEIVED until you accept it.',
     },
     capture: {
       title: 'Confirm payment received',
@@ -805,9 +931,9 @@ export default function OrderDetailPage({
                 onClick: () => setShowReturnModal(true),
               },
               {
-                label: 'Mark as complete',
-                hidden: order.status !== 'pending',
-                onClick: () => setConfirmAction('confirm'),
+                label: 'Log refund request',
+                hidden: isCanceled || isArchived || !canRequestRefund(order),
+                onClick: () => setConfirmAction('request-refund'),
               },
               {
                 label: 'Archive order',
@@ -1041,7 +1167,7 @@ export default function OrderDetailPage({
                             key={k}
                             className='text-[12px] px-2 py-1 rounded-md bg-[#F2F7F5] text-[#008060]'
                           >
-                            {prettify(k)}: {String(v)}
+                            {itemMetaLabel(k)}: {String(v)}
                           </span>
                         ))}
                       </div>
@@ -1078,6 +1204,45 @@ export default function OrderDetailPage({
             )}
           </Section>
 
+          {/* Refund request (before the order was despatched / picked up) */}
+          {getRefundRequest(order) && (
+            <Section className='order-3 lg:order-none px-4 py-4 lg:px-5'>
+              <SectionTitle>Refund request</SectionTitle>
+              <div className='mt-2 rounded-xl border border-[#E1E3E5] p-3'>
+                <Badge
+                  tone={
+                    getRefundRequest(order)?.status === 'refunded'
+                      ? 'gray'
+                      : getRefundRequest(order)?.status === 'declined'
+                        ? 'red'
+                        : 'orange'
+                  }
+                >
+                  {getRefundRequest(order)?.status === 'refunded'
+                    ? FLOW_LABEL.refunded
+                    : getRefundRequest(order)?.status === 'declined'
+                      ? 'Dismissed'
+                      : FLOW_LABEL.refund_request_received}
+                </Badge>
+                <p className='text-[13px] text-[#6D7175] mt-2 capitalize'>
+                  {getRefundRequest(order)?.source} ·{' '}
+                  {getRefundRequest(order)?.reason}
+                </p>
+                {getRefundRequest(order)?.note && (
+                  <p className='text-[13px] text-[#6D7175] mt-0.5'>
+                    {getRefundRequest(order)?.note}
+                  </p>
+                )}
+                {getRefundRequest(order)?.status === 'refunded' && (
+                  <p className='text-[13px] text-[#202223] mt-0.5'>
+                    Refunded{' '}
+                    {fmt(getRefundRequest(order)?.amount ?? 0, currency)}
+                  </p>
+                )}
+              </div>
+            </Section>
+          )}
+
           {/* Returns (only when there are some) */}
           {returns.length > 0 && (
             <Section className='order-3 lg:order-none px-4 py-4 lg:px-5'>
@@ -1100,10 +1265,14 @@ export default function OrderDetailPage({
                                 : 'yellow'
                         }
                       >
-                        <span className='capitalize'>
-                          {r.status === 'awaiting_return'
-                            ? 'Awaiting item'
-                            : r.status}
+                        <span>
+                          {r.status === 'requested'
+                            ? FLOW_LABEL.return_request_received
+                            : r.status === 'awaiting_return'
+                              ? FLOW_LABEL.processing
+                              : r.status === 'refunded'
+                                ? FLOW_LABEL.refunded
+                                : FLOW_LABEL.refund_rejected}
                         </span>
                       </Badge>
                       <span className='text-[12.5px] text-[#6D7175] capitalize'>
@@ -1123,6 +1292,23 @@ export default function OrderDetailPage({
                         {r.note}
                       </p>
                     )}
+                    {(r.status === 'requested' ||
+                      r.status === 'awaiting_return') && (
+                      <p className='text-[13px] mt-1 font-medium text-[#202223]'>
+                        Prepaid return label requested:{' '}
+                        {r.label_requested
+                          ? `YES (${fmt(returnLabelFee(r), currency)} is taken off the refund)`
+                          : r.label
+                            ? 'Label already sent'
+                            : 'NO'}
+                      </p>
+                    )}
+                    {r.label_fee_deducted > 0 && (
+                      <p className='text-[13px] text-[#6D7175] mt-0.5'>
+                        Label fee deducted:{' '}
+                        {fmt(r.label_fee_deducted, currency)}
+                      </p>
+                    )}
                     {r.label?.tracking_number && (
                       <p className='text-[13px] text-[#6D7175] mt-0.5'>
                         Return tracking: {r.label.tracking_number}
@@ -1137,7 +1323,7 @@ export default function OrderDetailPage({
                             disabled={!!returnActionLoading}
                             onClick={() => startReceive(r)}
                           >
-                            Received & refund
+                            Items received — refund
                           </Btn>
                           <Btn
                             variant='dangerOutline'
@@ -1145,7 +1331,7 @@ export default function OrderDetailPage({
                             disabled={!!returnActionLoading}
                             onClick={() => handleRejectReturn(r.id)}
                           >
-                            Cancel return
+                            Reject refund
                           </Btn>
                         </div>
                       )}
@@ -1155,6 +1341,8 @@ export default function OrderDetailPage({
                           <p className='text-[13px] text-[#202223]'>
                             Item received and checked? Confirm the amount to
                             refund (lower it if the item is damaged).
+                            {returnLabelFee(r) > 0 &&
+                              ` The ${fmt(returnLabelFee(r), currency)} prepaid label fee is already taken off.`}
                           </p>
                           <input
                             type='number'
@@ -1191,14 +1379,16 @@ export default function OrderDetailPage({
                           disabled={!!returnActionLoading}
                           onClick={() => handleApproveReturn(r.id)}
                         >
-                          Approve & send label
+                          {r.label_requested
+                            ? 'Process & send label'
+                            : 'Start processing'}
                         </Btn>
                         <Btn
                           variant='dangerOutline'
                           disabled={!!returnActionLoading}
                           onClick={() => handleRejectReturn(r.id)}
                         >
-                          Reject
+                          Reject refund
                         </Btn>
                       </div>
                     )}

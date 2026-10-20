@@ -1,6 +1,8 @@
 'use client'
 
 import { useRef } from 'react'
+import { toast } from 'sonner'
+import { usePosVoiceAssistant } from '@/hooks/usePosVoiceAssistant'
 interface Props {
   value: string
   onChange: (val: string) => void
@@ -17,6 +19,25 @@ export default function ProductSearch({
   onCustomItem,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
+  // --- Voice assistant ----------------------------------------------------
+  // Tap the mic, or turn on "Hello Smash" and just say it. It only FILLS the
+  // search box — it never calls onSubmit (the barcode/SKU "add straight to
+  // cart" path), so a misheard word can never add the wrong product.
+  // See hooks/usePosVoiceAssistant.ts.
+  const {
+    supported: voiceSupported,
+    listening,
+    wakeOn,
+    wakeListening,
+    startListening,
+    stopListening,
+    setWakeOn,
+  } = usePosVoiceAssistant({
+    onQuery: onChange,
+    onClear: () => onChange(''),
+    onOpenCamera,
+    onDone: () => inputRef.current?.focus(),
+  })
   return (
     <div className='flex gap-2'>
       {}
@@ -79,6 +100,96 @@ export default function ProductSearch({
           </button>
         )}
       </div>
+
+      {}
+      {voiceSupported && (
+        <button
+          onClick={() => (listening ? stopListening() : startListening())}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+            listening
+              ? 'animate-pulse'
+              : 'hover:border-[#008060] hover:text-[#008060] hover:bg-[#F2F7F5]'
+          }`}
+          style={{
+            background: listening ? '#FFF4F4' : '#FFFFFF',
+            borderColor: listening ? '#D72C0D' : '#E1E3E5',
+            color: listening ? '#D72C0D' : '#6D7175',
+          }}
+          title={
+            listening
+              ? 'Listening… tap to stop'
+              : 'Voice search — say a product, brand, category (e.g. "rackets") or SKU'
+          }
+          aria-label={listening ? 'Stop voice search' : 'Start voice search'}
+          aria-pressed={listening}
+        >
+          <svg
+            width='16'
+            height='16'
+            viewBox='0 0 24 24'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth='2'
+            strokeLinecap='round'
+            strokeLinejoin='round'
+          >
+            <rect x='9' y='2' width='6' height='12' rx='3' />
+            <path d='M5 11a7 7 0 0014 0' />
+            <line x1='12' y1='18' x2='12' y2='22' />
+          </svg>
+          <span className='hidden sm:inline'>
+            {listening ? 'Listening…' : 'Voice'}
+          </span>
+        </button>
+      )}
+
+      {}
+      {voiceSupported && (
+        <button
+          onClick={() => {
+            const next = !wakeOn
+            setWakeOn(next)
+            if (next) {
+              toast('Hands-free voice is on', {
+                description:
+                  'Say "Hello Smash" or "search for ..." — e.g. "search for rackets". The microphone stays open while this is on.',
+                duration: 4500,
+              })
+            }
+          }}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+            wakeOn
+              ? ''
+              : 'hover:border-[#008060] hover:text-[#008060] hover:bg-[#F2F7F5]'
+          }`}
+          style={{
+            background: wakeOn ? '#F2F7F5' : '#FFFFFF',
+            borderColor: wakeOn ? '#008060' : '#E1E3E5',
+            color: wakeOn ? '#008060' : '#6D7175',
+          }}
+          title={
+            wakeOn
+              ? 'Hands-free voice is on — say "Hello Smash" or "search for ...". Tap to turn off.'
+              : 'Turn on hands-free voice search (keeps the microphone open)'
+          }
+          aria-label='Toggle Hello Smash hands-free voice search'
+          aria-pressed={wakeOn}
+        >
+          <span
+            className={`inline-block w-2 h-2 rounded-full ${
+              wakeListening ? 'animate-pulse' : ''
+            }`}
+            style={{
+              background: wakeOn
+                ? wakeListening
+                  ? '#008060'
+                  : '#B5E4D8'
+                : '#C9CCCF',
+            }}
+          />
+          <span className='hidden md:inline'>Hello Smash</span>
+        </button>
+      )}
 
       {}
       <button

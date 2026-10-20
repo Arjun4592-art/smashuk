@@ -15,6 +15,19 @@ import {
 } from '@/lib/constants'
 import { usePrinterStore } from '@/store/printerStore'
 import {
+  updateOrderStatus,
+  approveOrderReturn,
+  receiveOrderReturn,
+  rejectOrderReturn,
+} from '@/lib/api/dashboard'
+import {
+  FLOW_LABEL,
+  FLOW_TONE,
+  returnLabelFee,
+  returnNetRefund,
+  type FlowStage,
+} from '@/lib/order-flow'
+import {
   printReceipt,
   printReceiptOnLabel,
   NoPrinterConnectedError,
@@ -93,6 +106,27 @@ export interface OrderDetailData {
   returned: boolean
   isPickup?: boolean
   fulfillmentStatus?: string
+  source?: 'pos' | 'website' | 'dashboard'
+  /** Order flow (see lib/order-flow.ts), computed by /api/pos/orders */
+  flowStage?: string
+  flowLabel?: string
+  flowActions?: {
+    action: string
+    label: string
+    variant: 'primary' | 'secondary' | 'danger'
+    confirm: string
+  }[]
+  refundRequest?: { status: string; reason?: string; note?: string } | null
+  returnRecords?: {
+    id: string
+    status: 'requested' | 'awaiting_return' | 'refunded' | 'rejected'
+    reason: string
+    refund_amount: number
+    label_requested: boolean
+    label_fee: number | null
+    label_sent: boolean
+    items: { title?: string; quantity: number }[]
+  }[]
   // Signed tracking token (see lib/api/order-track-token.ts) so a reprinted
   // receipt's QR works the same as the one printed at sale time.
   trackingToken?: string
@@ -119,7 +153,77 @@ export default function OrderDetailModal({
   const [fulfilling, setFulfilling] = useState(false)
   const [labelLoading, setLabelLoading] = useState(false)
   const [fulfillError, setFulfillError] = useState('')
+  const [flowBusy, setFlowBusy] = useState('')
   const [showEmailReceipt, setShowEmailReceipt] = useState(false)
+  // Online (website / dashboard) orders follow the order flow; walk-in POS
+  // sales keep the simple pick-up / dispatch button.
+  const useFlow = order.source !== 'pos' && !!order.flowStage
+  const handleFlowAction = async (action: string, confirmText?: string) => {
+    if (confirmText && !window.confirm(confirmText)) return
+    setFlowBusy(action)
+    setFulfillError('')
+    try {
+      const result: any = await updateOrderStatus(
+        order.medusaOrderId ?? order.id,
+        action,
+      )
+      if (action === 'despatch' && result?.warning) {
+        toast.warning(result.warning, { duration: 12000 })
+      } else if (action === 'accept-refund' && result?.manual) {
+        toast.success(
+          `Refund accepted — hand £${Number(result.refundAmount).toFixed(2)} back to the customer`,
+        )
+      }
+      onFulfill?.()
+      onClose()
+    } catch (err: unknown) {
+      setFulfillError(err instanceof Error ? err.message : 'Action failed')
+    } finally {
+      setFlowBusy('')
+    }
+  }
+  const handleReturnAction = async (
+    kind: 'approve' | 'receive' | 'reject',
+    r: NonNullable<OrderDetailData['returnRecords']>[number],
+  ) => {
+    const orderId = order.medusaOrderId ?? order.id
+    setFlowBusy(r.id)
+    setFulfillError('')
+    try {
+      if (kind === 'approve') {
+        await approveOrderReturn(orderId, r.id)
+      } else if (kind === 'receive') {
+        const net = returnNetRefund(r)
+        const input = window.prompt(
+          `Item received and checked? Confirm the amount to refund (£).${returnLabelFee(r) > 0 ? ` The £${returnLabelFee(r).toFixed(2)} prepaid label fee is already taken off.` : ''}`,
+          net.toFixed(2),
+        )
+        if (input === null) return
+        const amount = parseFloat(input)
+        if (Number.isNaN(amount) || amount < 0) {
+          setFulfillError('Enter a valid refund amount')
+          return
+        }
+        await receiveOrderReturn(
+          orderId,
+          r.id,
+          Math.abs(amount - net) > 0.005 ? amount : undefined,
+        )
+      } else {
+        const note = window.prompt(
+          'Why is the refund being rejected? This is emailed to the customer (optional).',
+        )
+        if (note === null) return
+        await rejectOrderReturn(orderId, r.id, note.trim() || undefined)
+      }
+      onFulfill?.()
+      onClose()
+    } catch (err: unknown) {
+      setFulfillError(err instanceof Error ? err.message : 'Action failed')
+    } finally {
+      setFlowBusy('')
+    }
+  }
   const printerType = usePrinterStore((s) => s.connectionType)
   const handleFulfill = async () => {
     setFulfilling(true)
@@ -188,6 +292,7 @@ export default function OrderDetailModal({
     }
   }
   const canFulfill =
+    !useFlow &&
     !order.returned &&
     (order.isPickup
       ? order.fulfillmentStatus !== 'delivered' &&
@@ -366,17 +471,37 @@ export default function OrderDetailModal({
   const isShippedStatus = ['shipped', 'partially_shipped'].includes(
     order.fulfillmentStatus ?? '',
   )
-  const showReturn = !order.returned && !isAwaitingPickup(order) && !canFulfill
+  const flowPastDespatch = [
+    'despatched',
+    'delivered',
+    'completed',
+    'refund_rejected',
+  ].includes(order.flowStage ?? '')
+  const showReturn =
+    !order.returned &&
+    !isAwaitingPickup(order) &&
+    !canFulfill &&
+    (!useFlow || flowPastDespatch)
   const canPrintLabel =
     !order.isPickup &&
     !order.returned &&
     !canFulfill &&
+    (!useFlow || order.flowStage === 'despatched') &&
     !['delivered', 'partially_delivered'].includes(
       order.fulfillmentStatus ?? '',
     )
 
   let fBadge: { tone: Tone; glyph: 'empty' | 'partial' | 'full'; text: string }
-  if (order.returned) fBadge = { tone: 'gray', glyph: 'full', text: 'Returned' }
+  if (useFlow) {
+    const stage = order.flowStage as FlowStage
+    fBadge = {
+      tone: FLOW_TONE[stage] ?? 'gray',
+      glyph:
+        stage === 'new' ? 'empty' : stage === 'processing' ? 'partial' : 'full',
+      text: FLOW_LABEL[stage] ?? order.flowLabel ?? stage,
+    }
+  } else if (order.returned)
+    fBadge = { tone: 'gray', glyph: 'full', text: 'Returned' }
   else if (isAwaitingPickup(order))
     fBadge = { tone: 'yellow', glyph: 'empty', text: 'Awaiting pickup' }
   else if (canFulfill)
@@ -561,6 +686,94 @@ export default function OrderDetailModal({
                     })}
                   </div>
 
+                  {useFlow && (order.flowActions?.length ?? 0) > 0 && (
+                    <div className='mt-3 space-y-2'>
+                      {order.flowActions!.map((a) => (
+                        <Btn
+                          key={a.action}
+                          variant={
+                            a.variant === 'primary' ? 'primary' : 'secondary'
+                          }
+                          full
+                          loading={flowBusy === a.action}
+                          disabled={!!flowBusy}
+                          onClick={() => handleFlowAction(a.action, a.confirm)}
+                        >
+                          {a.label}
+                        </Btn>
+                      ))}
+                    </div>
+                  )}
+                  {useFlow && order.refundRequest && (
+                    <p className='mt-3 text-[12.5px] text-[#6D7175]'>
+                      Refund request:{' '}
+                      {order.refundRequest.reason ?? 'no reason given'}
+                    </p>
+                  )}
+                  {useFlow &&
+                    (order.returnRecords ?? [])
+                      .filter(
+                        (r) =>
+                          r.status === 'requested' ||
+                          r.status === 'awaiting_return',
+                      )
+                      .map((r) => (
+                        <div
+                          key={r.id}
+                          className='mt-3 rounded-xl border border-[#E1E3E5] p-3 space-y-2'
+                        >
+                          <p className='text-[13px] font-semibold text-[#202223]'>
+                            {r.status === 'requested'
+                              ? FLOW_LABEL.return_request_received
+                              : FLOW_LABEL.processing}
+                          </p>
+                          <p className='text-[12.5px] text-[#6D7175]'>
+                            {r.items
+                              .map((i) => `${i.quantity}× ${i.title ?? 'item'}`)
+                              .join(', ')}
+                            {r.reason ? ` · ${r.reason}` : ''}
+                          </p>
+                          <p className='text-[12.5px] font-medium text-[#202223]'>
+                            Prepaid label requested:{' '}
+                            {r.label_requested
+                              ? `YES (£${returnLabelFee(r).toFixed(2)} taken off the refund)`
+                              : r.label_sent
+                                ? 'label already sent'
+                                : 'NO'}
+                          </p>
+                          {r.status === 'requested' ? (
+                            <Btn
+                              variant='primary'
+                              full
+                              loading={flowBusy === r.id}
+                              disabled={!!flowBusy}
+                              onClick={() => handleReturnAction('approve', r)}
+                            >
+                              {r.label_requested
+                                ? 'Process & send label'
+                                : 'Start processing'}
+                            </Btn>
+                          ) : (
+                            <Btn
+                              variant='primary'
+                              full
+                              loading={flowBusy === r.id}
+                              disabled={!!flowBusy}
+                              onClick={() => handleReturnAction('receive', r)}
+                            >
+                              Items received — refund
+                            </Btn>
+                          )}
+                          <Btn
+                            variant='secondary'
+                            full
+                            disabled={!!flowBusy}
+                            onClick={() => handleReturnAction('reject', r)}
+                          >
+                            Reject refund
+                          </Btn>
+                        </div>
+                      ))}
                   {canFulfill && (
                     <div className='mt-3 space-y-2'>
                       <Btn

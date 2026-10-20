@@ -12,6 +12,7 @@ import {
   type POSDetailEntry,
 } from '@/lib/api/pos'
 import ProductSearch from '@/components/pos/ProductSearch'
+import { matchesPosSearch } from '@/lib/pos/search-match'
 import CategoryFilter from '@/components/pos/CategoryFilter'
 import ProductGrid, { POSProduct } from '@/components/pos/ProductGrid'
 import VariantPickerModal from '@/components/pos/VariantPickerModal'
@@ -367,12 +368,7 @@ export default function BillingPage() {
       const matchSize =
         size === 'All sizes' ||
         p.sizes.some((s: any) => s.title === sizeTitle && s.value === size)
-      const matchSearch =
-        !q ||
-        (p.name ?? '').toLowerCase().includes(q) ||
-        (p.sku ?? '').toLowerCase().includes(q) ||
-        (p.ean ?? '').includes(q) ||
-        (p.barcode ?? '').toLowerCase().includes(q)
+      const matchSearch = matchesPosSearch(p, q)
       return matchCat && matchSize && matchSearch
     })
   }, [indexEntries, cat, size, sizeTitle, search])

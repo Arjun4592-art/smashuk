@@ -33,6 +33,15 @@ export interface ReturnRecord {
   processed_at?: string
   /** When the returned goods were received and inspected */
   received_at?: string
+  /**
+   * The customer asked for a prepaid return label when they requested the
+   * return. The label is only bought when staff move the return to
+   * PROCESSING, and `label_fee` is taken off the refund.
+   */
+  label_requested?: boolean
+  label_fee?: number
+  /** The label fee that was taken off the refund when the goods arrived */
+  label_fee_deducted?: number
   /** Set when a prepaid return label was booked and emailed to the customer */
   label?: {
     tracking_number?: string

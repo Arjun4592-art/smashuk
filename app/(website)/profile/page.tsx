@@ -9,6 +9,13 @@ import { useWishlistStore } from '@/store/wishlistStore'
 import { useOrders } from '@/hooks/useOrders'
 import { formatCurrency } from '@/lib/utils'
 import { getDisplayOrderStatus } from '@/lib/order-status'
+import {
+  FLOW_LABEL,
+  FLOW_PILL_CLASS,
+  FLOW_STAGE_ORDER,
+  canRequestReturn,
+  getRefundRequest,
+} from '@/lib/order-flow'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { PackageIcon, ChevronRightIcon, HeartIcon } from '@/components/ui/Icons'
@@ -55,15 +62,13 @@ const TABS = [
 ] as const
 type TabKey = (typeof TABS)[number]['key']
 
-const ORDER_STATUS_META: Record<string, { label: string; cls: string }> = {
-  pending: { label: 'Pending', cls: 'bg-[#FFC453]/15 text-[#916A00]' },
-  confirmed: { label: 'Confirmed', cls: 'bg-[#2C6ECB]/15 text-[#2C6ECB]' },
-  processing: { label: 'Processing', cls: 'bg-[#2C6ECB]/15 text-[#2C6ECB]' },
-  shipped: { label: 'Shipped', cls: 'bg-purple-100 text-purple-700' },
-  delivered: { label: 'Delivered', cls: 'bg-[#008060]/15 text-[#008060]' },
-  cancelled: { label: 'Cancelled', cls: 'bg-[#D82C0D]/15 text-[#D82C0D]' },
-  refunded: { label: 'Refunded', cls: 'bg-gray-100 text-gray-600' },
-}
+const ORDER_STATUS_META: Record<string, { label: string; cls: string }> =
+  Object.fromEntries(
+    FLOW_STAGE_ORDER.map((s) => [
+      s,
+      { label: FLOW_LABEL[s], cls: FLOW_PILL_CLASS[s] },
+    ]),
+  )
 
 type ReturnRecord = {
   id: string
@@ -73,6 +78,7 @@ type ReturnRecord = {
   requested_at?: string
   processed_at?: string
   label?: { tracking_number?: string; carrier?: string }
+  label_requested?: boolean
 }
 
 /** Everything the order card needs to know about returns / refunds. */
@@ -108,8 +114,8 @@ function getOrderReturnState(order: any) {
     refundedRecords,
     isRefunded,
     isCancelled,
-    canReturn:
-      order.payment_status === 'captured' && !isCancelled && hasRemainingQty,
+    // Returns only open once the order has been despatched / picked up
+    canReturn: canRequestReturn(order) && hasRemainingQty,
   }
 }
 
@@ -150,6 +156,7 @@ function ProfilePageContent() {
   const defaultAddress =
     addresses.find((a) => a.is_default_shipping) ?? addresses[0]
   const [trackingOrderId, setTrackingOrderId] = useState<string | null>(null)
+  const [avatarFailed, setAvatarFailed] = useState(false)
   const [returnOrder, setReturnOrder] = useState<any>(null)
   const initialTab = (searchParams.get('tab') as TabKey | null) ?? 'overview'
   const [activeTab, setActiveTab] = useState<TabKey>(
@@ -199,11 +206,12 @@ function ProfilePageContent() {
             </div>
             <div className='flex items-center gap-4'>
               <div className='w-16 h-16 bg-[#E8553A] rounded-2xl flex items-center justify-center text-white font-montserrat font-black text-2xl shadow-lg overflow-hidden'>
-                {user.avatar ? (
+                {user.avatar && !avatarFailed ? (
                   <img
                     src={user.avatar}
                     alt={user.name}
                     className='w-full h-full object-cover'
+                    onError={() => setAvatarFailed(true)}
                   />
                 ) : (
                   user.name.slice(0, 2).toUpperCase()
@@ -558,14 +566,9 @@ function OrderRow({
   const shownItems = items.slice(0, 3)
   const itemCount = items.reduce((n, i) => n + (i.quantity ?? 1), 0)
 
-  // One badge, most important state first.
-  let badge = ORDER_STATUS_META[displayStatus] ?? ORDER_STATUS_META.pending
-  if (ret.isCancelled) badge = ORDER_STATUS_META.cancelled
-  else if (ret.requested.length > 0)
-    badge = { label: 'Return requested', cls: 'bg-amber-100 text-amber-700' }
-  else if (ret.awaiting.length > 0)
-    badge = { label: 'Return approved', cls: 'bg-[#2C6ECB]/15 text-[#2C6ECB]' }
-  else if (ret.isRefunded) badge = ORDER_STATUS_META.refunded
+  // One badge: the order flow stage (NEW, PROCESSING, DESPATCHED, ...)
+  const badge = ORDER_STATUS_META[displayStatus] ?? ORDER_STATUS_META.new
+  const refundRequest = getRefundRequest(order)
 
   const activeReturn = ret.requested[0] ?? ret.awaiting[0]
   const returnedItemCount = (activeReturn?.items ?? []).reduce(
@@ -647,12 +650,19 @@ function OrderRow({
       )}
       {ret.requested.length === 0 && ret.awaiting.length > 0 && (
         <div className='mt-3 rounded-lg bg-[#2C6ECB]/10 border border-[#2C6ECB]/20 px-3 py-2 text-xs font-lato text-[#1f4f94]'>
-          Your return was approved. Please send the item back using the label we
-          emailed you
+          We&apos;re processing your return.{' '}
           {activeReturn?.label?.tracking_number
-            ? ` (tracking: ${activeReturn.label.tracking_number})`
-            : ''}
-          .
+            ? `Please send the item back using the label we emailed you (tracking: ${activeReturn.label.tracking_number}).`
+            : activeReturn?.label_requested
+              ? 'Your prepaid return label is on its way by email.'
+              : 'Please send the item back to us, and keep your proof of postage.'}{' '}
+          We refund you once we&apos;ve received and checked it.
+        </div>
+      )}
+      {refundRequest?.status === 'requested' && (
+        <div className='mt-3 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-xs font-lato text-amber-800'>
+          Refund request received. We&apos;ll email you once it&apos;s been
+          reviewed.
         </div>
       )}
       {ret.requested.length === 0 &&

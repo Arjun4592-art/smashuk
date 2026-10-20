@@ -122,6 +122,33 @@ function buildTimeline(order: any): TimelineEvent[] {
     }
   }
 
+  if (order.metadata?.order_accepted_at) {
+    events.push({
+      id: 'order-accepted',
+      type: 'fulfilled',
+      message: 'Order accepted — PROCESSING',
+      timestamp: order.metadata.order_accepted_at,
+    })
+  }
+  const refundReq = order.metadata?.refund_request
+  if (refundReq?.requested_at) {
+    events.push({
+      id: 'refund-request',
+      type: 'return_requested',
+      message: 'Refund requested before despatch',
+      timestamp: refundReq.requested_at,
+      extra: refundReq.reason,
+    })
+  }
+  if (refundReq?.status === 'refunded' && refundReq.processed_at) {
+    events.push({
+      id: 'refund-request-done',
+      type: 'return_approved',
+      message: 'Refund request accepted — REFUNDED',
+      timestamp: refundReq.processed_at,
+    })
+  }
+
   for (const r of order.metadata?.returns ?? []) {
     const requestedAt = r.requested_at ?? r.created_at
     if (requestedAt) {
