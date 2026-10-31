@@ -94,6 +94,25 @@ function PlusIcon() {
     </svg>
   )
 }
+function TrashIcon() {
+  return (
+    <svg
+      width='14'
+      height='14'
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='2'
+      strokeLinecap='round'
+      strokeLinejoin='round'
+    >
+      <polyline points='3 6 5 6 21 6' />
+      <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6' />
+      <path d='M10 11v6M14 11v6' />
+      <path d='M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2' />
+    </svg>
+  )
+}
 function EditIcon() {
   return (
     <svg
@@ -299,9 +318,9 @@ function BulkDeleteCustomersModal({
         </ul>
         {withOrders > 0 && (
           <p className='text-[12.5px] text-[#B45309] bg-[#FFF7E6] border border-[#FFE0A3] rounded-lg px-3 py-2 mb-4'>
-            {withOrders} of the selected customer
-            {withOrders !== 1 ? 's have' : ' has'} placed orders. Double-check
-            the list before deleting.
+            {count === 1
+              ? 'This customer has placed orders. The orders stay in the store, but the customer profile will be gone.'
+              : `${withOrders} of the selected customer${withOrders !== 1 ? 's have' : ' has'} placed orders. Double-check the list before deleting.`}
           </p>
         )}
         <div className='flex items-center gap-3'>
@@ -428,7 +447,10 @@ function CustomersContent() {
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
   const openEditModal = (customer: (typeof customers)[number]) => {
-    const [firstName, ...rest] = customer.name.split(' ')
+    // The list shows the email as the "name" when a customer has no name. Don't
+    // copy that into the first-name box (saving would store the email as name).
+    const hasRealName = customer.name !== customer.email
+    const [firstName, ...rest] = hasRealName ? customer.name.split(' ') : ['']
     setEditingCustomer(customer)
     setEditForm({
       firstName: firstName ?? '',
@@ -451,9 +473,10 @@ function CustomersContent() {
         credentials: 'include',
         body: JSON.stringify({
           email: editForm.email.trim(),
-          first_name: editForm.firstName.trim() || undefined,
-          last_name: editForm.lastName.trim() || undefined,
-          phone: editForm.phone.trim() || undefined,
+          // null (not undefined) so a field you empty is really cleared
+          first_name: editForm.firstName.trim() || null,
+          last_name: editForm.lastName.trim() || null,
+          phone: editForm.phone.trim() || null,
         }),
       })
       const data = await res.json()
@@ -465,6 +488,34 @@ function CustomersContent() {
       setEditError(err.message ?? 'Failed to update customer')
     } finally {
       setEditSaving(false)
+    }
+  }
+  // ---- single customer delete ----------------------------------------------
+  const [deleteTarget, setDeleteTarget] = useState<
+    (typeof customers)[number] | null
+  >(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const handleDeleteCustomer = async () => {
+    if (!deleteTarget || deleteBusy) return
+    setDeleteBusy(true)
+    try {
+      const res = await fetch(`/api/admin/customers/${deleteTarget.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`)
+      toast.success('Customer deleted')
+      const gone = deleteTarget.id
+      setSelectedIds((prev) => prev.filter((i) => i !== gone))
+      setDeleteTarget(null)
+      // Deleting the only row on the last page would leave an empty page.
+      if (paginated.length === 1 && page > 1) setPage((p) => p - 1)
+      refetch()
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Failed to delete customer')
+    } finally {
+      setDeleteBusy(false)
     }
   }
   const handleExportCsv = () => {
@@ -1015,13 +1066,21 @@ function CustomersContent() {
 
                         {}
                         <td className='px-4 py-3.5'>
-                          <div className='flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150'>
+                          <div className='flex items-center justify-end gap-1 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 transition-opacity duration-150'>
                             <button
                               onClick={() => openEditModal(customer)}
                               className='w-7 h-7 flex items-center justify-center text-[#8C9196] hover:text-[#202223] hover:bg-[#F0F0F0] rounded-lg transition-all duration-150 bg-transparent border-none cursor-pointer'
                               title='Edit'
                             >
                               <EditIcon />
+                            </button>
+                            <button
+                              onClick={() => setDeleteTarget(customer)}
+                              className='w-7 h-7 flex items-center justify-center text-[#8C9196] hover:text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg transition-colors cursor-pointer border-none bg-transparent'
+                              title='Delete'
+                              aria-label={`Delete ${customer.name}`}
+                            >
+                              <TrashIcon />
                             </button>
                           </div>
                         </td>
@@ -1328,6 +1387,17 @@ function CustomersContent() {
         </div>
       )}
 
+      {deleteTarget && (
+        <BulkDeleteCustomersModal
+          count={1}
+          names={[`${deleteTarget.name} (${deleteTarget.email})`]}
+          withOrders={deleteTarget.totalOrders > 0 ? 1 : 0}
+          working={deleteBusy}
+          onConfirm={handleDeleteCustomer}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
       {editingCustomer && (
         <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
           <div
@@ -1400,6 +1470,10 @@ function CustomersContent() {
                   }
                   className='w-full px-3 py-2 border border-[#E1E3E5] rounded-lg text-[13px] outline-none focus:border-[#008060]'
                 />
+                <p className='mt-1 text-[11px] text-[#8C9196]'>
+                  Updates the contact email on the customer profile. The
+                  customer still logs in with the email they signed up with.
+                </p>
               </div>
               <div>
                 <label className='block text-[11px] font-medium text-[#6D7175] mb-1'>
@@ -1419,6 +1493,17 @@ function CustomersContent() {
             </div>
 
             <div className='flex items-center justify-end gap-2.5 px-6 py-4 bg-[#FAFAFA] border-t border-[#E1E3E5]'>
+              <button
+                onClick={() => {
+                  const target = editingCustomer
+                  setEditingCustomer(null)
+                  setDeleteTarget(target)
+                }}
+                disabled={editSaving}
+                className='mr-auto px-3 py-2 text-[13px] font-medium text-[#D82C0D] hover:bg-[#FFF4F4] rounded-lg cursor-pointer border-none bg-transparent disabled:opacity-50'
+              >
+                Delete customer
+              </button>
               <button
                 onClick={() => setEditingCustomer(null)}
                 disabled={editSaving}

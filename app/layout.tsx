@@ -4,6 +4,7 @@ import './globals.css'
 import { Providers } from './providers'
 import { Toaster } from 'sonner'
 import { MarketingPixels } from '@/components/providers/MarketingPixels'
+import { getPublicMarketingSettingsSafe } from '@/lib/marketing-settings-public'
 import {
   DEFAULT_SEO,
   SITE_NAME,
@@ -87,11 +88,14 @@ export const metadata: Metadata = {
     apple: '/icons/icon-180.png',
   },
 }
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  // Tracking IDs are read on the server (cached 5 min) so the analytics
+  // scripts are in the first HTML instead of waiting for a client fetch.
+  const marketingSettings = await getPublicMarketingSettingsSafe()
   return (
     <html
       lang='en-GB'
@@ -99,7 +103,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className='font-inter antialiased' suppressHydrationWarning>
-        <MarketingPixels />
+        <MarketingPixels initialSettings={marketingSettings} />
         <Providers>{children}</Providers>
         <Toaster position='top-right' richColors closeButton duration={3000} />
       </body>

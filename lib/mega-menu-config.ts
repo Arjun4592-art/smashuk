@@ -1,4 +1,3 @@
-
 import { MEGA_MENUS } from '@/lib/mega-menu-data'
 
 export interface MegaMenuLink {
@@ -53,6 +52,11 @@ export const DEFAULT_NAV_LINKS: NavLinkEntry[] = [
     visible: true,
   },
   { label: 'Gift Cards', href: '/gift-cards', visible: true },
+  {
+    label: 'Smash Cup 2027 🏆',
+    href: 'https://smashnewyearcup2027.base44.app',
+    visible: true,
+  },
   { label: 'Blog', href: '/blog', visible: true },
 ]
 

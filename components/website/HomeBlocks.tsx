@@ -6,6 +6,7 @@ import CategoryFilter from '@/components/website/CategoryFilter'
 import HomeProductSection from '@/components/website/HomePageProducts'
 import NewsletterForm from '@/components/website/NewsletterForm'
 import HomeReviews from '@/components/website/HomeReviews'
+import TournamentBanner from '@/components/website/TournamentBanner'
 import {
   BoltIcon,
   CheckIcon,
@@ -21,6 +22,7 @@ import {
   TruckIcon,
 } from '@/components/ui/Icons'
 import type { HeroSlide } from '@/lib/hero-slides-shared'
+import type { BrandStats } from '@/lib/api/store'
 import type {
   HomeBlock,
   HomeLayout,
@@ -200,10 +202,14 @@ function Newsletter({ block }: { block: HomeNewsletterBlock }) {
   )
 }
 
-function renderBlock(block: HomeBlock, heroSlides: HeroSlide[]) {
+function renderBlock(
+  block: HomeBlock,
+  heroSlides: HeroSlide[],
+  brandStats?: BrandStats,
+) {
   switch (block.type) {
     case 'hero':
-      return <Hero slides={heroSlides} />
+      return <Hero slides={heroSlides} brandStats={brandStats} />
     case 'trust':
       return <TrustStrip block={block} />
     case 'categories':
@@ -223,7 +229,7 @@ function renderBlock(block: HomeBlock, heroSlides: HeroSlide[]) {
     case 'promo':
       return <PromoBanner block={block} />
     case 'brands':
-      return <BrandsBar />
+      return <BrandsBar brandStats={brandStats} />
     case 'reviews':
       return <HomeReviews />
     case 'newsletter':
@@ -236,17 +242,42 @@ function renderBlock(block: HomeBlock, heroSlides: HeroSlide[]) {
 export default function HomeBlocks({
   layout,
   heroSlides,
+  brandStats,
 }: {
   layout: HomeLayout
   heroSlides: HeroSlide[]
+  brandStats?: BrandStats
 }) {
+  const blocks = layout.blocks.filter((b) => b.enabled)
+
+  // The tournament banner goes right after the "Featured Products" section.
+  // The layout is editable in the dashboard, so don't rely on the id alone:
+  // prefer id 'products-featured', then a products block titled "Featured…",
+  // then fall back to the first products block.
+  const isProducts = (b: HomeBlock) => b.type === 'products'
+  const featuredIdx =
+    blocks.findIndex((b) => b.id === 'products-featured') !== -1
+      ? blocks.findIndex((b) => b.id === 'products-featured')
+      : blocks.findIndex(
+            (b) =>
+              isProducts(b) &&
+              /featured/i.test((b as { title?: string }).title ?? ''),
+          ) !== -1
+        ? blocks.findIndex(
+            (b) =>
+              isProducts(b) &&
+              /featured/i.test((b as { title?: string }).title ?? ''),
+          )
+        : blocks.findIndex(isProducts)
+
   return (
     <>
-      {layout.blocks
-        .filter((b) => b.enabled)
-        .map((b) => (
-          <Fragment key={b.id}>{renderBlock(b, heroSlides)}</Fragment>
-        ))}
+      {blocks.map((b, i) => (
+        <Fragment key={b.id}>
+          {renderBlock(b, heroSlides, brandStats)}
+          {i === featuredIdx && <TournamentBanner />}
+        </Fragment>
+      ))}
     </>
   )
 }

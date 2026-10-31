@@ -24,14 +24,24 @@ async function fetchCatalog(query: CatalogQuery): Promise<CatalogResponse> {
  * opposite — "0 products found" first, then results trickling in as batches
  * arrived.
  */
-export function useCatalog(query: CatalogQuery) {
+export function useCatalog(
+  query: CatalogQuery,
+  /**
+   * Page 1 pre-loaded by the server for the query identified by `key`. It is
+   * only applied when the live query matches that key, so changing a filter,
+   * sort or page still fetches normally.
+   */
+  initial?: { key: string; data: CatalogResponse },
+) {
   const key = catalogQueryToParams(query).toString()
+  const useInitial = !!initial && initial.key === key
   const result = useQuery({
     queryKey: ['catalog', key],
     queryFn: () => fetchCatalog(query),
     staleTime: 60 * 1000,
     placeholderData: keepPreviousData,
     retry: 1,
+    initialData: useInitial ? initial!.data : undefined,
   })
   return {
     products: result.data?.products ?? [],

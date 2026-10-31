@@ -3,7 +3,12 @@
 import { useSearchParams } from 'next/navigation'
 import { useMemo, useState, useCallback, useEffect } from 'react'
 import { useCatalog } from '@/hooks/useCatalog'
-import type { CatalogQuery } from '@/lib/catalog/types'
+import {
+  catalogQueryToParams,
+  type CatalogQuery,
+  type CatalogResponse,
+} from '@/lib/catalog/types'
+import { buildInitialCatalogQuery } from '@/lib/catalog/initial'
 import ProductGrid from '@/components/website/ProductGrid'
 import ShopFilterSidebar, {
   DEFAULT_FILTERS,
@@ -54,8 +59,11 @@ export interface ShopClientOverrides {
  */
 export default function ShopClient({
   overrides,
+  initialData,
 }: {
   overrides?: ShopClientOverrides
+  /** Page 1 of results rendered by the server, so no request is needed on load. */
+  initialData?: CatalogResponse
 } = {}) {
   const searchParams = useSearchParams()
   const sport = overrides?.sport ?? searchParams.get('sport') ?? ''
@@ -67,7 +75,14 @@ export default function ShopClient({
   const level = overrides?.level ?? searchParams.get('level') ?? ''
   const style = overrides?.style ?? searchParams.get('style') ?? ''
 
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
+  // Seed sports/categories from the URL up front. They used to be applied in an
+  // effect AFTER the first render, which changed the query key and triggered a
+  // second, redundant catalogue request on every page load.
+  const [filters, setFilters] = useState<FilterState>(() => ({
+    ...DEFAULT_FILTERS,
+    sports: sport ? [sport] : [],
+    categories: category ? [category] : [],
+  }))
   const [mobileOpen, setMobileOpen] = useState(false)
   // Sort and paging used to live inside ProductGrid, which could only sort and
   // slice the array it had been handed. Now that the grid only ever holds one
@@ -122,8 +137,30 @@ export default function ShopClient({
     ],
   )
 
+  const initial = useMemo(
+    () =>
+      initialData
+        ? {
+            key: catalogQueryToParams(
+              buildInitialCatalogQuery({
+                sport,
+                category,
+                brand: brandParam,
+                badge,
+                gender,
+                level,
+                style,
+                q,
+              }),
+            ).toString(),
+            data: initialData,
+          }
+        : undefined,
+    [initialData, sport, category, brandParam, badge, gender, level, style, q],
+  )
+
   const { products, count, facets, isLoading, isFetching, isError } =
-    useCatalog(query)
+    useCatalog(query, initial)
 
   // Any change that alters *which* products match has to reset paging,
   // otherwise a shopper on page 4 of "rackets" lands on an empty page 4 of

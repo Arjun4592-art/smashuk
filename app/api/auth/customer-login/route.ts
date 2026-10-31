@@ -1,41 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { setSurfaceCookies } from '@/lib/api/auth-cookie'
+import {
+  getClientIp,
+  rateLimitAll,
+  tooManyRequests,
+} from '@/lib/api/rate-limit'
+import { fetchWithTimeout } from '@/lib/api/fetch-with-timeout'
 const MEDUSA_URL =
   process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ?? 'http://localhost:9000'
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ?? ''
-const attempts = new Map<
-  string,
-  {
-    count: number
-    resetAt: number
-  }
->()
-const MAX_ATTEMPTS = 10
 const WINDOW_MS = 15 * 60 * 1000
-const MAX_MAP_SIZE = 5000
-function isRateLimited(key: string): boolean {
-  const now = Date.now()
-  if (attempts.size > MAX_MAP_SIZE) {
-    for (const [k, v] of attempts.entries()) {
-      if (now > v.resetAt) attempts.delete(k)
-    }
-  }
-  const entry = attempts.get(key)
-  if (!entry || now > entry.resetAt) {
-    attempts.set(key, {
-      count: 1,
-      resetAt: now + WINDOW_MS,
-    })
-    return false
-  }
-  entry.count += 1
-  return entry.count > MAX_ATTEMPTS
-}
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get('x-forwarded-for') ?? 'unknown'
-    const { email, password } = await req.json()
-    if (!email || !password) {
+    const ip = getClientIp(req)
+    // Throttle by IP before parsing anything, so a flood of junk can't make
+    // us do work.
+    const ipOnly = rateLimitAll([
+      { key: `customer-login:ip:${ip}`, max: 40, windowMs: WINDOW_MS },
+    ])
+    if (ipOnly.limited) {
+      return tooManyRequests(
+        ipOnly.retryAfterSec,
+        'Too many login attempts. Try again later.',
+      )
+    }
+    const body = await req.json().catch(() => ({}))
+    const rawEmail = body?.email
+    const password = body?.password
+    if (
+      typeof rawEmail !== 'string' ||
+      typeof password !== 'string' ||
+      !rawEmail ||
+      !password ||
+      rawEmail.length > 254 ||
+      password.length > 256
+    ) {
       return NextResponse.json(
         {
           error: 'Email and password are required.',
@@ -45,27 +44,42 @@ export async function POST(req: NextRequest) {
         },
       )
     }
-    if (isRateLimited(`customer:${ip}:${email}`)) {
-      return NextResponse.json(
-        {
-          error: 'Too many login attempts. Try again later.',
-        },
-        {
-          status: 429,
-        },
+    const email = rawEmail.trim().toLowerCase()
+    // Per IP+account stops guessing one account's password; per account (any
+    // IP) slows a distributed attack. The account-wide cap is higher so a
+    // stranger can't lock a real customer out with a handful of requests.
+    const limit = rateLimitAll([
+      {
+        key: `customer-login:ip-email:${ip}:${email}`,
+        max: 8,
+        windowMs: WINDOW_MS,
+      },
+      { key: `customer-login:email:${email}`, max: 30, windowMs: WINDOW_MS },
+    ])
+    if (limit.limited) {
+      return tooManyRequests(
+        limit.retryAfterSec,
+        'Too many login attempts. Try again later.',
       )
     }
-    const loginRes = await fetch(`${MEDUSA_URL}/auth/customer/emailpass`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const loginRes = await fetchWithTimeout(
+      `${MEDUSA_URL}/auth/customer/emailpass`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(process.env.STOREFRONT_SHARED_SECRET
+            ? { 'x-storefront-secret': process.env.STOREFRONT_SHARED_SECRET }
+            : {}),
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+        timeoutMs: 10_000,
       },
-      body: JSON.stringify({
-        email,
-        password,
-      }),
-    })
-    const loginData = await loginRes.json()
+    )
+    const loginData = await loginRes.json().catch(() => ({}))
     if (!loginRes.ok || !loginData.token) {
       return NextResponse.json(
         {
@@ -77,7 +91,7 @@ export async function POST(req: NextRequest) {
       )
     }
     const token = loginData.token as string
-    const meRes = await fetch(`${MEDUSA_URL}/store/customers/me`, {
+    const meRes = await fetchWithTimeout(`${MEDUSA_URL}/store/customers/me`, {
       headers: {
         Authorization: `Bearer ${token}`,
         'x-publishable-api-key': PUBLISHABLE_KEY,

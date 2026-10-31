@@ -82,6 +82,8 @@ export function usePosVoiceAssistant(opts: Options) {
   const [listening, setListening] = useState(false) // capturing a command
   const [wakeOn, setWakeOnState] = useState(false) // Hello Smash enabled
   const [wakeListening, setWakeListening] = useState(false) // mic open, waiting
+  const [heard, setHeard] = useState('') // live words shown in the status chip
+  const [needsTap, setNeedsTap] = useState(false) // browser wants a click first
 
   const recRef = useRef<any>(null)
   const modeRef = useRef<'idle' | 'wake' | 'command'>('idle')
@@ -92,6 +94,7 @@ export function usePosVoiceAssistant(opts: Options) {
   // clicked / pressed something. If that happens we retry once on the first tap.
   const gestureRetried = useRef(false)
   const gestureCleanup = useRef<(() => void) | null>(null)
+  const heardTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Functions call each other through this ref so they never go stale.
   const fns = useRef<Record<string, (...args: any[]) => any>>({})
 
@@ -100,6 +103,11 @@ export function usePosVoiceAssistant(opts: Options) {
       clearTimeout(restartTimer.current)
       restartTimer.current = null
     }
+  }
+  const showHeard = (text: string) => {
+    setHeard(text)
+    if (heardTimer.current) clearTimeout(heardTimer.current)
+    heardTimer.current = setTimeout(() => setHeard(''), 2500)
   }
   const stopRec = () => {
     const r = recRef.current
@@ -136,6 +144,7 @@ export function usePosVoiceAssistant(opts: Options) {
 
   fns.current.armGestureRetry = () => {
     if (gestureCleanup.current) return
+    setNeedsTap(true)
     const go = () => {
       if (gestureCleanup.current) gestureCleanup.current()
       gestureRetried.current = true
@@ -147,6 +156,7 @@ export function usePosVoiceAssistant(opts: Options) {
       window.removeEventListener('pointerdown', go, true)
       window.removeEventListener('keydown', go, true)
       gestureCleanup.current = null
+      setNeedsTap(false)
     }
   }
 
@@ -193,6 +203,7 @@ export function usePosVoiceAssistant(opts: Options) {
     rec.onstart = () => {
       modeRef.current = 'wake'
       setWakeListening(true)
+      setNeedsTap(false)
     }
     rec.onresult = (e: any) => {
       if (handled) return
@@ -201,9 +212,14 @@ export function usePosVoiceAssistant(opts: Options) {
       const wake = extractWake(String(res[0]?.transcript ?? ''))
       if (!wake.matched) return
       lastRemainder = wake.remainder
+      showHeard(wake.remainder || 'Hello Smash…')
       if (res.isFinal) hit(lastRemainder)
-      // Still talking ("Hello Smash, rackets"): give the rest a moment to arrive.
-      else if (!pending) pending = setTimeout(() => hit(lastRemainder), 1300)
+      // Still talking ("Hello Smash, rackets"): every new word restarts the
+      // wait, so a long query is not cut off after the first 1.3 seconds.
+      else {
+        if (pending) clearTimeout(pending)
+        pending = setTimeout(() => hit(lastRemainder), 1300)
+      }
     }
     rec.onerror = (e: any) => {
       const code = e?.error
@@ -292,14 +308,15 @@ export function usePosVoiceAssistant(opts: Options) {
       rec.continuous = false
       rec.interimResults = true
       rec.maxAlternatives = 1
-      let heard = ''
+      let heardText = ''
       rec.onstart = () => setListening(true)
       rec.onresult = (e: any) => {
         let text = ''
         for (let i = 0; i < e.results.length; i++) {
           text += e.results[i][0].transcript
         }
-        heard = text
+        heardText = text
+        showHeard(text)
         const cleaned = cleanSpokenQuery(text)
         // Live preview while still talking (commands like "clear" wait for the end).
         if (cleaned && classifyCommand(cleaned) === 'search') {
@@ -327,7 +344,7 @@ export function usePosVoiceAssistant(opts: Options) {
         if (recRef.current === rec) recRef.current = null
         setListening(false)
         modeRef.current = 'idle'
-        const cleaned = cleanSpokenQuery(heard)
+        const cleaned = cleanSpokenQuery(heardText)
         if (cleaned) fns.current.runCommand(cleaned)
         // Hand focus back to the search box so a barcode scanner keeps working.
         optsRef.current.onDone?.()
@@ -372,6 +389,7 @@ export function usePosVoiceAssistant(opts: Options) {
     return () => {
       document.removeEventListener('visibilitychange', onVisibility)
       if (gestureCleanup.current) gestureCleanup.current()
+      if (heardTimer.current) clearTimeout(heardTimer.current)
       clearRestart()
       stopRec()
       modeRef.current = 'idle'
@@ -395,6 +413,8 @@ export function usePosVoiceAssistant(opts: Options) {
     listening,
     wakeOn,
     wakeListening,
+    heard,
+    needsTap,
     startListening,
     stopListening,
     setWakeOn,

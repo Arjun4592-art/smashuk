@@ -19,7 +19,7 @@ declare global {
   }
 }
 
-interface MarketingSettings {
+export interface MarketingSettings {
   gaMeasurementId: string | null
   googleAdsId: string | null
   googleAdsConversionLabel: string | null
@@ -83,9 +83,17 @@ function PixelPageviewTracker({ settings }: { settings: MarketingSettings }) {
 // Reads whatever tracking IDs are saved in Dashboard > Settings > Marketing,
 // and wires all of them up here. Nothing needs to be edited in code — enter
 // the keys in the dashboard and this component picks them up automatically.
-export function MarketingPixels() {
-  const [settings, setSettings] = useState<MarketingSettings | null>(null)
+export function MarketingPixels({
+  initialSettings,
+}: {
+  /** Loaded by the root layout on the server. If absent, fetch on the client. */
+  initialSettings?: MarketingSettings
+} = {}) {
+  const [settings, setSettings] = useState<MarketingSettings | null>(
+    initialSettings ?? null,
+  )
   useEffect(() => {
+    if (initialSettings) return
     let cancelled = false
     fetch('/api/store/marketing-settings')
       .then((r) => (r.ok ? r.json() : null))
@@ -96,7 +104,7 @@ export function MarketingPixels() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [initialSettings])
   if (!settings) return null
   const {
     gaMeasurementId,

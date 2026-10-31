@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { ArrowRightIcon } from '@/components/ui/Icons'
 import { useBrandStats } from '@/hooks/useProducts'
+import type { BrandStats } from '@/lib/api/store'
 const BRAND_INFO: Record<
   string,
   {
@@ -122,8 +123,10 @@ function BrandLogo({
     />
   )
 }
-export default function BrandsBar() {
-  const { data, isLoading } = useBrandStats()
+export default function BrandsBar({
+  brandStats,
+}: { brandStats?: BrandStats } = {}) {
+  const { data, isLoading } = useBrandStats(brandStats)
   const BRANDS = useMemo(() => {
     const list = data?.brands ?? []
     return list.map((b) => {

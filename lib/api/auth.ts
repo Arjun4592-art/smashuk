@@ -1,65 +1,81 @@
-import { signIn, signOut } from 'next-auth/react';
-import type { User } from '@/types';
-export async function loginCustomer(email: string, password: string): Promise<User> {
+import { signIn, signOut } from 'next-auth/react'
+import type { User } from '@/types'
+export async function loginCustomer(
+  email: string,
+  password: string,
+): Promise<User> {
   const res = await fetch('/api/auth/customer-login', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       email,
-      password
+      password,
     }),
-    credentials: 'include'
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error ?? 'Login failed.');
-  return data.user as User;
+    credentials: 'include',
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data?.error ?? 'Login failed.')
+  return data.user as User
 }
-export async function registerCustomer(name: string, email: string, password: string): Promise<User> {
+export async function registerCustomer(
+  name: string,
+  email: string,
+  password: string,
+  antiBot: {
+    hp_url?: string
+    elapsedMs?: number
+    turnstileToken?: string
+  } = {},
+): Promise<User> {
   const res = await fetch('/api/auth/customer-register', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       name,
       email,
-      password
+      password,
+      ...antiBot,
     }),
-    credentials: 'include'
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error ?? 'Registration failed.');
-  return data.user as User;
+    credentials: 'include',
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data?.error ?? 'Registration failed.')
+  return data.user as User
 }
 export async function loginWithGoogle() {
   await signIn('google', {
-    callbackUrl: '/profile'
-  });
+    callbackUrl: '/profile',
+  })
 }
-export async function loginAdminUser(email: string, password: string): Promise<User> {
+export async function loginAdminUser(
+  email: string,
+  password: string,
+): Promise<User> {
   const res = await fetch('/api/auth/admin-login', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       email,
-      password
+      password,
     }),
-    credentials: 'include'
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error ?? 'Login failed.');
-  return data.user as User;
+    credentials: 'include',
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data?.error ?? 'Login failed.')
+  return data.user as User
 }
 export async function logoutUser() {
   await fetch('/api/auth/logout', {
     method: 'POST',
-    credentials: 'include'
-  }).catch(() => {});
+    credentials: 'include',
+  }).catch(() => {})
   await signOut({
-    callbackUrl: '/'
-  });
+    callbackUrl: '/',
+  })
 }

@@ -244,6 +244,9 @@ export default function Navbar({
                   <Link
                     key={link.href}
                     href={link.href}
+                    {...(/^https?:\/\//i.test(link.href)
+                      ? { target: '_blank', rel: 'noopener noreferrer' }
+                      : {})}
                     className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all font-lato ${(link as any).highlight ? 'text-[#E8553A] hover:bg-[#E8553A]/8 font-bold' : 'text-[#0A1F44] hover:text-[#E8553A] hover:bg-[#E8553A]/5'}`}
                   >
                     {link.label}
@@ -556,6 +559,9 @@ export default function Navbar({
               <Link
                 key={link.href}
                 href={link.href}
+                {...(/^https?:\/\//i.test(link.href)
+                  ? { target: '_blank', rel: 'noopener noreferrer' }
+                  : {})}
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-colors font-lato ${(link as any).highlight ? 'text-[#E8553A] bg-[#E8553A]/5 font-bold' : 'text-[#0A1F44] hover:bg-[#F2F4F7]'}`}
               >

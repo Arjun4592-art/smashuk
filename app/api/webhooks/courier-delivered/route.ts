@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { safeEqual } from '@/lib/api/safe-compare'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { markOrderDelivered, shipOrder } from '@/lib/api/medusa-fulfillment'
 import { sendMail, notifyOwner } from '@/lib/email'
@@ -9,7 +10,7 @@ import {
 
 export async function POST(req: NextRequest) {
   const secret = process.env.COURIER_WEBHOOK_SECRET
-  if (!secret || req.headers.get('x-courier-secret') !== secret) {
+  if (!secret || !safeEqual(req.headers.get('x-courier-secret'), secret)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const { orderId } = await req.json().catch(() => ({}))

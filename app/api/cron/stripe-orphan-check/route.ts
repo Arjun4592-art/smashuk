@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { safeEqual } from '@/lib/api/safe-compare'
 import { requireStripe } from '@/lib/stripe-server'
 import { medusaServiceFetch } from '@/lib/api/medusa-service-token'
 import { notifyOwner } from '@/lib/email'
@@ -10,7 +11,7 @@ const MAX_AGE_MIN = 25
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET
   const auth = req.headers.get('authorization')
-  if (!secret || auth !== `Bearer ${secret}`) {
+  if (!secret || !safeEqual(auth, `Bearer ${secret}`)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

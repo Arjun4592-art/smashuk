@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { SPORTS } from '@/lib/constants'
 import { useBrandStats } from '@/hooks/useProducts'
+import ProductImage from '@/components/website/ProductImage'
+import type { BrandStats } from '@/lib/api/store'
 import { DEFAULT_HERO_SLIDES, type HeroSlide } from '@/lib/hero-slides-shared'
 import {
   ArrowRightIcon,
@@ -83,11 +85,27 @@ function buildStats(
 }
 // `slides` come from Dashboard → Marketing → Home Slider (see
 // lib/hero-slides.ts). The built-in slides are only a fallback.
-export default function Hero({ slides }: { slides?: HeroSlide[] }) {
+export default function Hero({
+  slides,
+  brandStats: initialBrandStats,
+}: {
+  slides?: HeroSlide[]
+  /** Loaded by the server so the stat numbers are in the first HTML. */
+  brandStats?: BrandStats
+}) {
   const [current, setCurrent] = useState(0)
   const [autoplay, setAutoplay] = useState(true)
   const [isAnimating, setIsAnimating] = useState(false)
-  const { data: brandStats } = useBrandStats()
+  const { data: brandStats } = useBrandStats(initialBrandStats)
+  // Only the first slide's image is needed to paint. The rest used to be
+  // requested at full size immediately (all hidden at opacity-0), competing
+  // with the LCP image for bandwidth. Start loading them once the page has had
+  // time to paint; the first auto-advance is at 5s, so they're ready by then.
+  const [loadRest, setLoadRest] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setLoadRest(true), 2500)
+    return () => clearTimeout(t)
+  }, [])
   const SLIDES = useMemo(() => {
     const live = (slides ?? []).filter((s) => s.enabled && s.image)
     return (live.length > 0 ? live : DEFAULT_HERO_SLIDES).map((s) => ({
@@ -136,11 +154,16 @@ export default function Hero({ slides }: { slides?: HeroSlide[] }) {
             key={s.id}
             className={`absolute inset-0 transition-opacity duration-700 ${i === current ? 'opacity-100' : 'opacity-0'}`}
           >
-            <img
-              src={s.image}
-              alt={s.heading.split('\n').join(' ')}
-              className='w-full h-full object-cover'
-            />
+            {(i === 0 || loadRest || i === current) && (
+              <ProductImage
+                src={s.image}
+                alt={s.heading.split('\n').join(' ')}
+                sizes='100vw'
+                // Only slide 1 is the LCP candidate: eager + fetchPriority=high.
+                priority={i === 0}
+                className='w-full h-full object-cover'
+              />
+            )}
             <div className='absolute inset-0 bg-linear-to-r from-[#0A1F44]/92 via-[#0A1F44]/55 to-[#0A1F44]/10' />
           </div>
         ))}

@@ -7,6 +7,7 @@ import {
   getProduct,
   getSiteReviews,
   getBrandStats,
+  type BrandStats,
 } from '@/lib/api/store'
 export function useMedusaProducts(params?: {
   limit?: number
@@ -127,12 +128,15 @@ export function useSiteReviews() {
     placeholderData: [],
   })
 }
-export function useBrandStats() {
+export function useBrandStats(initialData?: BrandStats) {
   return useQuery({
     queryKey: ['brand-stats'],
     queryFn: getBrandStats,
     staleTime: 10 * 60 * 1000,
     retry: 1,
+    // Pre-loaded by the server on the homepage, so the stat numbers are in the
+    // first HTML and nothing shifts when they would otherwise arrive.
+    initialData,
     placeholderData: {
       brands: [],
       brandCount: 0,

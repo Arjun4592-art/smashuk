@@ -12,6 +12,8 @@ import {
 } from '@/lib/collections-data'
 import { SITE_NAME, SITE_URL } from '@/lib/constants'
 import ShopClient from '@/app/(website)/shop/ShopClient'
+import { buildInitialCatalogQuery } from '@/lib/catalog/initial'
+import { loadCatalogPageCachedSafe } from '@/lib/catalog/server-page'
 import { CollectionHero, CollectionSeoContent } from './CollectionContent'
 import VendorIndex from './VendorIndex'
 import { ProductGridSkeleton } from '@/components/ui/Skeleton'
@@ -20,7 +22,9 @@ export function generateStaticParams() {
   return getAllCollectionHandles().map((handle) => ({ handle }))
 }
 
-export const revalidate = 3600
+// Stock and prices change, and this page now ships real products in its HTML,
+// so refresh it every 5 minutes (the catalogue snapshot itself refreshes every 2).
+export const revalidate = 300
 
 export async function generateMetadata({
   params,
@@ -67,6 +71,11 @@ export default async function CollectionPage({
   const { handle } = await params
   const collection = getCollectionConfig(handle)
   if (!collection) notFound()
+  const initialData = collection.isVendorIndex
+    ? undefined
+    : await loadCatalogPageCachedSafe(
+        buildInitialCatalogQuery(collection.filters ?? {}),
+      )
 
   return (
     <div className='min-h-screen bg-white'>
@@ -102,7 +111,10 @@ export default async function CollectionPage({
             </div>
           }
         >
-          <ShopClient overrides={collection.filters} />
+          <ShopClient
+            overrides={collection.filters}
+            initialData={initialData}
+          />
         </Suspense>
       )}
       <CollectionSeoContent collection={collection} />
