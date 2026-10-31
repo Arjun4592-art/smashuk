@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { setSurfaceCookies } from '@/lib/api/auth-cookie'
-import { sendMail, notifyOwner } from '@/lib/email'
-import { welcomeEmail, adminWelcomeEmail } from '@/lib/email-templates'
+import { sendMail } from '@/lib/email'
+import { welcomeEmail } from '@/lib/email-templates'
 import {
   getClientIp,
   rateLimitAll,
@@ -181,14 +181,8 @@ export async function POST(req: NextRequest) {
       sendMail({ to: cleanEmail, subject, html, text, resendTemplate }).catch(
         () => {},
       )
-      const adminEmail = adminWelcomeEmail(newCustomer)
-      notifyOwner({
-        subject: adminEmail.subject,
-        html: adminEmail.html,
-        text: adminEmail.text,
-        resendTemplate: adminEmail.resendTemplate,
-        customerEmail: cleanEmail,
-      }).catch(() => {})
+      // NOTE: the internal "new customer" notification to the owner is
+      // intentionally NOT sent anymore.
     } catch (welcomeErr) {
       console.error('[customer-register] welcome email failed:', welcomeErr)
     }
